@@ -84,10 +84,14 @@ export function App() {
         const info = await framer.getProjectInfo();
         if (!active) return;
         setProject({ id: info.id, name: info.name });
-        const inferredUrl = inferPublishedUrl(info);
-        if (inferredUrl) {
-          setResolvedSourceUrl(inferredUrl);
-        }
+        const publishInfo = await framer.getPublishInfo().catch(() => null);
+        const publishUrl =
+          publishInfo &&
+          typeof (publishInfo as any).url === "string" &&
+          (publishInfo as any).url.length > 0
+            ? String((publishInfo as any).url)
+            : undefined;
+        if (publishUrl) setResolvedSourceUrl(publishUrl);
 
         const nodes = await framer.getNodesWithType("ComponentNode");
         if (!active) return;
@@ -117,36 +121,38 @@ export function App() {
       return;
     }
 
-    const chosenComponents = components.filter((node) =>
-      selectedComponentIds.includes(node.id),
-    );
-
-    const exportProps = inferExportPropsFromSelection(selection);
-    const context = await collectPluginContext({
-      selection,
-      project,
-      components,
-      selectedComponentIds,
-    });
-
-    const pluginCapture: PluginCapture = {
-      mode: "framer-plugin",
-      selectedNodes:
-        chosenComponents.length > 0
-          ? chosenComponents.map((node) => ({
-              id: node.id,
-              name: node.name ?? undefined,
-              type: "ComponentNode",
-            }))
-          : simplified,
-      capturedAt: new Date().toISOString(),
-      exportProps,
-      project: project ?? undefined,
-      context,
-    };
-
     setBusy(true);
     try {
+      if (selectedComponentIds.length > 0) {
+        await framer.setSelection(selectedComponentIds);
+      }
+
+      const liveSelection = await framer.getSelection();
+      const liveSimplified = simplifySelection(liveSelection);
+
+      if (liveSimplified.length === 0) {
+        framer.notify("Selection is empty.", { variant: "error" });
+        return;
+      }
+
+      const richSelectedNodes = await captureSelectionMetadata(liveSelection);
+      const exportProps = inferExportPropsFromSelection(liveSelection);
+      const context = await collectPluginContext({
+        selection: liveSelection,
+        project,
+        components,
+        selectedComponentIds,
+      });
+
+      const pluginCapture: PluginCapture = {
+        mode: "framer-plugin",
+        selectedNodes: richSelectedNodes,
+        capturedAt: new Date().toISOString(),
+        exportProps,
+        project: project ?? undefined,
+        context,
+      };
+
       const effectiveSourceUrl =
         sourceUrl.trim() ||
         resolvedSourceUrl ||
@@ -575,4 +581,70 @@ function inferExportPropsFromSelection(selection: CanvasNode[]) {
     ctaLabel,
     ctaHref: "ctaHref",
   };
+}
+
+async function captureSelectionMetadata(selection: CanvasNode[]) {
+  const nodes: SelectionNode[] = [];
+  const seen = new Set<string>();
+
+  const push = (node: SelectionNode) => {
+    if (!node.id) return;
+    if (seen.has(node.id)) return;
+    seen.add(node.id);
+    nodes.push(node);
+  };
+
+  const queue: CanvasNode[] = [...selection];
+  const maxNodes = 120;
+
+  while (queue.length > 0 && nodes.length < maxNodes) {
+    const node = queue.shift()!;
+    const id = String((node as any).id ?? "");
+    if (!id || seen.has(id)) continue;
+
+    const name =
+      typeof (node as any).name === "string" ? (node as any).name : undefined;
+    const type =
+      typeof (node as any).type === "string"
+        ? (node as any).type
+        : node.constructor?.name;
+
+    const rect = await framer.getRect(id).catch(() => null);
+    const bounds =
+      rect && typeof (rect as any).width === "number"
+        ? {
+            x: Number((rect as any).x ?? 0),
+            y: Number((rect as any).y ?? 0),
+            width: Number((rect as any).width ?? 0),
+            height: Number((rect as any).height ?? 0),
+          }
+        : undefined;
+
+    if (isTextNode(node)) {
+      const text = (await node.getText().catch(() => null)) ?? undefined;
+      push({
+        id,
+        name,
+        type: "TextNode",
+        text: typeof text === "string" ? text : undefined,
+        bounds,
+        metadata: {
+          tag: (node as any).tag,
+          link: (node as any).link,
+        },
+      } as any);
+    } else {
+      push({
+        id,
+        name,
+        type: typeof type === "string" ? type : undefined,
+        bounds,
+      } as any);
+    }
+
+    const children = await framer.getChildren(id).catch(() => []);
+    for (const child of children) queue.push(child);
+  }
+
+  return nodes;
 }
