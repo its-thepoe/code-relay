@@ -7,32 +7,35 @@ export default async function JobsPage() {
   const jobs = await readAllJobs();
 
   return (
-    <main style={{ padding: 24, maxWidth: 1100, margin: "0 auto" }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "baseline",
-          justifyContent: "space-between",
-          gap: 16,
-        }}
-      >
-        <h1 style={{ margin: 0, fontSize: 24 }}>Jobs</h1>
-        <Link href="/">Home</Link>
+    <main className="container">
+      <div className="topbar">
+        <h1 className="title">Jobs</h1>
+        <div className="nav">
+          <Link href="/">Home</Link>
+        </div>
       </div>
 
       <CreateJobForm />
 
-      <div style={{ marginTop: 18, borderTop: "1px solid #eee" }}>
+      <div style={{ marginTop: 18 }}>
         {jobs.length === 0 ? (
-          <p style={{ color: "#666", marginTop: 16 }}>No jobs yet.</p>
+          <div className="panel" style={{ marginTop: 16 }}>
+            <div className="panelBody muted">No jobs yet.</div>
+          </div>
         ) : (
-          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+          <ul
+            style={{
+              listStyle: "none",
+              padding: 0,
+              margin: 0,
+              display: "grid",
+              gap: 10,
+            }}
+          >
             {jobs.map((job) => (
-              <li
-                key={job.id}
-                style={{ padding: "14px 0", borderBottom: "1px solid #eee" }}
-              >
+              <li key={job.id} className="panel">
                 <div
+                  className="panelBody"
                   style={{
                     display: "flex",
                     justifyContent: "space-between",
@@ -40,11 +43,14 @@ export default async function JobsPage() {
                     flexWrap: "wrap",
                   }}
                 >
-                  <div>
-                    <div style={{ fontWeight: 600 }}>
+                  <div style={{ minWidth: 260 }}>
+                    <div style={{ fontWeight: 800, fontSize: 16 }}>
                       {job.title ?? job.sourceUrl}
                     </div>
-                    <div style={{ color: "#555", marginTop: 4, fontSize: 13 }}>
+                    <div
+                      className="muted"
+                      style={{ marginTop: 6, fontSize: 13 }}
+                    >
                       <span style={{ marginRight: 10 }}>
                         Status: {job.status}
                       </span>
@@ -54,9 +60,19 @@ export default async function JobsPage() {
                     </div>
                   </div>
                   <div
-                    style={{ display: "flex", gap: 12, alignItems: "center" }}
+                    style={{ display: "flex", gap: 10, alignItems: "center" }}
                   >
-                    <Link href={`/jobs/${job.id}`}>Open</Link>
+                    <Link
+                      className="btnSecondary"
+                      style={{
+                        textDecoration: "none",
+                        display: "inline-flex",
+                        alignItems: "center",
+                      }}
+                      href={`/jobs/${job.id}`}
+                    >
+                      Open
+                    </Link>
                   </div>
                 </div>
               </li>
@@ -73,63 +89,36 @@ function CreateJobForm() {
     <form
       action="/api/jobs"
       method="post"
-      style={{
-        marginTop: 16,
-        padding: 16,
-        border: "1px solid #eee",
-        borderRadius: 8,
-        display: "grid",
-        gap: 10,
-      }}
+      className="panel"
+      style={{ marginTop: 16 }}
     >
-      <label style={{ display: "grid", gap: 6 }}>
-        <div style={{ fontSize: 13, fontWeight: 600 }}>
-          Source URL (published page)
-        </div>
-        <input
-          name="sourceUrl"
-          placeholder="https://talktoaugust.com/"
-          required
-          style={{
-            height: 40,
-            padding: "0 12px",
-            border: "1px solid #ddd",
-            borderRadius: 8,
-          }}
-        />
-      </label>
+      <div className="panelBody" style={{ display: "grid", gap: 12 }}>
+        <label style={{ display: "grid", gap: 6 }}>
+          <div className="label">Source URL (published page)</div>
+          <input
+            name="sourceUrl"
+            placeholder="https://talktoaugust.com/"
+            required
+            className="input"
+          />
+        </label>
 
-      <label style={{ display: "grid", gap: 6 }}>
-        <div style={{ fontSize: 13, fontWeight: 600 }}>Selector (optional)</div>
-        <input
-          name="selector"
-          placeholder="section[data-framer-name='Hero']"
-          style={{
-            height: 40,
-            padding: "0 12px",
-            border: "1px solid #ddd",
-            borderRadius: 8,
-          }}
-        />
-      </label>
+        <label style={{ display: "grid", gap: 6 }}>
+          <div className="label">Selector (optional)</div>
+          <input
+            name="selector"
+            placeholder="section[data-framer-name='Hero']"
+            className="input"
+          />
+        </label>
 
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <button
-          type="submit"
-          style={{
-            height: 40,
-            padding: "0 14px",
-            borderRadius: 8,
-            border: "1px solid #111",
-            background: "#111",
-            color: "#fff",
-            cursor: "pointer",
-          }}
-        >
-          Create Job
-        </button>
-        <div style={{ fontSize: 13, color: "#666", alignSelf: "center" }}>
-          Run worker with <code>npm run dev:worker</code>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button type="submit" className="btn">
+            Create Job
+          </button>
+          <div style={{ fontSize: 13, alignSelf: "center" }} className="muted">
+            Run worker with <code>npm run dev:worker</code>
+          </div>
         </div>
       </div>
     </form>

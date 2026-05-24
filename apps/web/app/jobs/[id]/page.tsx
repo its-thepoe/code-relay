@@ -93,15 +93,30 @@ export default async function JobPage({
 
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           {hasPreview ? (
-            <a href={`/api/jobs/${job.id}/artifact?type=preview`}>
+            <a
+              href={`/api/jobs/${job.id}/artifact?type=preview`}
+              target="_blank"
+              rel="noreferrer"
+            >
               Open Preview
             </a>
           ) : null}
           {hasZip ? (
-            <a href={`/api/jobs/${job.id}/artifact?type=zip`}>Download ZIP</a>
+            <a
+              href={`/api/jobs/${job.id}/artifact?type=zip`}
+              download
+              target="_blank"
+              rel="noreferrer"
+            >
+              Download ZIP
+            </a>
           ) : null}
           {hasReport ? (
-            <a href={`/api/jobs/${job.id}/artifact?type=report`}>
+            <a
+              href={`/api/jobs/${job.id}/artifact?type=report`}
+              target="_blank"
+              rel="noreferrer"
+            >
               Open Report JSON
             </a>
           ) : null}
