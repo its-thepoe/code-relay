@@ -1,5 +1,7 @@
 node_modules/
 dist/
 .coderelay/
+.next/
+apps/web/.next/
 *.log
 .DS_Store

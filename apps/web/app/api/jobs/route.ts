@@ -1,13 +1,36 @@
 import { NextResponse } from "next/server";
 import { createJobFromRequest } from "../../../lib/jobs-store";
 
+function corsHeaders(request: Request) {
+  const origin = request.headers.get("origin") ?? "";
+  const allow =
+    origin === "https://localhost:5174" ||
+    origin === "http://localhost:5174" ||
+    origin.startsWith("https://localhost:") ||
+    origin.startsWith("http://localhost:");
+
+  return {
+    "access-control-allow-origin": allow ? origin : "*",
+    "access-control-allow-methods": "POST, OPTIONS",
+    "access-control-allow-headers": "content-type",
+    "access-control-max-age": "86400",
+  };
+}
+
+export async function OPTIONS(request: Request) {
+  return new NextResponse(null, { status: 204, headers: corsHeaders(request) });
+}
+
 export async function POST(request: Request) {
   const contentType = request.headers.get("content-type") ?? "";
 
   if (contentType.includes("application/json")) {
     const json = await request.json();
     const job = await createJobFromRequest(json);
-    return NextResponse.json(job, { status: 201 });
+    return NextResponse.json(job, {
+      status: 201,
+      headers: corsHeaders(request),
+    });
   }
 
   const form = await request.formData();
@@ -16,5 +39,11 @@ export async function POST(request: Request) {
   const selector = selectorRaw.length > 0 ? selectorRaw : undefined;
 
   const job = await createJobFromRequest({ sourceUrl, selector });
-  return NextResponse.redirect(new URL(`/jobs/${job.id}`, request.url));
+  const response = NextResponse.redirect(
+    new URL(`/jobs/${job.id}`, request.url),
+  );
+  Object.entries(corsHeaders(request)).forEach(([key, value]) => {
+    response.headers.set(key, value);
+  });
+  return response;
 }
