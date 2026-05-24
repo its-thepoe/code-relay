@@ -3,21 +3,25 @@
 ## 1. Product Summary
 
 ### Working Name
-**Coderelay**  
 
+**Coderelay**
 
 ### One-line Description
+
 A Framer-to-code handoff tool that exports Framer pages, sections, and components into clean, editable React code that developers and AI coding agents can continue working with in any React project type.
 
 ### Core Value Proposition
+
 > **A static export gives you a copy. We give you a codebase.**
 
 The product is not positioned as a cheap Framer-to-HTML mirror or self-hosting hack. It is a developer handoff tool for users who want to continue building outside Framer without losing the design details they created in Framer.
 
 ### Primary Product Promise
+
 > Export Framer designs into clean React code with styles, assets, motion details, and a fidelity report included.
 
 ### Product Form
+
 The product should exist as a hybrid system:
 
 1. **Framer Plugin**  
@@ -105,21 +109,27 @@ Users need a reliable way to convert Framer work into maintainable code without 
 ## 4. Jobs to Be Done
 
 ### Primary Job
+
 When I have built a site, page, section, or component in Framer and now need to continue in code, I want to export it into clean React code that can fit Vite, Next.js, Remix, Astro, Laravel/Inertia, or another React-based project so that I can hand it to a developer or AI coding agent without rebuilding everything from scratch.
 
 ### Designer Job
+
 When I create polished Framer designs with motion, spacing, responsive behaviour, and visual details, I want those details preserved during code handoff so that my work does not become a flat or inaccurate rebuild.
 
 ### Founder Job
+
 When I validate quickly in Framer and later need to integrate the site into a product/app codebase, I want a fast export path so that I can continue building without paying for a full manual rebuild.
 
 ### Agency Job
+
 When I build Framer sites for clients, I want to offer developer-ready code handoff as a premium deliverable so that I can increase project value and reduce handoff friction.
 
 ### Developer Job
+
 When I receive a Framer-built design, I want structured, understandable code instead of a messy static scrape so that I can edit, refactor, integrate, and extend it.
 
 ### AI-Agent Continuation Job
+
 When I export a Framer design, I want the output to be structured enough for Cursor, Claude Code, Windsurf, Codex, or another coding agent to understand and modify effectively.
 
 ---
@@ -129,9 +139,11 @@ When I export a Framer design, I want the output to be structured enough for Cur
 ### 5.1 Framer Designers
 
 #### Profile
+
 Designers who use Framer to build marketing pages, landing pages, portfolios, campaign pages, and client websites.
 
 #### Needs
+
 - Preserve visual polish.
 - Avoid manual rebuilds.
 - Hand off to developers.
@@ -139,6 +151,7 @@ Designers who use Framer to build marketing pages, landing pages, portfolios, ca
 - Continue in code without becoming a full engineer.
 
 #### Pain
+
 - Static HTML exports are not truly maintainable.
 - Developer rebuilds often lose design detail.
 - They have no objective way to prove fidelity after handoff.
@@ -148,9 +161,11 @@ Designers who use Framer to build marketing pages, landing pages, portfolios, ca
 ### 5.2 Founders and Indie Builders
 
 #### Profile
+
 People who launch fast in Framer, then later want to integrate the site into their product codebase or continue building with AI coding tools.
 
 #### Needs
+
 - Fast output.
 - Low-cost conversion.
 - Code they can use in Cursor/Claude/Windsurf.
@@ -158,6 +173,7 @@ People who launch fast in Framer, then later want to integrate the site into the
 - Minimal setup.
 
 #### Pain
+
 - They do not want to pay for full front-end rebuilds.
 - They do not want a static copy they cannot meaningfully edit.
 - They want ownership and portability.
@@ -167,9 +183,11 @@ People who launch fast in Framer, then later want to integrate the site into the
 ### 5.3 Agencies and Freelancers
 
 #### Profile
+
 Framer specialists, web studios, brand designers, and freelancers building client websites.
 
 #### Needs
+
 - Client-ready code export.
 - Reliable handoff report.
 - Ability to charge more for code handoff.
@@ -177,6 +195,7 @@ Framer specialists, web studios, brand designers, and freelancers building clien
 - Potential GitHub handoff later.
 
 #### Pain
+
 - Clients eventually ask for code ownership.
 - Manual developer handoff slows projects.
 - Static ZIPs may look unprofessional.
@@ -187,9 +206,11 @@ Framer specialists, web studios, brand designers, and freelancers building clien
 ### 5.4 Front-end Developers
 
 #### Profile
+
 Developers receiving Framer designs from designers or clients.
 
 #### Needs
+
 - Clean React component structure that can be copied into different React project types.
 - Understandable components.
 - Styles that can be edited.
@@ -197,6 +218,7 @@ Developers receiving Framer designs from designers or clients.
 - Notes on unsupported behaviour.
 
 #### Pain
+
 - Rebuilding is repetitive.
 - Scraped HTML is hard to integrate.
 - Animation behaviour is unclear.
@@ -273,12 +295,15 @@ The product should not be positioned as:
 ## 8. Positioning
 
 ### Primary Positioning
+
 > **The Framer export tool for people who want to keep building.**
 
 ### Supporting Copy
+
 Export your Framer pages and sections into clean React code, with assets, styles, motion details, and a fidelity report included.
 
 ### Core Differentiator
+
 Static export tools give users a working copy. This product gives users a workable codebase.
 
 ### Positioning Pillars
@@ -303,15 +328,19 @@ Static export tools give users a working copy. This product gives users a workab
 ## 9. Product Principles
 
 ### 9.1 Codebase Over Copy
+
 The goal is not to create a frozen visual duplicate. The goal is to generate code that can be used as a starting point for continued development.
 
 ### 9.2 Preserve Craft Where Possible
+
 Typography, spacing, layout, hierarchy, assets, and motion details matter. The product should not flatten design quality.
 
 ### 9.3 Be Honest About Fidelity
+
 Do not pretend every export is perfect. Show a report with what matched, what was approximated, and what needs review.
 
 ### 9.4 Use The Richest Source Of Truth
+
 Do not rely on browser DOM scraping alone when plugin-side canvas context is available. Coderelay should combine:
 
 - Framer plugin selection data for design intent.
@@ -320,12 +349,15 @@ Do not rely on browser DOM scraping alone when plugin-side canvas context is ava
 - Attempt history for transparent iteration.
 
 ### 9.5 Keep Infrastructure Lean
+
 Storage should be temporary by default. Screenshots should not become permanent artefacts. Compute should be controlled through job limits.
 
 ### 9.6 Make Output Agent-Ready
+
 Even without an internal AI editor, the exported project should include enough structure, naming, and instructions for external AI coding agents to work effectively.
 
 ### 9.7 Avoid Platform-Hostile Positioning
+
 Position as handoff, portability, and developer workflow — not as Framer replacement or circumvention.
 
 ---
@@ -335,205 +367,212 @@ Position as handoff, portability, and developer workflow — not as Framer repla
 The product will be developed in phases.
 
 ### MVP Scope
+
 The MVP focuses on exporting **one selected Framer section/component** into portable React code with CSS Modules, assets, and a basic fidelity report.
 
 ### Post-MVP Scope
+
 Post-MVP expands into page export, better motion preservation, CMS export, full-site export, GitHub integration, CLI, team accounts, and agency workflows.
 
 ### 10.1 Scope Summary Matrix
 
-| Area | MVP | Post-MVP | Out of Scope |
-|---|---|---|---|
-| Export unit | One selected section/component | Full page, full site | Arbitrary third-party site cloning |
-| Output | Portable React + CSS Modules | Next.js/Vite/Remix/Astro adapters, Tailwind option, GitHub PR | Static HTML-only as primary product |
-| Motion | Basic appear/hover | Scroll effects, stagger, parallax | Perfect animation parity for all cases |
-| CMS | No | Framer CMS snapshot to local typed data | Real-time CMS sync to every CMS provider |
-| Storage | Temporary ZIP/report | Longer paid retention | Permanent archive by default |
-| Iteration | Bounded rerun loop + attempt history + categorized repair | Smarter repair strategies and manual review tools | Open-ended internal vibe-coding/chat editor |
-| Billing | Manual/free beta | Credits/subscriptions | Usage-free unlimited heavy exports |
-| Developer workflow | ZIP download | GitHub + CLI | Full deployment platform |
-| Platform | Framer only | Framer-first, maybe other tools much later | Multi-no-code exporter from day one |
+| Area               | MVP                                                       | Post-MVP                                                      | Out of Scope                                |
+| ------------------ | --------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------- |
+| Export unit        | One selected section/component                            | Full page, full site                                          | Arbitrary third-party site cloning          |
+| Output             | Portable React + CSS Modules                              | Next.js/Vite/Remix/Astro adapters, Tailwind option, GitHub PR | Static HTML-only as primary product         |
+| Motion             | Basic appear/hover                                        | Scroll effects, stagger, parallax                             | Perfect animation parity for all cases      |
+| CMS                | No                                                        | Framer CMS snapshot to local typed data                       | Real-time CMS sync to every CMS provider    |
+| Storage            | Temporary ZIP/report                                      | Longer paid retention                                         | Permanent archive by default                |
+| Iteration          | Bounded rerun loop + attempt history + categorized repair | Smarter repair strategies and manual review tools             | Open-ended internal vibe-coding/chat editor |
+| Billing            | Manual/free beta                                          | Credits/subscriptions                                         | Usage-free unlimited heavy exports          |
+| Developer workflow | ZIP download                                              | GitHub + CLI                                                  | Full deployment platform                    |
+| Platform           | Framer only                                               | Framer-first, maybe other tools much later                    | Multi-no-code exporter from day one         |
 
 ### 10.2 MVP Priority Matrix
 
 #### MVP-A: Local Export Engine
 
-| Feature | Description | Priority |
-|---|---|---:|
-| CLI export command | Export from a published Framer URL locally | P0 |
-| Playwright capture | Capture original desktop/mobile screenshots | P0 |
-| DOM/style extraction | Extract layout, text, assets, and computed styles | P0 |
-| Runtime capture IR | Normalize published-site DOM, computed styles, assets, and screenshots | P0 |
-| Intermediate representation | Convert raw capture into reusable export IR | P0 |
-| Simulated plugin capture | Use fixture metadata until real plugin capture is available | P0 |
-| Node-to-DOM matching | Match design-side metadata to runtime DOM with confidence scores | P0 |
-| Portable React output | Generate `.tsx` component and CSS Module | P0 |
-| Local preview | Render generated output locally | P0 |
-| Categorized screenshot diff | Compare original and generated output by layout, typography, color, assets, and mobile | P0 |
-| Bounded rerun loop | Retry generation with another strategy when fidelity is low | P0 |
-| Local ZIP | Package runnable output | P0 |
-| Report JSON | Include fidelity, warnings, attempts, and failure reasons | P0 |
+| Feature                     | Description                                                                            | Priority |
+| --------------------------- | -------------------------------------------------------------------------------------- | -------: |
+| CLI export command          | Export from a published Framer URL locally                                             |       P0 |
+| Playwright capture          | Capture original desktop/mobile screenshots                                            |       P0 |
+| DOM/style extraction        | Extract layout, text, assets, and computed styles                                      |       P0 |
+| Runtime capture IR          | Normalize published-site DOM, computed styles, assets, and screenshots                 |       P0 |
+| Intermediate representation | Convert raw capture into reusable export IR                                            |       P0 |
+| Simulated plugin capture    | Use fixture metadata until real plugin capture is available                            |       P0 |
+| Node-to-DOM matching        | Match design-side metadata to runtime DOM with confidence scores                       |       P0 |
+| Portable React output       | Generate `.tsx` component and CSS Module                                               |       P0 |
+| Local preview               | Render generated output locally                                                        |       P0 |
+| Categorized screenshot diff | Compare original and generated output by layout, typography, color, assets, and mobile |       P0 |
+| Bounded rerun loop          | Retry generation with another strategy when fidelity is low                            |       P0 |
+| Local ZIP                   | Package runnable output                                                                |       P0 |
+| Report JSON                 | Include fidelity, warnings, attempts, and failure reasons                              |       P0 |
 
 #### MVP-B: Productized Section Export
 
-| Feature | Description | Priority |
-|---|---|---:|
-| Supabase job system | Create, claim, process, and complete export jobs | P0 |
-| Export attempts | Store attempt history and best attempt per job | P0 |
-| Plugin capture storage | Store lightweight selected-node payload on export jobs | P0 |
-| Node match records | Store match confidence and reasons for debugging/reporting | P0 |
-| R2 upload | Upload ZIP/report temporarily | P0 |
-| Web dashboard | Show jobs, attempts, status, report, and downloads | P0 |
-| Manual rerun | Allow user-triggered rerun with adjusted settings | P0 |
-| Framer plugin shell | Start section export from inside Framer using `framer-plugin` canvas mode | P0 |
+| Feature                | Description                                                               | Priority |
+| ---------------------- | ------------------------------------------------------------------------- | -------: |
+| Supabase job system    | Create, claim, process, and complete export jobs                          |       P0 |
+| Export attempts        | Store attempt history and best attempt per job                            |       P0 |
+| Plugin capture storage | Store lightweight selected-node payload on export jobs                    |       P0 |
+| Node match records     | Store match confidence and reasons for debugging/reporting                |       P0 |
+| R2 upload              | Upload ZIP/report temporarily                                             |       P0 |
+| Web dashboard          | Show jobs, attempts, status, report, and downloads                        |       P0 |
+| Manual rerun           | Allow user-triggered rerun with adjusted settings                         |       P0 |
+| Framer plugin shell    | Start section export from inside Framer using `framer-plugin` canvas mode |       P0 |
 
 #### MVP-C: Fidelity Hardening
 
-| Feature | Description | Priority |
-|---|---|---:|
-| Categorized fidelity scores | Score layout, typography, color, assets, motion, and node matching | P0 |
-| Diff-driven rerun strategies | Pick rerun strategy based on mismatch category | P0 |
-| Typography repair | Adjust font size, weight, line-height, and letter spacing | P0 |
-| Layout repair | Adjust grid/flex choice, gap, padding, and alignment | P0 |
-| Mobile repair | Add or tune breakpoint overrides | P0 |
-| Asset repair | Tune object-fit, object-position, size, and asset mode | P1 |
-| Fixture regression set | Test common Framer section patterns repeatedly | P0 |
+| Feature                      | Description                                                        | Priority |
+| ---------------------------- | ------------------------------------------------------------------ | -------: |
+| Categorized fidelity scores  | Score layout, typography, color, assets, motion, and node matching |       P0 |
+| Diff-driven rerun strategies | Pick rerun strategy based on mismatch category                     |       P0 |
+| Typography repair            | Adjust font size, weight, line-height, and letter spacing          |       P0 |
+| Layout repair                | Adjust grid/flex choice, gap, padding, and alignment               |       P0 |
+| Mobile repair                | Add or tune breakpoint overrides                                   |       P0 |
+| Asset repair                 | Tune object-fit, object-position, size, and asset mode             |       P1 |
+| Fixture regression set       | Test common Framer section patterns repeatedly                     |       P0 |
 
 ### 10.3 MVP Feature Priority
 
 #### Must Have
 
-| Feature | Description | Priority |
-|---|---|---:|
-| Framer plugin shell | Opens inside Framer and provides export UI | P0 |
-| Plugin SDK setup | Use `framer-plugin`, Vite, `vite-plugin-framer`, and `modes: ["canvas"]` | P0 |
-| User authentication | Connect plugin to web app account | P0 |
-| Selection detection | Detect selected section/component | P0 |
-| Selection metadata capture | Capture selected node IDs, names, types, text, bounds, and available metadata | P0 |
-| Export job creation | Create job in Supabase | P0 |
-| Job dashboard | Show queued/running/completed/failed states | P0 |
-| Worker processing | Poll job and process export | P0 |
-| Local screenshot capture | Capture original/generated screenshots locally | P0 |
-| React component generation | Generate editable `.tsx` component | P0 |
-| CSS Module generation | Generate editable styles | P0 |
-| Asset handling | Link or download assets depending on mode | P0 |
-| ZIP packaging | Package generated output | P0 |
-| R2 upload | Upload ZIP/report temporarily | P0 |
-| Download link | Signed URL from dashboard | P0 |
-| Basic fidelity report | Desktop/mobile visual match and warnings | P0 |
-| Categorized fidelity report | Show which mismatch category caused reruns | P0 |
-| Node match report | Show match confidence and unmatched nodes | P0 |
-| Attempt history | Show rerun count, strategy, score, and warnings | P0 |
-| Best attempt download | Download the best completed attempt by default | P0 |
-| README | Explain how to run output | P0 |
-| AGENT_BRIEF | Explain how external coding agents should work with output | P0 |
-| Auto-expiry | Delete exports after retention period | P0 |
-| Error messaging | Human-readable failed job errors | P0 |
+| Feature                     | Description                                                                   | Priority |
+| --------------------------- | ----------------------------------------------------------------------------- | -------: |
+| Framer plugin shell         | Opens inside Framer and provides export UI                                    |       P0 |
+| Plugin SDK setup            | Use `framer-plugin`, Vite, `vite-plugin-framer`, and `modes: ["canvas"]`      |       P0 |
+| User authentication         | Connect plugin to web app account                                             |       P0 |
+| Selection detection         | Detect selected section/component                                             |       P0 |
+| Selection metadata capture  | Capture selected node IDs, names, types, text, bounds, and available metadata |       P0 |
+| Export job creation         | Create job in Supabase                                                        |       P0 |
+| Job dashboard               | Show queued/running/completed/failed states                                   |       P0 |
+| Worker processing           | Poll job and process export                                                   |       P0 |
+| Local screenshot capture    | Capture original/generated screenshots locally                                |       P0 |
+| React component generation  | Generate editable `.tsx` component                                            |       P0 |
+| CSS Module generation       | Generate editable styles                                                      |       P0 |
+| Asset handling              | Link or download assets depending on mode                                     |       P0 |
+| ZIP packaging               | Package generated output                                                      |       P0 |
+| R2 upload                   | Upload ZIP/report temporarily                                                 |       P0 |
+| Download link               | Signed URL from dashboard                                                     |       P0 |
+| Basic fidelity report       | Desktop/mobile visual match and warnings                                      |       P0 |
+| Categorized fidelity report | Show which mismatch category caused reruns                                    |       P0 |
+| Node match report           | Show match confidence and unmatched nodes                                     |       P0 |
+| Attempt history             | Show rerun count, strategy, score, and warnings                               |       P0 |
+| Best attempt download       | Download the best completed attempt by default                                |       P0 |
+| README                      | Explain how to run output                                                     |       P0 |
+| AGENT_BRIEF                 | Explain how external coding agents should work with output                    |       P0 |
+| Auto-expiry                 | Delete exports after retention period                                         |       P0 |
+| Error messaging             | Human-readable failed job errors                                              |       P0 |
 
 #### Should Have
 
-| Feature | Description | Priority |
-|---|---|---:|
-| Linked asset mode | Use remote asset references for cheaper/free exports | P1 |
-| Portable asset mode | Bundle assets in ZIP for paid/beta users | P1 |
-| Basic hover preservation | Preserve simple hover CSS where detectable | P1 |
-| Basic appear animation | Map simple reveal to Motion/CSS | P1 |
-| Responsive CSS | Generate basic media queries | P1 |
-| Export expiry display | Show when ZIP expires | P1 |
-| Retry failed job | Allow user to retry failed export | P1 |
-| Rerun low-fidelity job | Allow user to rerun completed exports below target fidelity | P1 |
-| Manual delete export | Let user delete export before expiry | P1 |
+| Feature                  | Description                                                 | Priority |
+| ------------------------ | ----------------------------------------------------------- | -------: |
+| Linked asset mode        | Use remote asset references for cheaper/free exports        |       P1 |
+| Portable asset mode      | Bundle assets in ZIP for paid/beta users                    |       P1 |
+| Basic hover preservation | Preserve simple hover CSS where detectable                  |       P1 |
+| Basic appear animation   | Map simple reveal to Motion/CSS                             |       P1 |
+| Responsive CSS           | Generate basic media queries                                |       P1 |
+| Export expiry display    | Show when ZIP expires                                       |       P1 |
+| Retry failed job         | Allow user to retry failed export                           |       P1 |
+| Rerun low-fidelity job   | Allow user to rerun completed exports below target fidelity |       P1 |
+| Manual delete export     | Let user delete export before expiry                        |       P1 |
 
 #### Could Have
 
-| Feature | Description | Priority |
-|---|---|---:|
-| Debug screenshots on failure | Temporarily upload debug screenshots only for failed jobs | P2 |
-| Simple usage limits | Limit exports per user manually | P2 |
-| Invite codes | Private alpha access control | P2 |
-| Basic billing waitlist | Capture willingness to pay | P2 |
-| Export naming controls | Let user name component before export | P2 |
+| Feature                      | Description                                               | Priority |
+| ---------------------------- | --------------------------------------------------------- | -------: |
+| Debug screenshots on failure | Temporarily upload debug screenshots only for failed jobs |       P2 |
+| Simple usage limits          | Limit exports per user manually                           |       P2 |
+| Invite codes                 | Private alpha access control                              |       P2 |
+| Basic billing waitlist       | Capture willingness to pay                                |       P2 |
+| Export naming controls       | Let user name component before export                     |       P2 |
 
 #### Won't Have In MVP
 
-| Feature | Reason |
-|---|---|
-| Full-page export | Too broad for first version |
-| Full-site export | Requires routing, shared components, dedupe |
-| CMS export | Better after page export works |
-| GitHub export | Useful but not needed to prove core value |
-| CLI | Developer convenience after product is validated |
-| Internal AI editing | Outside value prop; users use their own agents |
+| Feature                  | Reason                                                              |
+| ------------------------ | ------------------------------------------------------------------- |
+| Full-page export         | Too broad for first version                                         |
+| Full-site export         | Requires routing, shared components, dedupe                         |
+| CMS export               | Better after page export works                                      |
+| GitHub export            | Useful but not needed to prove core value                           |
+| CLI                      | Developer convenience after product is validated                    |
+| Internal AI editing      | Outside value prop; users use their own agents                      |
 | Unbounded AI repair loop | Adds cost/complexity; MVP uses bounded deterministic reruns instead |
-| Advanced scroll motion | Hard; support later |
-| Forms backend | Export visual form only, warn about logic |
-| Auth/membership | Not suitable for MVP |
-| E-commerce checkout | High-risk and platform-specific |
-| Permanent storage | Cost risk and not needed |
+| Advanced scroll motion   | Hard; support later                                                 |
+| Forms backend            | Export visual form only, warn about logic                           |
+| Auth/membership          | Not suitable for MVP                                                |
+| E-commerce checkout      | High-risk and platform-specific                                     |
+| Permanent storage        | Cost risk and not needed                                            |
 
 ### 10.4 Support Matrix
 
 #### MVP Supported
 
-| Item | Support Level |
-|---|---|
-| Text | Full |
-| Images | Full/partial depending on asset mode |
-| Basic layout | Full for simple sections |
-| Typography | Partial/full depending on font access |
-| Colours | Full |
-| Spacing | Partial/full |
-| Border radius | Full |
-| Shadows | Partial/full |
-| Basic responsive behaviour | Partial |
-| Basic hover | Partial |
-| Basic appear animation | Partial |
-| Forms | Visual only, logic warning |
-| Custom embeds | Visual/placeholder, warning |
+| Item                       | Support Level                         |
+| -------------------------- | ------------------------------------- |
+| Text                       | Full                                  |
+| Images                     | Full/partial depending on asset mode  |
+| Basic layout               | Full for simple sections              |
+| Typography                 | Partial/full depending on font access |
+| Colours                    | Full                                  |
+| Spacing                    | Partial/full                          |
+| Border radius              | Full                                  |
+| Shadows                    | Partial/full                          |
+| Basic responsive behaviour | Partial                               |
+| Basic hover                | Partial                               |
+| Basic appear animation     | Partial                               |
+| Forms                      | Visual only, logic warning            |
+| Custom embeds              | Visual/placeholder, warning           |
 
 #### Post-MVP Supported
 
-| Item | Target Phase |
-|---|---|
-| Full page export | Phase 2 |
-| Advanced motion | Phase 3 |
-| CMS export | Phase 4 |
-| Full-site export | Phase 5 |
-| GitHub export | Phase 6 |
-| CLI | Phase 7 |
-| Team workspaces | Phase 8 |
+| Item             | Target Phase |
+| ---------------- | ------------ |
+| Full page export | Phase 2      |
+| Advanced motion  | Phase 3      |
+| CMS export       | Phase 4      |
+| Full-site export | Phase 5      |
+| GitHub export    | Phase 6      |
+| CLI              | Phase 7      |
+| Team workspaces  | Phase 8      |
 
 #### Out Of Scope Indefinitely Or Long-Term
 
-| Item | Reason |
-|---|---|
-| Cloning arbitrary sites user does not own | Legal/ethical risk |
-| Replacing Framer editor | Not the product |
-| Perfect parity for all animation timelines | Technically unrealistic |
-| Migrating payment checkout logic | High-risk, provider-specific |
-| Migrating auth/member systems | Security and complexity |
-| Universal no-code platform export | Dilutes focus |
-| Internal AI coding workspace | Outside core value prop |
+| Item                                       | Reason                       |
+| ------------------------------------------ | ---------------------------- |
+| Cloning arbitrary sites user does not own  | Legal/ethical risk           |
+| Replacing Framer editor                    | Not the product              |
+| Perfect parity for all animation timelines | Technically unrealistic      |
+| Migrating payment checkout logic           | High-risk, provider-specific |
+| Migrating auth/member systems              | Security and complexity      |
+| Universal no-code platform export          | Dilutes focus                |
+| Internal AI coding workspace               | Outside core value prop      |
 
 ---
 
 ## 11. MVP Scope
 
 ## 11.1 MVP Name
+
 **Section Export MVP**
 
 ## 11.2 MVP Objective
+
 Allow a user to select one Framer section/component and export it into a developer-ready React component with CSS Modules, assets, README, agent brief, and basic fidelity report.
 
 ## 11.3 MVP User Story
+
 As a Framer user, I want to select a section in Framer and export it into React code so that I can continue building it with a developer or AI coding agent.
 
 ## 11.4 MVP Delivery Split
 
 ### MVP-A: Local Export Engine
+
 MVP-A proves the export engine before the SaaS surface exists.
 
 Included:
+
 - CLI command that accepts a published Framer URL and optional section selector hints.
 - Playwright capture for desktop and mobile.
 - DOM/computed-style extraction.
@@ -546,15 +585,18 @@ Included:
 - Manual rerun support for low-fidelity attempts.
 
 Success criteria:
+
 - 7/10 simple Framer sections export into usable React.
 - Generated output runs locally.
 - Report explains mismatches and unsupported features.
 - Reruns can improve output without starting from scratch.
 
 ### MVP-B: Productized Section Export
+
 MVP-B wraps the proven export engine with account, dashboard, worker, storage, and plugin flows.
 
 Included:
+
 - Supabase auth and job system.
 - Worker-based export processing.
 - R2 ZIP/report upload.
@@ -568,9 +610,11 @@ Included:
 - Downloadable best attempt.
 
 ### MVP-C: Fidelity Hardening
+
 MVP-C improves export quality after MVP-A proves the engine and MVP-B proves the product loop.
 
 Included:
+
 - Categorized fidelity scoring for layout, typography, color, assets, responsive behavior, and motion.
 - Diff-driven rerun strategies.
 - Better node-to-DOM matching confidence.
@@ -580,6 +624,7 @@ Included:
 ## 11.5 MVP Included Features
 
 ### Framer Plugin
+
 - User can open plugin inside Framer.
 - User can authenticate with the standalone web app.
 - Plugin can detect selected section/component.
@@ -589,6 +634,7 @@ Included:
 - Plugin can link user to the web dashboard.
 
 ### Web App
+
 - User can sign up/log in.
 - User can view export jobs.
 - User can see job status.
@@ -600,6 +646,7 @@ Included:
 - User can rerun an export when fidelity is below target or warnings are fixable.
 
 ### Backend/Supabase
+
 - Store users.
 - Store projects.
 - Store export jobs.
@@ -608,6 +655,7 @@ Included:
 - Enforce user-level access.
 
 ### Worker
+
 - Poll queued jobs.
 - Lock and process job.
 - Render original selection/page context.
@@ -627,6 +675,7 @@ Included:
 - Delete local temporary files.
 
 ### Exported Output
+
 - React component.
 - CSS Module.
 - Assets folder where applicable.
@@ -638,6 +687,7 @@ Included:
 - Adapter notes for Vite, Next.js, Remix, Astro, and other React project types.
 
 ### Storage
+
 - ZIP stored temporarily.
 - Report JSON stored temporarily.
 - Screenshots kept local only by default.
@@ -737,9 +787,11 @@ Post-MVP development should proceed in deliberate stages.
 ## 12.1 Phase 2: Page Export
 
 ### Goal
+
 Export one complete Framer page into a portable React page with adapters for Vite, Next.js, Remix, Astro, and similar React project types.
 
 ### Included
+
 - Page-level export.
 - Multiple sections per page.
 - Route generation.
@@ -750,11 +802,13 @@ Export one complete Framer page into a portable React page with adapters for Vit
 - Basic navigation/footer handling.
 
 ### Excluded
+
 - Multi-page site crawling.
 - CMS dynamic routes.
 - Advanced component deduplication.
 
 ### Success Criteria
+
 - User can export a full landing page.
 - Output runs locally.
 - Page has reasonable component/section structure.
@@ -765,9 +819,11 @@ Export one complete Framer page into a portable React page with adapters for Vit
 ## 12.2 Phase 3: Motion Fidelity
 
 ### Goal
+
 Improve preservation of Framer motion and interactions.
 
 ### Included
+
 - Hover state capture.
 - In-view animation mapping.
 - Basic stagger animation mapping.
@@ -777,11 +833,13 @@ Improve preservation of Framer motion and interactions.
 - Reduced-motion support.
 
 ### Excluded
+
 - Perfect reconstruction of every scroll choreography.
 - Complex timeline editor.
 - Internal AI repair.
 
 ### Success Criteria
+
 - Common appear animations are preserved.
 - Basic hover interactions are preserved.
 - Unsupported motion is clearly flagged.
@@ -792,9 +850,11 @@ Improve preservation of Framer motion and interactions.
 ## 12.3 Phase 4: CMS Export
 
 ### Goal
+
 Export simple Framer CMS content into local structured data and dynamic routes.
 
 ### Included
+
 - CMS collection reading where available.
 - JSON/TypeScript data export.
 - Dynamic route generation.
@@ -803,11 +863,13 @@ Export simple Framer CMS content into local structured data and dynamic routes.
 - Local asset mapping.
 
 ### Excluded
+
 - Full external CMS migration to Sanity/Contentful/etc.
 - Complex CMS filtering/search.
 - Real-time CMS sync.
 
 ### Success Criteria
+
 - Simple Framer blogs can export into Next.js dynamic routes.
 - CMS content is represented in typed local files.
 - Missing/unsupported CMS features are flagged.
@@ -817,9 +879,11 @@ Export simple Framer CMS content into local structured data and dynamic routes.
 ## 12.4 Phase 5: Full-Site Export
 
 ### Goal
+
 Export small Framer websites into structured portable React projects.
 
 ### Included
+
 - Multi-page crawling.
 - Shared layout.
 - Shared nav/footer detection.
@@ -829,12 +893,14 @@ Export small Framer websites into structured portable React projects.
 - Site-level export report.
 
 ### Excluded
+
 - Large enterprise-scale site migration.
 - Auth-gated pages.
 - Framer-native checkout logic.
 - Advanced search/localisation.
 
 ### Success Criteria
+
 - Small marketing sites can export end-to-end.
 - Shared components are not duplicated excessively.
 - Generated app structure is usable by a developer.
@@ -844,9 +910,11 @@ Export small Framer websites into structured portable React projects.
 ## 12.5 Phase 6: GitHub Export
 
 ### Goal
+
 Allow users to push exports to GitHub.
 
 ### Included
+
 - GitHub App integration.
 - Create new repo.
 - Push export to repo.
@@ -855,10 +923,12 @@ Allow users to push exports to GitHub.
 - Export manifest.
 
 ### Excluded
+
 - Automated deployment management.
 - CI/CD hosting support beyond generated instructions.
 
 ### Success Criteria
+
 - Users can send export directly to GitHub.
 - PR includes useful report and file summary.
 - Agencies can hand off to clients through GitHub.
@@ -868,9 +938,11 @@ Allow users to push exports to GitHub.
 ## 12.6 Phase 7: CLI
 
 ### Goal
+
 Give developers a terminal workflow.
 
 ### Included
+
 - `npx coderelay login`
 - `npx coderelay pull <jobId>`
 - `npx coderelay preview`
@@ -878,10 +950,12 @@ Give developers a terminal workflow.
 - Local config file.
 
 ### Excluded
+
 - Local-only Framer extraction.
 - Full offline mode.
 
 ### Success Criteria
+
 - Developer can pull an export locally without using dashboard download.
 - CLI can initialise and preview generated output.
 
@@ -890,9 +964,11 @@ Give developers a terminal workflow.
 ## 12.7 Phase 8: Agency and Team Workflows
 
 ### Goal
+
 Support higher-value users.
 
 ### Included
+
 - Workspaces.
 - Team seats.
 - Client projects.
@@ -903,10 +979,12 @@ Support higher-value users.
 - Bulk export credits.
 
 ### Excluded
+
 - White-glove migration service automation.
 - Marketplace for Framer exports.
 
 ### Success Criteria
+
 - Agencies can manage multiple projects and clients.
 - Agency tier has clear willingness to pay.
 
@@ -1188,6 +1266,7 @@ Dashboard download
 ### Recommended Stack
 
 #### Plugin
+
 - React
 - TypeScript
 - `framer-plugin`
@@ -1196,18 +1275,21 @@ Dashboard download
 - `import "framer-plugin/framer.css"`
 
 #### Web App
+
 - Next.js
 - TypeScript
 - Tailwind/shadcn optional
 - Supabase client
 
 #### Backend
+
 - Supabase Auth
 - Supabase Postgres
 - Supabase Row Level Security
 - Supabase Edge Functions only for lightweight API actions if needed
 
 #### Worker
+
 - Node.js
 - TypeScript
 - Playwright
@@ -1217,12 +1299,14 @@ Dashboard download
 - Sharp optional for image processing
 
 #### Storage
+
 - Cloudflare R2
 - Private bucket
 - Signed URLs
 - Lifecycle rules
 
 #### Payments Later
+
 - Stripe, Lemon Squeezy, or Paddle
 
 ---
@@ -1404,12 +1488,12 @@ jobs/{jobId}/debug/diff.png
 
 ### Retention Defaults
 
-| Artefact | Free | Paid | Agency |
-|---|---:|---:|---:|
-| ZIP | 24 hours | 7 days | 30 days |
-| Report JSON | 7–30 days | 30 days | 90 days |
-| Debug screenshots | Not stored | 3 days | 7 days |
-| Local temp files | Immediate delete | Immediate delete | Immediate delete |
+| Artefact          |             Free |             Paid |           Agency |
+| ----------------- | ---------------: | ---------------: | ---------------: |
+| ZIP               |         24 hours |           7 days |          30 days |
+| Report JSON       |        7–30 days |          30 days |          90 days |
+| Debug screenshots |       Not stored |           3 days |           7 days |
+| Local temp files  | Immediate delete | Immediate delete | Immediate delete |
 
 ---
 
@@ -1446,6 +1530,7 @@ jobs/{jobId}/debug/diff.png
 ## 23. Monetisation
 
 ### Pricing Philosophy
+
 Charge for time saved and handoff quality, not for storage.
 
 ### Free Tier
@@ -1584,16 +1669,16 @@ A successful developer-ready export is one where:
 
 ## 25. Risks and Mitigations
 
-| Risk | Impact | Mitigation |
-|---|---:|---|
-| Framer plugin review rejection | High | Keep standalone SaaS as core, position as handoff, avoid hostile language |
-| Layout extraction is poor | High | Start with selected sections, use visual diff, limit supported layouts |
-| Generated code is messy | High | Prioritise React/CSS structure over perfect static mirroring |
-| Storage bill grows | Medium | Temporary storage, lifecycle deletion, screenshots local only |
-| Worker compute gets expensive | Medium | Queue limits, job timeouts, paid usage, one VPS first |
-| Competitors undercut static export price | Medium | Avoid competing as static exporter; own developer handoff |
-| Animation fidelity is hard | High | Support simple motion first, report approximations honestly |
-| Users expect perfect export | High | Set expectations through report and supported feature matrix |
+| Risk                                     | Impact | Mitigation                                                                |
+| ---------------------------------------- | -----: | ------------------------------------------------------------------------- |
+| Framer plugin review rejection           |   High | Keep standalone SaaS as core, position as handoff, avoid hostile language |
+| Layout extraction is poor                |   High | Start with selected sections, use visual diff, limit supported layouts    |
+| Generated code is messy                  |   High | Prioritise React/CSS structure over perfect static mirroring              |
+| Storage bill grows                       | Medium | Temporary storage, lifecycle deletion, screenshots local only             |
+| Worker compute gets expensive            | Medium | Queue limits, job timeouts, paid usage, one VPS first                     |
+| Competitors undercut static export price | Medium | Avoid competing as static exporter; own developer handoff                 |
+| Animation fidelity is hard               |   High | Support simple motion first, report approximations honestly               |
+| Users expect perfect export              |   High | Set expectations through report and supported feature matrix              |
 
 ---
 

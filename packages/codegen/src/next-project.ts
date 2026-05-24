@@ -1,63 +1,91 @@
-import { mkdirp } from 'fs-extra'
-import { writeFile } from 'node:fs/promises'
-import path from 'node:path'
-import prettier from 'prettier'
-import type { ExportIR, RuntimeNode } from '../../shared/src/types.js'
+import { mkdirp } from "fs-extra";
+import { writeFile } from "node:fs/promises";
+import path from "node:path";
+import prettier from "prettier";
+import type { ExportIR, RuntimeNode } from "../../shared/src/types.js";
 
 type GenerateInput = {
-  ir: ExportIR
-  projectDir: string
-  strategy: string
-}
+  ir: ExportIR;
+  projectDir: string;
+  strategy: string;
+};
 
 export type GeneratedProject = {
-  projectDir: string
-  componentPath: string
-  cssPath: string
-  previewHtmlPath: string
-}
+  projectDir: string;
+  componentPath: string;
+  cssPath: string;
+  previewHtmlPath: string;
+};
 
-export async function generateNextProject(input: GenerateInput): Promise<GeneratedProject> {
-  const componentDir = path.join(input.projectDir, 'components')
-  const appDir = path.join(input.projectDir, 'app')
+export async function generateNextProject(
+  input: GenerateInput,
+): Promise<GeneratedProject> {
+  const componentDir = path.join(input.projectDir, "components");
+  const appDir = path.join(input.projectDir, "app");
 
-  await mkdirp(componentDir)
-  await mkdirp(appDir)
+  await mkdirp(componentDir);
+  await mkdirp(appDir);
 
-  const componentPath = path.join(componentDir, `${input.ir.componentName}.tsx`)
-  const cssPath = path.join(componentDir, `${input.ir.componentName}.module.css`)
-  const previewHtmlPath = path.join(input.projectDir, 'preview.html')
+  const componentPath = path.join(
+    componentDir,
+    `${input.ir.componentName}.tsx`,
+  );
+  const cssPath = path.join(
+    componentDir,
+    `${input.ir.componentName}.module.css`,
+  );
+  const previewHtmlPath = path.join(input.projectDir, "preview.html");
 
-  const component = await formatTsx(createComponent(input.ir), 'typescript')
-  const css = createCss(input.ir, input.strategy)
-  const page = await formatTsx(createPage(input.ir), 'typescript')
-  const layout = await formatTsx(createLayout(input.ir), 'typescript')
-  const globalCss = createGlobalCss()
-  const packageJson = `${JSON.stringify(createPackageJson(input.ir), null, 2)}\n`
-  const tsconfig = `${JSON.stringify(createTsConfig(), null, 2)}\n`
+  const component = await formatTsx(createComponent(input.ir), "typescript");
+  const css = createCss(input.ir, input.strategy);
+  const page = await formatTsx(createPage(input.ir), "typescript");
+  const layout = await formatTsx(createLayout(input.ir), "typescript");
+  const globalCss = createGlobalCss();
+  const packageJson = `${JSON.stringify(createPackageJson(input.ir), null, 2)}\n`;
+  const tsconfig = `${JSON.stringify(createTsConfig(), null, 2)}\n`;
 
-  await writeFile(componentPath, component)
-  await writeFile(cssPath, css)
-  await writeFile(path.join(appDir, 'page.tsx'), page)
-  await writeFile(path.join(appDir, 'layout.tsx'), layout)
-  await writeFile(path.join(appDir, 'globals.css'), globalCss)
-  await writeFile(path.join(input.projectDir, 'package.json'), packageJson)
-  await writeFile(path.join(input.projectDir, 'tsconfig.json'), tsconfig)
-  await writeFile(path.join(input.projectDir, 'next.config.ts'), createNextConfig())
-  await writeFile(previewHtmlPath, createPreviewHtml(input.ir, css))
+  await writeFile(componentPath, component);
+  await writeFile(cssPath, css);
+  await writeFile(path.join(appDir, "page.tsx"), page);
+  await writeFile(path.join(appDir, "layout.tsx"), layout);
+  await writeFile(path.join(appDir, "globals.css"), globalCss);
+  await writeFile(path.join(input.projectDir, "package.json"), packageJson);
+  await writeFile(path.join(input.projectDir, "tsconfig.json"), tsconfig);
+  await writeFile(
+    path.join(input.projectDir, "next.config.ts"),
+    createNextConfig(),
+  );
+  await writeFile(previewHtmlPath, createPreviewHtml(input.ir, css));
 
   return {
     projectDir: input.projectDir,
     componentPath,
     cssPath,
     previewHtmlPath,
-  }
+  };
 }
 
 function createComponent(ir: ExportIR) {
-  const sections = ir.component.sections.length > 0
-    ? ir.component.sections.map((section, index) => renderSection(section.nodes, index, ir, section.kind ?? inferKindFromNodes(section.nodes, index))).join('\n')
-    : renderSection(ir.component.nodes, 0, ir, inferKindFromNodes(ir.component.nodes, 0))
+  const sections =
+    ir.component.sections.length > 0
+      ? ir.component.sections
+          .map((section, index) =>
+            renderSection({
+              nodes: section.nodes,
+              index,
+              ir,
+              kind: section.kind ?? inferKindFromNodes(section.nodes, index),
+              confidence: section.confidence,
+            }),
+          )
+          .join("\n")
+      : renderSection({
+          nodes: ir.component.nodes,
+          index: 0,
+          ir,
+          kind: inferKindFromNodes(ir.component.nodes, 0),
+          confidence: ir.component.sections[0]?.confidence,
+        });
 
   return `import styles from './${ir.componentName}.module.css'
 
@@ -98,7 +126,7 @@ export function ${ir.componentName}() {
     </main>
   )
 }
-`
+`;
 }
 
 function createPage(ir: ExportIR) {
@@ -107,7 +135,7 @@ function createPage(ir: ExportIR) {
 export default function Page() {
   return <${ir.componentName} />
 }
-`
+`;
 }
 
 function createLayout(ir: ExportIR) {
@@ -126,67 +154,112 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   )
 }
-`
+`;
 }
 
 function renderNode(node: RuntimeNode) {
-  if (node.tag === 'img' && node.attributes.src) {
-    return `<img className={styles.image} src="${escapeAttribute(node.attributes.src)}" alt="${escapeAttribute(node.attributes.alt ?? '')}" />`
+  if (node.tag === "img" && node.attributes.src) {
+    return `<img className={styles.image} src="${escapeAttribute(node.attributes.src)}" alt="${escapeAttribute(node.attributes.alt ?? "")}" />`;
   }
 
-  const text = escapeText(node.text ?? '')
+  const text = escapeText(node.text ?? "");
 
   if (!text) {
-    return ''
+    return "";
   }
 
-  if (node.tag === 'h1') {
-    return `<h1 className={styles.heading}>${text}</h1>`
+  if (node.tag === "h1") {
+    return `<h1 className={styles.heading}>${text}</h1>`;
   }
 
-  if (node.tag === 'h2' || node.tag === 'h3') {
-    return `<h2 className={styles.subheading}>${text}</h2>`
+  if (node.tag === "h2" || node.tag === "h3") {
+    return `<h2 className={styles.subheading}>${text}</h2>`;
   }
 
-  if (node.tag === 'a') {
-    return `<a className={styles.link} href="${escapeAttribute(node.attributes.href ?? '#')}">${text}</a>`
+  if (node.tag === "a") {
+    return `<a className={styles.link} href="${escapeAttribute(node.attributes.href ?? "#")}">${text}</a>`;
   }
 
-  if (node.tag === 'button') {
-    return `<button className={styles.button} type="button">${text}</button>`
+  if (node.tag === "button") {
+    return `<button className={styles.button} type="button">${text}</button>`;
   }
 
-  return `<p className={styles.body}>${text}</p>`
+  return `<p className={styles.body}>${text}</p>`;
 }
 
-function renderSection(nodes: RuntimeNode[], index: number, ir: ExportIR, kind: 'hero' | 'content' | 'media-grid') {
-  const repaired = repairSectionNodes(nodes)
-  const groups = groupSectionNodes(repaired)
+function renderSection(input: {
+  nodes: RuntimeNode[];
+  index: number;
+  ir: ExportIR;
+  kind: "hero" | "content" | "media-grid";
+  confidence?: number;
+}) {
+  const repaired = repairSectionNodes(input.nodes);
+  const groups = groupSectionNodes(repaired);
   const items = [
     ...groups.headings.map(renderNode),
     ...groups.body.map(renderNode),
     ...groups.cta.map(renderNode),
     ...groups.images.map(renderNode),
-  ].filter(Boolean).join('\n')
-  const style = sectionStyle(nodes, index, ir)
-  const component = kind === 'hero' ? 'SectionHero' : kind === 'media-grid' ? 'SectionMediaGrid' : 'SectionContent'
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const style = sectionStyle(input.nodes, input.index, input.ir);
+  const component =
+    input.kind === "hero"
+      ? "SectionHero"
+      : input.kind === "media-grid"
+        ? "SectionMediaGrid"
+        : "SectionContent";
+  const confidence = input.confidence ?? 1;
+
+  if (confidence < 0.5) {
+    return `<${component} style={${style.styleObject}}>
+      <div className={styles.placeholder}>
+        Exported section flagged low-confidence. Review layout and typography.
+      </div>
+    </${component}>`;
+  }
 
   return `<${component} style={${style.styleObject}}>
-    ${items || '<div className={styles.placeholder}>Exported Framer section</div>'}
-  </${component}>`
+    ${items || "<div className={styles.placeholder}>Exported Framer section</div>"}
+  </${component}>`;
 }
 
 function createCss(ir: ExportIR, strategy: string) {
-  const root = ir.runtimeCapture.nodes.find((node) => node.rect.width > 200 && node.rect.height > 100)
-  const heading = ir.component.nodes.find((node) => node.tag === 'h1' || node.tag === 'h2')
-  const body = ir.component.nodes.find((node) => node.tag === 'p')
-  const backgroundColor = findBackgroundColor(ir, root)
-  const textColor = usableColor(heading?.styles.color ?? body?.styles.color) ?? '#111111'
-  const headingSize = heading?.styles.fontSize ?? 'clamp(2.5rem, 6vw, 5.5rem)'
-  const bodySize = body?.styles.fontSize ?? '1.125rem'
-  const minHeight = ir.runtimeCapture.mode === 'page' ? 520 : Math.max(360, Math.min(900, ir.runtimeCapture.viewports.desktop.height))
-  const landingStructured = strategy === 'landing-page-structured'
-  const stricterSpacing = strategy !== 'semantic-layout'
+  const root = ir.runtimeCapture.nodes.find(
+    (node) => node.rect.width > 200 && node.rect.height > 100,
+  );
+  const heading = ir.component.nodes.find(
+    (node) => node.tag === "h1" || node.tag === "h2",
+  );
+  const body = ir.component.nodes.find((node) => node.tag === "p");
+  const backgroundColor = findBackgroundColor(ir, root);
+  const textColor =
+    usableColor(heading?.styles.color ?? body?.styles.color) ?? "#111111";
+  const headingSize = heading?.styles.fontSize ?? "clamp(2.5rem, 6vw, 5.5rem)";
+  const bodySize = body?.styles.fontSize ?? "1.125rem";
+  const minHeight =
+    ir.runtimeCapture.mode === "page"
+      ? 520
+      : Math.max(
+          360,
+          Math.min(900, ir.runtimeCapture.viewports.desktop.height),
+        );
+  const landingStructured = strategy === "landing-page-structured";
+  const stricterSpacing = strategy !== "semantic-layout";
+
+  const mobilePaddingByLayout = {
+    hero: strategy === "landing-page-structured" ? "56px 20px" : "64px 22px",
+    content: "52px 18px",
+    "media-grid": "48px 18px",
+  } as const;
+
+  const desktopPaddingByLayout = {
+    hero: stricterSpacing ? "84px 56px" : "112px 72px",
+    content: stricterSpacing ? "72px 48px" : "96px 64px",
+    "media-grid": stricterSpacing ? "72px 48px" : "96px 64px",
+  } as const;
 
   return `.page {
   min-height: 100vh;
@@ -200,7 +273,7 @@ function createCss(ir: ExportIR, strategy: string) {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: ${stricterSpacing ? '72px 48px' : '96px 64px'};
+  padding: ${desktopPaddingByLayout.content};
 }
 
 .inner {
@@ -209,7 +282,7 @@ function createCss(ir: ExportIR, strategy: string) {
   grid-template-columns: minmax(0, 820px);
   align-items: center;
   justify-content: center;
-  gap: ${stricterSpacing ? '32px' : '48px'};
+  gap: ${stricterSpacing ? "32px" : "48px"};
 }
 
 .inner[data-layout='hero'] {
@@ -228,9 +301,9 @@ function createCss(ir: ExportIR, strategy: string) {
   margin: 0;
   max-width: 900px;
   font-size: ${headingSize};
-  line-height: ${heading?.styles.lineHeight ?? '0.98'};
-  font-weight: ${heading?.styles.fontWeight ?? '700'};
-  letter-spacing: ${heading?.styles.letterSpacing ?? '0'};
+  line-height: ${heading?.styles.lineHeight ?? "0.98"};
+  font-weight: ${heading?.styles.fontWeight ?? "700"};
+  letter-spacing: ${heading?.styles.letterSpacing ?? "0"};
 }
 
 .subheading {
@@ -244,7 +317,7 @@ function createCss(ir: ExportIR, strategy: string) {
   margin: 24px 0 0;
   max-width: 680px;
   font-size: ${bodySize};
-  line-height: ${body?.styles.lineHeight ?? '1.6'};
+  line-height: ${body?.styles.lineHeight ?? "1.6"};
 }
 
 .link,
@@ -266,8 +339,8 @@ function createCss(ir: ExportIR, strategy: string) {
 
 .image {
   width: 100%;
-  aspect-ratio: ${landingStructured ? 'auto' : '4 / 5'};
-  max-height: ${landingStructured ? '760px' : '680px'};
+  aspect-ratio: ${landingStructured ? "auto" : "4 / 5"};
+  max-height: ${landingStructured ? "760px" : "680px"};
   object-fit: cover;
   border-radius: 18px;
   box-shadow: 0 28px 80px rgb(0 0 0 / 18%);
@@ -279,13 +352,13 @@ function createCss(ir: ExportIR, strategy: string) {
 
 @media (max-width: 768px) {
   .section {
-    min-height: ${ir.runtimeCapture.mode === 'page' ? 420 : Math.max(360, Math.min(900, ir.runtimeCapture.viewports.mobile.height))}px;
-    padding: 56px 24px;
+    min-height: ${ir.runtimeCapture.mode === "page" ? 420 : Math.max(360, Math.min(900, ir.runtimeCapture.viewports.mobile.height))}px;
+    padding: ${mobilePaddingByLayout.content};
   }
 
   .heroSection {
-    min-height: ${ir.runtimeCapture.mode === 'page' ? 560 : Math.max(360, Math.min(900, ir.runtimeCapture.viewports.mobile.height))}px;
-    padding: 56px 24px;
+    min-height: ${ir.runtimeCapture.mode === "page" ? 560 : Math.max(360, Math.min(900, ir.runtimeCapture.viewports.mobile.height))}px;
+    padding: ${mobilePaddingByLayout.hero};
   }
 
   .inner {
@@ -301,25 +374,52 @@ function createCss(ir: ExportIR, strategy: string) {
   }
 
   .section {
-    padding: 44px 18px;
+    padding: ${mobilePaddingByLayout.content};
   }
 
   .image {
-    max-height: 520px;
     aspect-ratio: auto;
+    max-height: 520px;
+  }
+
+  /* Mobile-first repair: explicit spacing + image normalization by section type */
+  .inner[data-layout='hero'] {
+    gap: 20px;
+  }
+
+  .inner[data-layout='content'] {
+    gap: 18px;
+  }
+
+  .inner[data-layout='media-grid'] {
+    gap: 14px;
+  }
+
+  .inner[data-layout='hero'] .image {
+    max-height: 560px;
+  }
+
+  .inner[data-layout='media-grid'] .image {
+    max-height: 420px;
+    object-fit: cover;
   }
 
   .heading {
     font-size: clamp(2.25rem, 12vw, 4rem);
   }
 }
-`
+`;
 }
 
 function createPreviewHtml(ir: ExportIR, css: string) {
-  const body = ir.component.sections.length > 0
-    ? ir.component.sections.map((section, index) => renderPreviewSection(section.nodes, index, ir)).join('\n')
-    : renderPreviewSection(ir.component.nodes, 0, ir)
+  const body =
+    ir.component.sections.length > 0
+      ? ir.component.sections
+          .map((section, index) =>
+            renderPreviewSection(section.nodes, index, ir),
+          )
+          .join("\n")
+      : renderPreviewSection(ir.component.nodes, 0, ir);
 
   return `<!doctype html>
 <html>
@@ -329,7 +429,7 @@ function createPreviewHtml(ir: ExportIR, css: string) {
     <title>${escapeText(ir.componentName)}</title>
     <style>
       ${createGlobalCss()}
-      ${css.replaceAll(/\.(\w+)/g, '.$1')}
+      ${css.replaceAll(/\.(\w+)/g, ".$1")}
     </style>
   </head>
   <body>
@@ -338,15 +438,20 @@ function createPreviewHtml(ir: ExportIR, css: string) {
     </main>
   </body>
 </html>
-`
+`;
 }
 
-function renderPreviewSection(nodes: RuntimeNode[], index: number, ir: ExportIR) {
-  const repaired = repairSectionNodes(nodes)
-  const groups = groupSectionNodes(repaired)
-  const style = sectionStyle(nodes, index, ir)
-  const kind = inferKindFromNodes(nodes, index)
-  const layout = kind === 'hero' ? 'hero' : kind === 'media-grid' ? 'media-grid' : 'content'
+function renderPreviewSection(
+  nodes: RuntimeNode[],
+  index: number,
+  ir: ExportIR,
+) {
+  const repaired = repairSectionNodes(nodes);
+  const groups = groupSectionNodes(repaired);
+  const style = sectionStyle(nodes, index, ir);
+  const kind = inferKindFromNodes(nodes, index);
+  const layout =
+    kind === "hero" ? "hero" : kind === "media-grid" ? "media-grid" : "content";
 
   return `<section class="section" style="${style.inlineCss}">
   <div class="inner" data-layout="${layout}">
@@ -355,96 +460,155 @@ function renderPreviewSection(nodes: RuntimeNode[], index: number, ir: ExportIR)
       ...groups.body.map(renderPreviewNode),
       ...groups.cta.map(renderPreviewNode),
       ...groups.images.map(renderPreviewNode),
-    ].filter(Boolean).join('\n')}
+    ]
+      .filter(Boolean)
+      .join("\n")}
   </div>
-</section>`
+</section>`;
 }
 
 function sectionStyle(nodes: RuntimeNode[], index: number, ir: ExportIR) {
-  const hasHeading = nodes.some((node) => node.tag === 'h1' || node.tag === 'h2')
-  const imageCount = nodes.filter((node) => node.tag === 'img').length
-  const textCount = nodes.filter((node) => node.text && node.tag !== 'img').length
-  const root = nodes[0]
-  const bg = usableColor(root?.styles.backgroundColor) ?? (index % 2 === 0 ? 'transparent' : 'rgba(0, 0, 0, 0.02)')
-  const isHero = index === 0 && hasHeading
+  const hasHeading = nodes.some(
+    (node) => node.tag === "h1" || node.tag === "h2",
+  );
+  const imageCount = nodes.filter((node) => node.tag === "img").length;
+  const textCount = nodes.filter(
+    (node) => node.text && node.tag !== "img",
+  ).length;
+  const root = nodes[0];
+  const bg =
+    usableColor(root?.styles.backgroundColor) ??
+    (index % 2 === 0 ? "transparent" : "rgba(0, 0, 0, 0.02)");
+  const isHero = index === 0 && hasHeading;
   const layout = isHero
-    ? 'hero'
+    ? "hero"
     : imageCount >= 2 && textCount <= 6
-      ? 'media-grid'
-      : 'content'
-  const minHeight = Math.max(420, Math.min(1100, Number(root?.rect.height ?? 520)))
+      ? "media-grid"
+      : "content";
+  const minHeight = Math.max(
+    420,
+    Math.min(1100, Number(root?.rect.height ?? 520)),
+  );
 
   return {
     layout,
     styleObject: `{ background: ${JSON.stringify(bg)}, minHeight: '${minHeight}px' }`,
     inlineCss: `background:${bg};min-height:${minHeight}px`,
-  }
+  };
 }
 
 function repairSectionNodes(nodes: RuntimeNode[]) {
+  // Structural repair pass:
+  // - reorder by source y/x
+  // - preserve natural reading order (top-to-bottom, then left-to-right)
+  // - keep tiny overlays from dominating order (by using a y tolerance)
   return [...nodes].sort((first, second) => {
-    if (Math.abs(first.rect.y - second.rect.y) > 8) {
-      return first.rect.y - second.rect.y
-    }
-
-    return first.rect.x - second.rect.x
-  })
+    const yDelta = first.rect.y - second.rect.y;
+    if (Math.abs(yDelta) > 10) return yDelta;
+    return first.rect.x - second.rect.x;
+  });
 }
 
 function groupSectionNodes(nodes: RuntimeNode[]) {
-  const headings = nodes.filter((node) => node.tag === 'h1' || node.tag === 'h2' || node.tag === 'h3')
-  const cta = nodes.filter((node) => node.tag === 'a' || node.tag === 'button')
-  const images = nodes.filter((node) => node.tag === 'img')
-  const headingAndCtaAndImage = new Set([...headings, ...cta, ...images])
-  const body = nodes.filter((node) => !headingAndCtaAndImage.has(node))
+  const headings = nodes.filter(
+    (node) => node.tag === "h1" || node.tag === "h2" || node.tag === "h3",
+  );
+  const cta = nodes.filter((node) => node.tag === "a" || node.tag === "button");
+  const images = nodes.filter((node) => node.tag === "img");
 
-  return { headings, body, cta, images }
+  const used = new Set([...headings, ...cta, ...images]);
+  const bodyRaw = nodes.filter((node) => !used.has(node));
+
+  // Cluster handling:
+  // - keep heading-group + body + CTA clusters in approximate vertical order
+  // - group image clusters separately so they don't break reading flow
+  const body = clusterByY(bodyRaw).flat();
+  const clusteredImages = clusterByY(images).flat();
+  const clusteredCta = clusterByY(cta).flat();
+  const clusteredHeadings = clusterByY(headings).flat();
+
+  return {
+    headings: clusteredHeadings,
+    body,
+    cta: clusteredCta,
+    images: clusteredImages,
+  };
 }
 
-function inferKindFromNodes(nodes: RuntimeNode[], index: number): 'hero' | 'content' | 'media-grid' {
-  const headings = nodes.filter((node) => node.tag === 'h1' || node.tag === 'h2').length
-  const images = nodes.filter((node) => node.tag === 'img').length
-  const text = nodes.filter((node) => node.text && node.tag !== 'img').length
+function clusterByY(nodes: RuntimeNode[]) {
+  const sorted = [...nodes].sort((a, b) =>
+    a.rect.y === b.rect.y ? a.rect.x - b.rect.x : a.rect.y - b.rect.y,
+  );
+  const clusters: RuntimeNode[][] = [];
+
+  for (const node of sorted) {
+    const last = clusters[clusters.length - 1];
+    if (!last) {
+      clusters.push([node]);
+      continue;
+    }
+
+    const anchor = last[0]!;
+    if (Math.abs(node.rect.y - anchor.rect.y) <= 28) {
+      last.push(node);
+    } else {
+      clusters.push([node]);
+    }
+  }
+
+  // Within each cluster, keep left-to-right.
+  return clusters.map((cluster) => cluster.sort((a, b) => a.rect.x - b.rect.x));
+}
+
+function inferKindFromNodes(
+  nodes: RuntimeNode[],
+  index: number,
+): "hero" | "content" | "media-grid" {
+  const headings = nodes.filter(
+    (node) => node.tag === "h1" || node.tag === "h2",
+  ).length;
+  const images = nodes.filter((node) => node.tag === "img").length;
+  const text = nodes.filter((node) => node.text && node.tag !== "img").length;
 
   if (index === 0 && (headings > 0 || images > 0)) {
-    return 'hero'
+    return "hero";
   }
 
   if (images >= 2 && text <= 6) {
-    return 'media-grid'
+    return "media-grid";
   }
 
-  return 'content'
+  return "content";
 }
 
 function renderPreviewNode(node: RuntimeNode) {
-  if (node.tag === 'img' && node.attributes.src) {
-    return `<img class="image" src="${escapeAttribute(node.attributes.src)}" alt="${escapeAttribute(node.attributes.alt ?? '')}">`
+  if (node.tag === "img" && node.attributes.src) {
+    return `<img class="image" src="${escapeAttribute(node.attributes.src)}" alt="${escapeAttribute(node.attributes.alt ?? "")}">`;
   }
 
-  const text = escapeText(node.text ?? '')
+  const text = escapeText(node.text ?? "");
 
   if (!text) {
-    return ''
+    return "";
   }
 
-  if (node.tag === 'h1') {
-    return `<h1 class="heading">${text}</h1>`
+  if (node.tag === "h1") {
+    return `<h1 class="heading">${text}</h1>`;
   }
 
-  if (node.tag === 'h2' || node.tag === 'h3') {
-    return `<h2 class="subheading">${text}</h2>`
+  if (node.tag === "h2" || node.tag === "h3") {
+    return `<h2 class="subheading">${text}</h2>`;
   }
 
-  if (node.tag === 'a') {
-    return `<a class="link" href="${escapeAttribute(node.attributes.href ?? '#')}">${text}</a>`
+  if (node.tag === "a") {
+    return `<a class="link" href="${escapeAttribute(node.attributes.href ?? "#")}">${text}</a>`;
   }
 
-  if (node.tag === 'button') {
-    return `<button class="button" type="button">${text}</button>`
+  if (node.tag === "button") {
+    return `<button class="button" type="button">${text}</button>`;
   }
 
-  return `<p class="body">${text}</p>`
+  return `<p class="body">${text}</p>`;
 }
 
 function createGlobalCss() {
@@ -465,54 +629,60 @@ body {
 img {
   display: block;
 }
-`
+`;
 }
 
 function createPackageJson(ir: ExportIR) {
   return {
-    name: ir.componentName.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase(),
-    version: '0.1.0',
+    name: ir.componentName.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase(),
+    version: "0.1.0",
     private: true,
     scripts: {
-      dev: 'next dev',
-      build: 'next build',
-      start: 'next start',
+      dev: "next dev",
+      build: "next build",
+      start: "next start",
     },
     dependencies: {
-      next: 'latest',
-      react: 'latest',
-      'react-dom': 'latest',
+      next: "latest",
+      react: "latest",
+      "react-dom": "latest",
     },
     devDependencies: {
-      '@types/node': 'latest',
-      '@types/react': 'latest',
-      '@types/react-dom': 'latest',
-      typescript: 'latest',
+      "@types/node": "latest",
+      "@types/react": "latest",
+      "@types/react-dom": "latest",
+      typescript: "latest",
     },
-  }
+  };
 }
 
 function createTsConfig() {
   return {
     compilerOptions: {
-      target: 'ES2017',
-      lib: ['dom', 'dom.iterable', 'esnext'],
+      target: "ES2017",
+      lib: ["dom", "dom.iterable", "esnext"],
       allowJs: true,
       skipLibCheck: true,
       strict: true,
       noEmit: true,
       esModuleInterop: true,
-      module: 'esnext',
-      moduleResolution: 'bundler',
+      module: "esnext",
+      moduleResolution: "bundler",
       resolveJsonModule: true,
       isolatedModules: true,
-      jsx: 'react-jsx',
+      jsx: "react-jsx",
       incremental: true,
-      plugins: [{ name: 'next' }],
+      plugins: [{ name: "next" }],
     },
-    include: ['next-env.d.ts', '**/*.ts', '**/*.tsx', '.next/types/**/*.ts', '.next/dev/types/**/*.ts'],
-    exclude: ['node_modules'],
-  }
+    include: [
+      "next-env.d.ts",
+      "**/*.ts",
+      "**/*.tsx",
+      ".next/types/**/*.ts",
+      ".next/dev/types/**/*.ts",
+    ],
+    exclude: ["node_modules"],
+  };
 }
 
 function createNextConfig() {
@@ -525,45 +695,50 @@ const nextConfig: NextConfig = {
 }
 
 export default nextConfig
-`
+`;
 }
 
-async function formatTsx(source: string, parser: 'typescript') {
+async function formatTsx(source: string, parser: "typescript") {
   return prettier.format(source, {
     parser,
     singleQuote: true,
     semi: false,
-  })
+  });
 }
 
 function usableColor(value?: string) {
-  if (!value || value === 'rgba(0, 0, 0, 0)' || value === 'transparent') {
-    return undefined
+  if (!value || value === "rgba(0, 0, 0, 0)" || value === "transparent") {
+    return undefined;
   }
 
-  return value
+  return value;
 }
 
 function findBackgroundColor(ir: ExportIR, root?: RuntimeNode) {
-  const rootColor = usableColor(root?.styles.backgroundColor)
+  const rootColor = usableColor(root?.styles.backgroundColor);
 
   if (rootColor) {
-    return rootColor
+    return rootColor;
   }
 
-  return ir.runtimeCapture.nodes
-    .map((node) => usableColor(node.styles.backgroundColor))
-    .find(Boolean) ?? '#ffffff'
+  return (
+    ir.runtimeCapture.nodes
+      .map((node) => usableColor(node.styles.backgroundColor))
+      .find(Boolean) ?? "#ffffff"
+  );
 }
 
 function escapeText(value: string) {
-  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
 }
 
 function escapeAttribute(value: string) {
-  return escapeText(value).replaceAll('"', '&quot;')
+  return escapeText(value).replaceAll('"', "&quot;");
 }
 
 function escapeJs(value: string) {
-  return value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")
+  return value.replaceAll("\\", "\\\\").replaceAll("'", "\\'");
 }

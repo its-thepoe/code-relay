@@ -11,5 +11,9 @@
     "outDir": "dist",
     "types": ["node"]
   },
-  "include": ["apps/**/*.ts", "packages/**/*.ts"]
+  "include": [
+    "apps/exporter-cli/**/*.ts",
+    "apps/worker/**/*.ts",
+    "packages/**/*.ts"
+  ]
 }

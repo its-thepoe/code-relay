@@ -1,4 +1,4 @@
- # Implementation Plan: Framer-to-Code Handoff Tool
+# Implementation Plan: Framer-to-Code Handoff Tool
 
 ## 1. Implementation Strategy
 
@@ -56,8 +56,8 @@ npm create framer-plugin@latest
 Required plugin setup:
 
 ```ts
-import { framer, FramerPluginClosedError } from 'framer-plugin'
-import 'framer-plugin/framer.css'
+import { framer, FramerPluginClosedError } from "framer-plugin";
+import "framer-plugin/framer.css";
 ```
 
 `framer.json` should start in canvas mode:
@@ -225,27 +225,35 @@ coderelay/
 ### Package Responsibilities
 
 #### `apps/web`
+
 Dashboard and lightweight API routes.
 
 #### `apps/plugin`
+
 Framer plugin UI and project/selection capture.
 
 #### `apps/worker`
+
 Background worker service.
 
 #### `packages/exporter-core`
+
 Shared export orchestration logic.
 
 #### `packages/codegen`
+
 React/CSS code generation.
 
 #### `packages/fidelity`
+
 Screenshot comparison and report generation.
 
 #### `packages/matcher`
+
 Matching between Framer plugin canvas nodes and rendered DOM nodes.
 
 #### `packages/shared`
+
 Shared types, constants, job status enums.
 
 ---
@@ -546,18 +554,21 @@ running for > JOB_TIMEOUT_SECONDS
 
 ```ts
 async function processJob(job: ExportJob) {
-  const workdir = await createTempJobDir(job.id)
+  const workdir = await createTempJobDir(job.id);
 
   try {
-    const original = await captureOriginal(job, workdir)
-    const runtime = await extractRuntimeRenderData(original.page)
-    const matches = await matchPluginNodesToDom(job.plugin_capture, runtime.nodes)
+    const original = await captureOriginal(job, workdir);
+    const runtime = await extractRuntimeRenderData(original.page);
+    const matches = await matchPluginNodesToDom(
+      job.plugin_capture,
+      runtime.nodes,
+    );
     const ir = await buildIntermediateRepresentation({
       pluginCapture: job.plugin_capture,
       runtime,
       matches,
       legacyPayload: job.framer_payload,
-    })
+    });
     const attempts = await runExportAttempts({
       job,
       ir,
@@ -565,14 +576,26 @@ async function processJob(job: ExportJob) {
       workdir,
       targetFidelity: job.target_fidelity_score ?? 0.95,
       maxAttempts: job.max_auto_attempts ?? 2,
-    })
+    });
 
-    const best = selectBestAttempt(attempts)
-    const report = await createReport(job, ir, best.fidelity, attempts, matches)
-    const zipPath = await packageExport(best.projectDir, report)
+    const best = selectBestAttempt(attempts);
+    const report = await createReport(
+      job,
+      ir,
+      best.fidelity,
+      attempts,
+      matches,
+    );
+    const zipPath = await packageExport(best.projectDir, report);
 
-    const zipKey = await uploadToR2(zipPath, `jobs/${job.id}/exports/output.zip`)
-    const reportKey = await uploadJsonToR2(report, `jobs/${job.id}/reports/report.json`)
+    const zipKey = await uploadToR2(
+      zipPath,
+      `jobs/${job.id}/exports/output.zip`,
+    );
+    const reportKey = await uploadJsonToR2(
+      report,
+      `jobs/${job.id}/reports/report.json`,
+    );
 
     await markJobCompleted(job.id, {
       bestAttemptId: best.id,
@@ -581,11 +604,11 @@ async function processJob(job: ExportJob) {
       fidelityScore: best.fidelity.overall,
       warningCount: report.warnings.length,
       expiresAt: calculateExpiry(job.userPlan),
-    })
+    });
   } catch (error) {
-    await markJobFailed(job.id, humaniseError(error))
+    await markJobFailed(job.id, humaniseError(error));
   } finally {
-    await deleteDirectory(workdir)
+    await deleteDirectory(workdir);
   }
 }
 ```
@@ -595,42 +618,49 @@ async function processJob(job: ExportJob) {
 ```ts
 async function runExportAttempts(input: ExportAttemptInput) {
   const strategies = [
-    'semantic-layout',
-    'spacing-typography-correction',
-    'visual-fallback-layer',
-  ]
+    "semantic-layout",
+    "spacing-typography-correction",
+    "visual-fallback-layer",
+  ];
 
-  const attempts: ExportAttemptResult[] = []
+  const attempts: ExportAttemptResult[] = [];
 
   for (let index = 0; index < input.maxAttempts; index++) {
     const attempt = await createAttempt(input.job.id, {
       attemptNumber: index + 1,
-      strategy: strategies[index] ?? 'semantic-layout',
-    })
+      strategy: strategies[index] ?? "semantic-layout",
+    });
 
     const generated = await generateReactProject(input.ir, input.workdir, {
       strategy: attempt.strategy,
-      outputTarget: input.job.output_target ?? 'portable-react',
-    })
+      outputTarget: input.job.output_target ?? "portable-react",
+    });
 
-    const preview = await renderGeneratedProject(generated, input.workdir)
+    const preview = await renderGeneratedProject(generated, input.workdir);
     const fidelity = await compareScreenshotsByCategory(
       input.original.screenshots,
       preview.screenshots,
-      input.ir
-    )
-    const warnings = await collectAttemptWarnings(input.ir, generated, fidelity)
+      input.ir,
+    );
+    const warnings = await collectAttemptWarnings(
+      input.ir,
+      generated,
+      fidelity,
+    );
 
-    await markAttemptCompleted(attempt.id, { fidelity, warnings })
+    await markAttemptCompleted(attempt.id, { fidelity, warnings });
 
-    attempts.push({ ...attempt, generated, fidelity, warnings })
+    attempts.push({ ...attempt, generated, fidelity, warnings });
 
-    if (fidelity.overall >= input.targetFidelity && !hasFixableWarnings(warnings)) {
-      break
+    if (
+      fidelity.overall >= input.targetFidelity &&
+      !hasFixableWarnings(warnings)
+    ) {
+      break;
     }
   }
 
-  return attempts
+  return attempts;
 }
 ```
 
@@ -673,19 +703,22 @@ Add tablet later.
 ### Original Capture
 
 ```ts
-const browser = await chromium.launch({ headless: true })
-const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
-await page.goto(sourceUrl, { waitUntil: 'networkidle', timeout: 60000 })
-await page.screenshot({ path: `${workdir}/original-desktop.png`, fullPage: true })
+const browser = await chromium.launch({ headless: true });
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await page.goto(sourceUrl, { waitUntil: "networkidle", timeout: 60000 });
+await page.screenshot({
+  path: `${workdir}/original-desktop.png`,
+  fullPage: true,
+});
 ```
 
 ### DOM Extraction
 
 ```ts
 const nodes = await page.evaluate(() => {
-  return Array.from(document.querySelectorAll('*')).map((el) => {
-    const rect = el.getBoundingClientRect()
-    const styles = window.getComputedStyle(el)
+  return Array.from(document.querySelectorAll("*")).map((el) => {
+    const rect = el.getBoundingClientRect();
+    const styles = window.getComputedStyle(el);
 
     return {
       tag: el.tagName.toLowerCase(),
@@ -710,9 +743,9 @@ const nodes = await page.evaluate(() => {
         transform: styles.transform,
         opacity: styles.opacity,
       },
-    }
-  })
-})
+    };
+  });
+});
 ```
 
 ### Selection-Specific Capture
@@ -720,44 +753,46 @@ const nodes = await page.evaluate(() => {
 For MVP, there are two options:
 
 #### Option A: Plugin provides selected node context
+
 Use the plugin selection data as the preferred source of design intent.
 
 The plugin runs in `canvas` mode and should use:
 
 ```ts
-import { framer } from 'framer-plugin'
+import { framer } from "framer-plugin";
 
-const selection = await framer.getSelection()
+const selection = await framer.getSelection();
 const unsubscribe = framer.subscribeToSelection((nodes) => {
   // Update exportability and preview metadata in the plugin UI.
-})
+});
 ```
 
 Capture only lightweight metadata in the export payload:
 
 ```ts
 type PluginCanvasCapture = {
-  mode: 'canvas'
+  mode: "canvas";
   selectedNodes: Array<{
-    id?: string
-    name?: string
-    type?: string
-    text?: string
+    id?: string;
+    name?: string;
+    type?: string;
+    text?: string;
     bounds?: {
-      x: number
-      y: number
-      width: number
-      height: number
-    }
-    metadata?: Record<string, unknown>
-  }>
-  capturedAt: string
-}
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+    metadata?: Record<string, unknown>;
+  }>;
+  capturedAt: string;
+};
 ```
 
 Do not store large selection payloads in Framer `pluginData`. Use `localStorage` only for per-user session references/preferences, and send export payloads directly to the web API.
 
 #### Option B: User provides/publishes a test page and selected section is matched
+
 The worker identifies the selected section in rendered DOM by text, position, or plugin-provided metadata.
 
 Option B is fallback only. It may be less precise, but it keeps MVP-A possible before full plugin metadata is available.
@@ -781,11 +816,13 @@ Example:
 
 ```ts
 type NodeMatch = {
-  framerNodeId?: string
-  domPath?: string
-  confidence: number
-  matchReasons: Array<'text' | 'bounds' | 'asset' | 'hierarchy' | 'style' | 'type'>
-}
+  framerNodeId?: string;
+  domPath?: string;
+  confidence: number;
+  matchReasons: Array<
+    "text" | "bounds" | "asset" | "hierarchy" | "style" | "type"
+  >;
+};
 ```
 
 Low-confidence matches should create warnings instead of silently producing overconfident code.
@@ -800,29 +837,36 @@ Do not generate React directly from raw DOM. Build a neutral representation firs
 
 ```ts
 export type ExportIR = {
-  jobId: string
-  exportType: 'component' | 'page' | 'site'
+  jobId: string;
+  exportType: "component" | "page" | "site";
   source: {
-    url?: string
-    projectName?: string
-  }
-  pluginCapture?: PluginCanvasCapture
-  runtimeCapture: RuntimeCaptureIR
-  nodeMatches: NodeMatch[]
-  tokens: DesignTokensIR
-  assets: AssetIR[]
-  component: ComponentIR
-  warnings: ExportWarning[]
-}
+    url?: string;
+    projectName?: string;
+  };
+  pluginCapture?: PluginCanvasCapture;
+  runtimeCapture: RuntimeCaptureIR;
+  nodeMatches: NodeMatch[];
+  tokens: DesignTokensIR;
+  assets: AssetIR[];
+  component: ComponentIR;
+  warnings: ExportWarning[];
+};
 
 export type ComponentIR = {
-  id: string
-  name: string
-  semanticType: 'hero' | 'feature' | 'cta' | 'footer' | 'navbar' | 'section' | 'unknown'
-  layout: LayoutIR
-  children: NodeIR[]
-  motion?: MotionIR[]
-}
+  id: string;
+  name: string;
+  semanticType:
+    | "hero"
+    | "feature"
+    | "cta"
+    | "footer"
+    | "navbar"
+    | "section"
+    | "unknown";
+  layout: LayoutIR;
+  children: NodeIR[];
+  motion?: MotionIR[];
+};
 ```
 
 ### Why IR Matters
@@ -897,7 +941,7 @@ React + TypeScript + CSS Modules
 ### Example Component
 
 ```tsx
-import styles from './ExportedSection.module.css'
+import styles from "./ExportedSection.module.css";
 
 export function ExportedSection() {
   return (
@@ -905,13 +949,15 @@ export function ExportedSection() {
       <div className={styles.content}>
         <h1 className={styles.heading}>Your heading</h1>
         <p className={styles.body}>Your body text</p>
-        <a className={styles.button} href="#">Get started</a>
+        <a className={styles.button} href="#">
+          Get started
+        </a>
       </div>
       <div className={styles.visual}>
         <img src="/assets/image-1.png" alt="" />
       </div>
     </section>
-  )
+  );
 }
 ```
 
@@ -1045,8 +1091,8 @@ await s3.putObject({
   Bucket: process.env.R2_BUCKET_NAME,
   Key: `jobs/${job.id}/exports/output.zip`,
   Body: fs.createReadStream(zipPath),
-  ContentType: 'application/zip',
-})
+  ContentType: "application/zip",
+});
 ```
 
 ### Signed Download URL
@@ -1057,9 +1103,9 @@ Generate signed URLs from web app API.
 const command = new GetObjectCommand({
   Bucket: bucket,
   Key: zipKey,
-})
+});
 
-const url = await getSignedUrl(s3, command, { expiresIn: 60 * 10 })
+const url = await getSignedUrl(s3, command, { expiresIn: 60 * 10 });
 ```
 
 ### Lifecycle Rules
@@ -1136,40 +1182,40 @@ Button: Export to React
 
 ```ts
 type PluginExportPayload = {
-  source: 'framer-plugin'
+  source: "framer-plugin";
   project: {
-    name?: string
-    id?: string
-    publishedUrl?: string
-  }
+    name?: string;
+    id?: string;
+    publishedUrl?: string;
+  };
   selection: {
-    nodeIds: string[]
-    label?: string
-    type?: 'component' | 'section' | 'unknown'
+    nodeIds: string[];
+    label?: string;
+    type?: "component" | "section" | "unknown";
     nodes?: Array<{
-      id?: string
-      name?: string
-      type?: string
-      text?: string
+      id?: string;
+      name?: string;
+      type?: string;
+      text?: string;
       bounds?: {
-        x: number
-        y: number
-        width: number
-        height: number
-      }
-      metadata?: Record<string, unknown>
-    }>
-  }
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+      };
+      metadata?: Record<string, unknown>;
+    }>;
+  };
   settings: {
-    exportType: 'component'
-    styleMode: 'css-modules'
-    assetMode: 'linked' | 'portable'
-    outputTarget: 'portable-react'
-    targetFidelityScore?: number
-    maxAutoAttempts?: number
-  }
-  metadata?: Record<string, unknown>
-}
+    exportType: "component";
+    styleMode: "css-modules";
+    assetMode: "linked" | "portable";
+    outputTarget: "portable-react";
+    targetFidelityScore?: number;
+    maxAutoAttempts?: number;
+  };
+  metadata?: Record<string, unknown>;
+};
 ```
 
 ### Authentication
@@ -1330,9 +1376,11 @@ Are warnings accurate?
 ## Phase 0: MVP-A Local Export Engine
 
 ### Duration
+
 1–2 weeks
 
 ### Goal
+
 Prove that a Framer-rendered section/page can be captured, represented, generated, rerun, and visually compared before building SaaS infrastructure.
 
 ### Tasks
@@ -1352,6 +1400,7 @@ Prove that a Framer-rendered section/page can be captured, represented, generate
 13. Record fidelity scores, attempt strategies, node-match confidence, and failure types.
 
 ### Deliverable
+
 CLI prototype:
 
 ```bash
@@ -1372,9 +1421,11 @@ pnpm export:test --url https://example.framer.website
 ## Phase 1: MVP-B Core Worker and Supabase Job System
 
 ### Duration
+
 1–2 weeks
 
 ### Goal
+
 Turn the local prototype into a backend job pipeline.
 
 ### Tasks
@@ -1411,9 +1462,11 @@ Turn the local prototype into a backend job pipeline.
 ## Phase 1.5: MVP-C Fidelity Hardening
 
 ### Duration
+
 1–2 weeks
 
 ### Goal
+
 Improve export quality before private alpha by making reruns respond to actual mismatch categories.
 
 ### Tasks
@@ -1439,9 +1492,11 @@ Improve export quality before private alpha by making reruns respond to actual m
 ## Phase 2: Web Dashboard
 
 ### Duration
+
 1 week
 
 ### Goal
+
 Let users see jobs and download exports.
 
 ### Tasks
@@ -1467,9 +1522,11 @@ Let users see jobs and download exports.
 ## Phase 3: Framer Plugin MVP
 
 ### Duration
+
 1–2 weeks
 
 ### Goal
+
 Let users start exports from inside Framer.
 
 ### Tasks
@@ -1504,9 +1561,11 @@ Let users start exports from inside Framer.
 ## Phase 4: Private Alpha
 
 ### Duration
+
 2–4 weeks
 
 ### Goal
+
 Test the product with real Framer users.
 
 ### Tasks
@@ -1534,9 +1593,11 @@ Test the product with real Framer users.
 ## Phase 5: Page Export Beta
 
 ### Duration
+
 3–6 weeks
 
 ### Goal
+
 Export complete one-page landing pages.
 
 ### Tasks
@@ -1562,9 +1623,11 @@ Export complete one-page landing pages.
 ## Phase 6: Monetisation
 
 ### Duration
+
 1–2 weeks
 
 ### Goal
+
 Add payment and usage control.
 
 ### Tasks
@@ -1578,6 +1641,7 @@ Add payment and usage control.
 7. Add upgrade prompts.
 
 ### Recommended First Model
+
 Start with credits.
 
 ```text
@@ -1711,6 +1775,7 @@ Pro/Agency: subscription later
 ## Sprint 1: Feasibility
 
 ### Outcome
+
 Local prototype works on sample Framer pages.
 
 ### Tasks
@@ -1731,6 +1796,7 @@ Local prototype works on sample Framer pages.
 ## Sprint 2: Backend Pipeline
 
 ### Outcome
+
 Jobs can be created, processed, and stored.
 
 ### Tasks
@@ -1749,6 +1815,7 @@ Jobs can be created, processed, and stored.
 ## Sprint 3: Dashboard
 
 ### Outcome
+
 Users can see and download exports.
 
 ### Tasks
@@ -1764,6 +1831,7 @@ Users can see and download exports.
 ## Sprint 4: Plugin
 
 ### Outcome
+
 Exports can start from Framer.
 
 ### Tasks
@@ -1781,6 +1849,7 @@ Exports can start from Framer.
 ## Sprint 4.5: Fidelity Hardening
 
 ### Outcome
+
 Exports improve through categorized reruns before private alpha.
 
 ### Tasks
@@ -1798,6 +1867,7 @@ Exports improve through categorized reruns before private alpha.
 ## Sprint 5: Alpha Hardening
 
 ### Outcome
+
 Private testers can use it.
 
 ### Tasks
@@ -1813,18 +1883,18 @@ Private testers can use it.
 
 ## 23. Engineering Milestones
 
-| Milestone | Description | Output |
-|---|---|---|
-| M0 | Local crawler/codegen spike | CLI prototype |
-| M1 | Hybrid capture engine | Runtime capture + simulated plugin capture + node matching |
-| M2 | Job system | Supabase + worker + export attempts |
-| M3 | Storage pipeline | R2 upload/download/delete |
-| M4 | Dashboard | Auth + job detail + download + rerun |
-| M5 | Plugin MVP | Start exports from Framer with canvas selection capture |
-| M6 | Fidelity hardening | Categorized reports + diff-driven reruns |
-| M7 | Private alpha | 20–50 testers |
-| M8 | Page export beta | One-page exports |
-| M9 | Paid beta | Credits/subscriptions |
+| Milestone | Description                 | Output                                                     |
+| --------- | --------------------------- | ---------------------------------------------------------- |
+| M0        | Local crawler/codegen spike | CLI prototype                                              |
+| M1        | Hybrid capture engine       | Runtime capture + simulated plugin capture + node matching |
+| M2        | Job system                  | Supabase + worker + export attempts                        |
+| M3        | Storage pipeline            | R2 upload/download/delete                                  |
+| M4        | Dashboard                   | Auth + job detail + download + rerun                       |
+| M5        | Plugin MVP                  | Start exports from Framer with canvas selection capture    |
+| M6        | Fidelity hardening          | Categorized reports + diff-driven reruns                   |
+| M7        | Private alpha               | 20–50 testers                                              |
+| M8        | Page export beta            | One-page exports                                           |
+| M9        | Paid beta                   | Credits/subscriptions                                      |
 
 ---
 

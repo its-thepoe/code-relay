@@ -1,47 +1,67 @@
-import { mkdirp } from 'fs-extra'
-import { chromium, type Browser, type ElementHandle, type Page } from 'playwright'
-import path from 'node:path'
-import { PNG } from 'pngjs'
-import fs from 'node:fs/promises'
-import type { PluginCanvasCapture, Rect, RuntimeCapture, RuntimeNode, ViewportName } from '../../shared/src/types.js'
+import { mkdirp } from "fs-extra";
+import {
+  chromium,
+  type Browser,
+  type ElementHandle,
+  type Page,
+} from "playwright";
+import path from "node:path";
+import { PNG } from "pngjs";
+import fs from "node:fs/promises";
+import type {
+  PluginCanvasCapture,
+  Rect,
+  RuntimeCapture,
+  RuntimeNode,
+  ViewportName,
+} from "../../shared/src/types.js";
 
 type CaptureInput = {
-  url: string
-  workDir: string
-  selector?: string
-}
+  url: string;
+  workDir: string;
+  selector?: string;
+};
 
 const viewports: Record<ViewportName, { width: number; height: number }> = {
   desktop: { width: 1440, height: 900 },
   mobile: { width: 390, height: 844 },
-}
+};
 
-export async function captureRuntime(input: CaptureInput): Promise<RuntimeCapture> {
-  const captureDir = path.join(input.workDir, 'original')
-  await mkdirp(captureDir)
+export async function captureRuntime(
+  input: CaptureInput,
+): Promise<RuntimeCapture> {
+  const captureDir = path.join(input.workDir, "original");
+  await mkdirp(captureDir);
 
-  const browser = await chromium.launch({ headless: true })
+  const browser = await chromium.launch({ headless: true });
 
   try {
-    const desktop = await captureViewport(browser, input, 'desktop', captureDir)
-    const mobile = await captureViewport(browser, input, 'mobile', captureDir)
+    const desktop = await captureViewport(
+      browser,
+      input,
+      "desktop",
+      captureDir,
+    );
+    const mobile = await captureViewport(browser, input, "mobile", captureDir);
 
     return {
       url: input.url,
       title: desktop.title,
-      mode: input.selector ? 'section' : 'page',
+      mode: input.selector ? "section" : "page",
       viewports: {
         desktop: desktop.viewport,
         mobile: mobile.viewport,
       },
       nodes: desktop.nodes,
-    }
+    };
   } finally {
-    await browser.close()
+    await browser.close();
   }
 }
 
-export function createSimulatedPluginCapture(nodes: RuntimeNode[]): PluginCanvasCapture {
+export function createSimulatedPluginCapture(
+  nodes: RuntimeNode[],
+): PluginCanvasCapture {
   const selectedNodes = nodes
     .filter((node) => node.rect.width > 0 && node.rect.height > 0)
     .slice(0, 80)
@@ -53,55 +73,56 @@ export function createSimulatedPluginCapture(nodes: RuntimeNode[]): PluginCanvas
       bounds: node.rect,
       metadata: {
         domPath: node.domPath,
+        sectionName: node.sectionName,
         src: node.attributes.src,
         href: node.attributes.href,
       },
-    }))
+    }));
 
   return {
-    mode: 'simulated',
+    mode: "simulated",
     selectedNodes,
     capturedAt: new Date().toISOString(),
-  }
+  };
 }
 
 async function captureViewport(
   browser: Browser,
   input: CaptureInput,
   viewportName: ViewportName,
-  captureDir: string
+  captureDir: string,
 ) {
-  const viewport = viewports[viewportName]
-  const page = await browser.newPage({ viewport })
+  const viewport = viewports[viewportName];
+  const page = await browser.newPage({ viewport });
 
-  await page.goto(input.url, { waitUntil: 'networkidle', timeout: 60_000 })
-  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto(input.url, { waitUntil: "networkidle", timeout: 60_000 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
 
-  const screenshotPath = path.join(captureDir, `${viewportName}.png`)
+  const screenshotPath = path.join(captureDir, `${viewportName}.png`);
 
   if (input.selector) {
-    const rootHandle = await resolveRootHandle(page, input.selector)
-    const clip = await getClip(rootHandle, viewport)
+    const rootHandle = await resolveRootHandle(page, input.selector);
+    const clip = await getClip(rootHandle, viewport);
 
     await page.screenshot({
       path: screenshotPath,
       clip,
-      animations: 'disabled',
-    })
+      animations: "disabled",
+    });
 
-    await rootHandle.dispose()
+    await rootHandle.dispose();
   } else {
     await page.screenshot({
       path: screenshotPath,
       fullPage: true,
-      animations: 'disabled',
-    })
+      animations: "disabled",
+    });
   }
 
-  const nodes = await extractNodes(page, input.selector)
-  const title = await page.title()
-  const imageSize = await getPngSize(screenshotPath)
-  await page.close()
+  const nodes = await extractNodes(page, input.selector);
+  const title = await page.title();
+  const imageSize = await getPngSize(screenshotPath);
+  await page.close();
 
   return {
     title,
@@ -111,18 +132,18 @@ async function captureViewport(
       width: imageSize.width,
       height: imageSize.height,
     },
-  }
+  };
 }
 
 async function resolveRootHandle(page: Page, selector?: string) {
   if (selector) {
-    const selected = await page.$(selector)
+    const selected = await page.$(selector);
 
     if (!selected) {
-      throw new Error(`No element found for selector: ${selector}`)
+      throw new Error(`No element found for selector: ${selector}`);
     }
 
-    return selected
+    return selected;
   }
 
   const handle = await page.evaluateHandle(`() => {
@@ -138,13 +159,16 @@ async function resolveRootHandle(page: Page, selector?: string) {
       })
 
     return candidates[0] ?? document.body
-  }`)
+  }`);
 
-  return handle.asElement() ?? (await page.$('body'))!
+  return handle.asElement() ?? (await page.$("body"))!;
 }
 
-async function getClip(rootHandle: ElementHandle<Element>, viewport: { width: number; height: number }) {
-  const box = await rootHandle.boundingBox()
+async function getClip(
+  rootHandle: ElementHandle<Element>,
+  viewport: { width: number; height: number },
+) {
+  const box = await rootHandle.boundingBox();
 
   if (!box) {
     return {
@@ -152,7 +176,7 @@ async function getClip(rootHandle: ElementHandle<Element>, viewport: { width: nu
       y: 0,
       width: viewport.width,
       height: viewport.height,
-    }
+    };
   }
 
   return {
@@ -160,11 +184,14 @@ async function getClip(rootHandle: ElementHandle<Element>, viewport: { width: nu
     y: Math.max(0, box.y),
     width: Math.min(viewport.width, Math.max(1, box.width)),
     height: Math.min(2400, Math.max(1, box.height)),
-  }
+  };
 }
 
-async function extractNodes(page: Page, selector?: string): Promise<RuntimeNode[]> {
-  const rootSelector = JSON.stringify(selector ?? null)
+async function extractNodes(
+  page: Page,
+  selector?: string,
+): Promise<RuntimeNode[]> {
+  const rootSelector = JSON.stringify(selector ?? null);
 
   return page.evaluate(`(() => {
     const rootSelector = ${rootSelector}
@@ -255,14 +282,14 @@ async function extractNodes(page: Page, selector?: string): Promise<RuntimeNode[
         }
       })
       .filter((node) => node.rect.width > 0 && node.rect.height > 0)
-  })()`)
+  })()`);
 }
 
 async function getPngSize(filePath: string) {
-  const png = PNG.sync.read(await fs.readFile(filePath))
+  const png = PNG.sync.read(await fs.readFile(filePath));
 
   return {
     width: png.width,
     height: png.height,
-  }
+  };
 }
