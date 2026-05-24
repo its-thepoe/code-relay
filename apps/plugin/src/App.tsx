@@ -16,6 +16,12 @@ type PluginCapture = {
   mode: "framer-plugin";
   selectedNodes: SelectionNode[];
   capturedAt: string;
+  exportProps?: {
+    heroTitle?: string;
+    heroSubtitle?: string;
+    ctaLabel?: string;
+    ctaHref?: string;
+  };
 };
 
 function useSelection() {
@@ -42,6 +48,10 @@ export function App() {
   const [apiBaseUrl, setApiBaseUrl] = useState("http://localhost:3000");
   const [busy, setBusy] = useState(false);
   const selection = useSelection();
+  const [heroTitleProp, setHeroTitleProp] = useState("title");
+  const [heroSubtitleProp, setHeroSubtitleProp] = useState("subtitle");
+  const [ctaLabelProp, setCtaLabelProp] = useState("ctaLabel");
+  const [ctaHrefProp, setCtaHrefProp] = useState("ctaHref");
 
   const simplified = useMemo(() => simplifySelection(selection), [selection]);
   const selectionLabel =
@@ -74,6 +84,12 @@ export function App() {
       mode: "framer-plugin",
       selectedNodes: simplified,
       capturedAt: new Date().toISOString(),
+      exportProps: {
+        heroTitle: heroTitleProp.trim() || undefined,
+        heroSubtitle: heroSubtitleProp.trim() || undefined,
+        ctaLabel: ctaLabelProp.trim() || undefined,
+        ctaHref: ctaHrefProp.trim() || undefined,
+      },
     };
 
     setBusy(true);
@@ -159,6 +175,79 @@ export function App() {
       <div style={{ fontSize: 12, opacity: 0.8 }}>
         Selection: <strong>{selectionLabel}</strong>
       </div>
+
+      <details>
+        <summary style={{ cursor: "pointer" }}>Props</summary>
+        <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+          <label style={{ display: "grid", gap: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.8 }}>
+              Hero title prop
+            </div>
+            <input
+              value={heroTitleProp}
+              onChange={(event) => setHeroTitleProp(event.target.value)}
+              style={{
+                height: 34,
+                padding: "0 10px",
+                borderRadius: 8,
+                border: "1px solid rgba(0,0,0,0.15)",
+                outline: "none",
+              }}
+            />
+          </label>
+
+          <label style={{ display: "grid", gap: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.8 }}>
+              Hero subtitle prop
+            </div>
+            <input
+              value={heroSubtitleProp}
+              onChange={(event) => setHeroSubtitleProp(event.target.value)}
+              style={{
+                height: 34,
+                padding: "0 10px",
+                borderRadius: 8,
+                border: "1px solid rgba(0,0,0,0.15)",
+                outline: "none",
+              }}
+            />
+          </label>
+
+          <label style={{ display: "grid", gap: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.8 }}>
+              CTA label prop
+            </div>
+            <input
+              value={ctaLabelProp}
+              onChange={(event) => setCtaLabelProp(event.target.value)}
+              style={{
+                height: 34,
+                padding: "0 10px",
+                borderRadius: 8,
+                border: "1px solid rgba(0,0,0,0.15)",
+                outline: "none",
+              }}
+            />
+          </label>
+
+          <label style={{ display: "grid", gap: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.8 }}>
+              CTA href prop
+            </div>
+            <input
+              value={ctaHrefProp}
+              onChange={(event) => setCtaHrefProp(event.target.value)}
+              style={{
+                height: 34,
+                padding: "0 10px",
+                borderRadius: 8,
+                border: "1px solid rgba(0,0,0,0.15)",
+                outline: "none",
+              }}
+            />
+          </label>
+        </div>
+      </details>
 
       {/* Guideline #7: prefer div role=button over <button> to avoid Framer CSS overrides */}
       <div

@@ -70,12 +70,24 @@ export async function generateNextProject(
 }
 
 function createDts(ir: ExportIR) {
-  return `import type * as React from "react"
+  const lines: string[] = [];
+  lines.push(`import type * as React from "react"`);
+  lines.push("");
+  lines.push(`export type ${ir.componentName}Props = {`);
 
-export type ${ir.componentName}Props = Record<string, never>
+  const props = ir.exportProps;
+  if (props?.heroTitle) lines.push(`  ${props.heroTitle}?: string`);
+  if (props?.heroSubtitle) lines.push(`  ${props.heroSubtitle}?: string`);
+  if (props?.ctaLabel) lines.push(`  ${props.ctaLabel}?: string`);
+  if (props?.ctaHref) lines.push(`  ${props.ctaHref}?: string`);
 
-export declare function ${ir.componentName}(props: ${ir.componentName}Props): React.JSX.Element
-`;
+  lines.push(`}`);
+  lines.push("");
+  lines.push(
+    `export declare function ${ir.componentName}(props: ${ir.componentName}Props): React.JSX.Element`,
+  );
+  lines.push("");
+  return `${lines.join("\n")}\n`;
 }
 
 function createComponent(ir: ExportIR) {
@@ -132,7 +144,11 @@ function SectionMediaGrid({ children, style }: { children: React.ReactNode; styl
   )
 }
 
-export function ${ir.componentName}() {
+export type ${ir.componentName}Props = {
+  ${formatPropTypeLines(ir)}
+}
+
+export function ${ir.componentName}(props: ${ir.componentName}Props) {
   return (
     <main className={styles.page} data-coderelay-source="${escapeAttribute(ir.sourceUrl)}">
       ${sections}
@@ -200,6 +216,98 @@ function renderNode(node: RuntimeNode) {
   return `<p className={styles.body}>${text}</p>`;
 }
 
+type RenderContext = {
+  titleUsed: boolean;
+  subtitleUsed: boolean;
+  ctaLabelUsed: boolean;
+  ctaHrefUsed: boolean;
+};
+
+function createRenderContext(): RenderContext {
+  return {
+    titleUsed: false,
+    subtitleUsed: false,
+    ctaLabelUsed: false,
+    ctaHrefUsed: false,
+  };
+}
+
+function renderNodeWithProps(
+  node: RuntimeNode,
+  ir: ExportIR,
+  ctx: RenderContext,
+) {
+  if (node.tag === "img" && node.attributes.src) {
+    return `<img className={styles.image} src="${escapeAttribute(node.attributes.src)}" alt="${escapeAttribute(node.attributes.alt ?? "")}" />`;
+  }
+
+  const text = escapeText(node.text ?? "");
+  if (!text) return "";
+
+  const props = ir.exportProps;
+  const titleKey = props?.heroTitle;
+  const subtitleKey = props?.heroSubtitle;
+  const ctaLabelKey = props?.ctaLabel;
+  const ctaHrefKey = props?.ctaHref;
+
+  if (node.tag === "h1") {
+    const content =
+      titleKey && !ctx.titleUsed
+        ? `{props.${titleKey} ?? ${JSON.stringify(text)}}`
+        : text;
+    if (titleKey && !ctx.titleUsed) ctx.titleUsed = true;
+    return `<h1 className={styles.heading}>${content}</h1>`;
+  }
+
+  if (node.tag === "h2" || node.tag === "h3") {
+    const content =
+      subtitleKey && !ctx.subtitleUsed
+        ? `{props.${subtitleKey} ?? ${JSON.stringify(text)}}`
+        : text;
+    if (subtitleKey && !ctx.subtitleUsed) ctx.subtitleUsed = true;
+    return `<h2 className={styles.subheading}>${content}</h2>`;
+  }
+
+  if (node.tag === "a") {
+    const label =
+      ctaLabelKey && !ctx.ctaLabelUsed
+        ? `{props.${ctaLabelKey} ?? ${JSON.stringify(text)}}`
+        : text;
+    if (ctaLabelKey && !ctx.ctaLabelUsed) ctx.ctaLabelUsed = true;
+
+    const href = node.attributes.href ?? "#";
+    const hrefExpr =
+      ctaHrefKey && !ctx.ctaHrefUsed
+        ? `{props.${ctaHrefKey} ?? ${JSON.stringify(href)}}`
+        : `"${escapeAttribute(href)}"`;
+    if (ctaHrefKey && !ctx.ctaHrefUsed) ctx.ctaHrefUsed = true;
+
+    return `<a className={styles.link} href=${hrefExpr}>${label}</a>`;
+  }
+
+  if (node.tag === "button") {
+    const label =
+      ctaLabelKey && !ctx.ctaLabelUsed
+        ? `{props.${ctaLabelKey} ?? ${JSON.stringify(text)}}`
+        : text;
+    if (ctaLabelKey && !ctx.ctaLabelUsed) ctx.ctaLabelUsed = true;
+    return `<button className={styles.button} type="button">${label}</button>`;
+  }
+
+  return `<p className={styles.body}>${text}</p>`;
+}
+
+function formatPropTypeLines(ir: ExportIR) {
+  const props = ir.exportProps;
+  const lines: string[] = [];
+  if (props?.heroTitle) lines.push(`${props.heroTitle}?: string`);
+  if (props?.heroSubtitle) lines.push(`${props.heroSubtitle}?: string`);
+  if (props?.ctaLabel) lines.push(`${props.ctaLabel}?: string`);
+  if (props?.ctaHref) lines.push(`${props.ctaHref}?: string`);
+  if (lines.length === 0) return "";
+  return lines.join("\n  ");
+}
+
 function renderSection(input: {
   nodes: RuntimeNode[];
   index: number;
@@ -209,11 +317,12 @@ function renderSection(input: {
 }) {
   const repaired = repairSectionNodes(input.nodes);
   const groups = groupSectionNodes(repaired);
+  const ctx = createRenderContext();
   const items = [
-    ...groups.headings.map(renderNode),
-    ...groups.body.map(renderNode),
-    ...groups.cta.map(renderNode),
-    ...groups.images.map(renderNode),
+    ...groups.headings.map((node) => renderNodeWithProps(node, input.ir, ctx)),
+    ...groups.body.map((node) => renderNodeWithProps(node, input.ir, ctx)),
+    ...groups.cta.map((node) => renderNodeWithProps(node, input.ir, ctx)),
+    ...groups.images.map((node) => renderNodeWithProps(node, input.ir, ctx)),
   ]
     .filter(Boolean)
     .join("\n");

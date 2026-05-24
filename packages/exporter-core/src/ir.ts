@@ -58,6 +58,7 @@ export function buildIntermediateRepresentation(input: BuildIrInput): ExportIR {
     jobId: `local-${Date.now()}`,
     sourceUrl: input.url,
     componentName,
+    exportProps: readExportProps(input.pluginCapture),
     runtimeCapture: input.runtimeCapture,
     pluginCapture: input.pluginCapture,
     nodeMatches: input.nodeMatches,
@@ -69,6 +70,31 @@ export function buildIntermediateRepresentation(input: BuildIrInput): ExportIR {
     assets,
     warnings,
   };
+}
+
+function readExportProps(
+  pluginCapture: PluginCanvasCapture,
+): ExportIR["exportProps"] {
+  const meta = pluginCapture.selectedNodes[0]?.metadata;
+  if (!meta || typeof meta !== "object") return undefined;
+  const exportProps = (meta as any).exportProps;
+  if (!exportProps || typeof exportProps !== "object") return undefined;
+
+  const heroTitle =
+    typeof exportProps.heroTitle === "string"
+      ? exportProps.heroTitle
+      : undefined;
+  const heroSubtitle =
+    typeof exportProps.heroSubtitle === "string"
+      ? exportProps.heroSubtitle
+      : undefined;
+  const ctaLabel =
+    typeof exportProps.ctaLabel === "string" ? exportProps.ctaLabel : undefined;
+  const ctaHref =
+    typeof exportProps.ctaHref === "string" ? exportProps.ctaHref : undefined;
+
+  if (!heroTitle && !heroSubtitle && !ctaLabel && !ctaHref) return undefined;
+  return { heroTitle, heroSubtitle, ctaLabel, ctaHref };
 }
 
 function pickContentNodes(nodes: RuntimeNode[]) {

@@ -77,6 +77,12 @@ export type ExportIR = {
   jobId: string;
   sourceUrl: string;
   componentName: string;
+  exportProps?: {
+    heroTitle?: string;
+    heroSubtitle?: string;
+    ctaLabel?: string;
+    ctaHref?: string;
+  };
   runtimeCapture: RuntimeCapture;
   pluginCapture: PluginCanvasCapture;
   nodeMatches: NodeMatch[];
