@@ -175,7 +175,8 @@ function toRuntimeNode(
   entry: Record<string, unknown>,
   index: number,
 ): RuntimeNode | null {
-  const id = typeof entry.id === "string" ? entry.id : `plugin-node-${index + 1}`;
+  const id =
+    typeof entry.id === "string" ? entry.id : `plugin-node-${index + 1}`;
   const tag = normalizeTag(typeof entry.type === "string" ? entry.type : "div");
   const text =
     typeof entry.text === "string" && entry.text.trim().length > 0

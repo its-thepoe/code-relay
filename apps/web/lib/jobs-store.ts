@@ -85,9 +85,7 @@ export async function createJobFromRequest(
   const sourceUrl =
     sourceUrlRaw || (projectId ? `framer://project/${projectId}` : "");
   if (!sourceUrl && !pluginCapture) {
-    throw new Error(
-      "sourceUrl or pluginCapture is required.",
-    );
+    throw new Error("sourceUrl or pluginCapture is required.");
   }
 
   const selector =
