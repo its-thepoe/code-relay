@@ -69,7 +69,7 @@ export function App() {
   useLayoutEffect(() => {
     framer.showUI({
       width: 360,
-      height: 420,
+      height: 520,
       resizable: true,
     });
   }, []);
@@ -111,7 +111,7 @@ export function App() {
       return;
     }
 
-    if (simplified.length === 0) {
+    if (simplified.length === 0 && selectedComponentIds.length === 0) {
       framer.notify("Select a section or component on the canvas first.", {
         variant: "error",
       });
@@ -180,7 +180,15 @@ export function App() {
   }
 
   return (
-    <main style={{ padding: 12, display: "grid", gap: 10 }}>
+    <main
+      style={{
+        padding: 12,
+        display: "grid",
+        gap: 10,
+        height: "100%",
+        gridTemplateRows: "auto auto auto auto auto 1fr auto",
+      }}
+    >
       <div style={{ fontWeight: 700, fontSize: 14 }}>Coderelay Export</div>
 
       <label style={{ display: "grid", gap: 6 }}>
@@ -289,37 +297,49 @@ export function App() {
 
       {/* Guideline #7: prefer div role=button over <button> to avoid Framer CSS overrides */}
       <div
-        role="button"
-        tabIndex={0}
-        aria-disabled={busy}
-        onClick={() => {
-          if (busy) return;
-          void onCreateJob();
-        }}
-        onKeyDown={(event) => {
-          if (busy) return;
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            void onCreateJob();
-          }
-        }}
-        className="framer-button-primary"
         style={{
-          height: 36,
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          userSelect: "none",
-          cursor: busy ? "default" : "pointer",
-          opacity: busy ? 0.7 : 1,
+          position: "sticky",
+          bottom: 0,
+          paddingTop: 10,
+          background: "var(--framer-color-bg, #fff)",
         }}
       >
-        {busy ? "Creating…" : "Create Export Job"}
-      </div>
+        <div
+          role="button"
+          tabIndex={0}
+          aria-disabled={busy}
+          onClick={() => {
+            if (busy) return;
+            void onCreateJob();
+          }}
+          onKeyDown={(event) => {
+            if (busy) return;
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              void onCreateJob();
+            }
+          }}
+          className="framer-button-primary"
+          style={{
+            height: 40,
+            width: "100%",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            userSelect: "none",
+            cursor: busy ? "default" : "pointer",
+            opacity: busy ? 0.7 : 1,
+          }}
+        >
+          {busy ? "Creating…" : "Create Export Job"}
+        </div>
 
-      <div style={{ fontSize: 11, opacity: 0.7, lineHeight: 1.4 }}>
-        MVP test: no auth. Sends lightweight selection metadata + URL to the
-        local dashboard.
+        <div
+          style={{ fontSize: 11, opacity: 0.7, lineHeight: 1.4, marginTop: 8 }}
+        >
+          MVP test: no auth. Sends lightweight selection metadata + URL to the
+          local dashboard.
+        </div>
       </div>
     </main>
   );
