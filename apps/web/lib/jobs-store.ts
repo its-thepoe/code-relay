@@ -18,6 +18,7 @@ export type LocalExportJob = {
     exportDir?: string;
     zipPath?: string;
     reportPath?: string;
+    previewPath?: string;
   };
 };
 

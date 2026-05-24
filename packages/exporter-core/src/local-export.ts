@@ -13,6 +13,7 @@ import type {
 import { captureRuntime, createSimulatedPluginCapture } from "./capture.js";
 import { buildIntermediateRepresentation } from "./ir.js";
 import { zipDirectory } from "./package.js";
+import fs from "node:fs/promises";
 
 type LocalExportInput = {
   url: string;
@@ -27,6 +28,7 @@ type LocalExportResult = {
   exportDir: string;
   zipPath: string;
   reportPath: string;
+  previewPath: string;
   bestAttempt: ExportAttemptResult;
 };
 
@@ -87,6 +89,17 @@ export async function runLocalExport(
     createAgentBrief(ir, bestAttempt),
   );
 
+  const previewPath = path.join(exportDir, "preview.html");
+  const attemptPreviewPath = path.join(bestAttempt.projectDir, "preview.html");
+  try {
+    await fs.copyFile(attemptPreviewPath, previewPath);
+  } catch {
+    await writeFile(
+      previewPath,
+      `<!doctype html><html><body><pre>preview.html was not generated for this attempt.</pre></body></html>\n`,
+    );
+  }
+
   const zipPath = path.join(runDir, `${ir.componentName}.zip`);
   await zipDirectory(exportDir, zipPath);
 
@@ -94,6 +107,7 @@ export async function runLocalExport(
     exportDir,
     zipPath,
     reportPath,
+    previewPath,
     bestAttempt,
   };
 }

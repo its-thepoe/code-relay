@@ -18,6 +18,7 @@ type LocalExportJob = {
     exportDir?: string;
     zipPath?: string;
     reportPath?: string;
+    previewPath?: string;
   };
 };
 
@@ -87,6 +88,7 @@ async function processJob(job: LocalExportJob) {
       exportDir: result.exportDir,
       zipPath: result.zipPath,
       reportPath: result.reportPath,
+      previewPath: result.previewPath,
     };
     job.errorMessage = undefined;
     await writeJob(job);

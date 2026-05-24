@@ -18,6 +18,7 @@ export default async function JobPage({
 
   const hasZip = Boolean(job.artifacts?.zipPath);
   const hasReport = Boolean(job.artifacts?.reportPath);
+  const hasPreview = Boolean(job.artifacts?.previewPath);
 
   return (
     <main style={{ padding: 24, maxWidth: 1100, margin: "0 auto" }}>
@@ -80,6 +81,30 @@ export default async function JobPage({
               <span style={{ color: "#777" }}>pending</span>
             )}
           </div>
+          <div>
+            Preview:{" "}
+            {hasPreview ? (
+              <code>{job.artifacts!.previewPath}</code>
+            ) : (
+              <span style={{ color: "#777" }}>pending</span>
+            )}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          {hasPreview ? (
+            <a href={`/api/jobs/${job.id}/artifact?type=preview`}>
+              Open Preview
+            </a>
+          ) : null}
+          {hasZip ? (
+            <a href={`/api/jobs/${job.id}/artifact?type=zip`}>Download ZIP</a>
+          ) : null}
+          {hasReport ? (
+            <a href={`/api/jobs/${job.id}/artifact?type=report`}>
+              Open Report JSON
+            </a>
+          ) : null}
         </div>
       </div>
 
