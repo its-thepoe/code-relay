@@ -1,6 +1,8 @@
 import {
   framer,
+  isTextNode,
   FramerPluginClosedError,
+  type ComponentNode,
   type CanvasNode,
 } from "framer-plugin";
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
@@ -21,6 +23,10 @@ type PluginCapture = {
     heroSubtitle?: string;
     ctaLabel?: string;
     ctaHref?: string;
+  };
+  project?: {
+    id: string;
+    name: string;
   };
 };
 
@@ -48,10 +54,13 @@ export function App() {
   const [apiBaseUrl, setApiBaseUrl] = useState("http://localhost:3000");
   const [busy, setBusy] = useState(false);
   const selection = useSelection();
-  const [heroTitleProp, setHeroTitleProp] = useState("title");
-  const [heroSubtitleProp, setHeroSubtitleProp] = useState("subtitle");
-  const [ctaLabelProp, setCtaLabelProp] = useState("ctaLabel");
-  const [ctaHrefProp, setCtaHrefProp] = useState("ctaHref");
+  const [project, setProject] = useState<{ id: string; name: string } | null>(
+    null,
+  );
+  const [components, setComponents] = useState<ComponentNode[]>([]);
+  const [selectedComponentIds, setSelectedComponentIds] = useState<string[]>(
+    [],
+  );
 
   const simplified = useMemo(() => simplifySelection(selection), [selection]);
   const selectionLabel =
@@ -63,6 +72,35 @@ export function App() {
       height: 420,
       resizable: true,
     });
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    const load = async () => {
+      try {
+        const info = await framer.getProjectInfo();
+        if (!active) return;
+        setProject({ id: info.id, name: info.name });
+
+        const nodes = await framer.getNodesWithType("ComponentNode");
+        if (!active) return;
+        const sorted = [...nodes].sort((a, b) =>
+          (a.name ?? "").localeCompare(b.name ?? ""),
+        );
+        setComponents(sorted);
+      } catch (error) {
+        if (error instanceof FramerPluginClosedError) return;
+        framer.notify(error instanceof Error ? error.message : String(error), {
+          variant: "error",
+        });
+      }
+    };
+
+    void load();
+    return () => {
+      active = false;
+    };
   }, []);
 
   async function onCreateJob() {
@@ -80,16 +118,25 @@ export function App() {
       return;
     }
 
+    const chosenComponents = components.filter((node) =>
+      selectedComponentIds.includes(node.id),
+    );
+
+    const exportProps = inferExportPropsFromSelection(selection);
+
     const pluginCapture: PluginCapture = {
       mode: "framer-plugin",
-      selectedNodes: simplified,
+      selectedNodes:
+        chosenComponents.length > 0
+          ? chosenComponents.map((node) => ({
+              id: node.id,
+              name: node.name ?? undefined,
+              type: "ComponentNode",
+            }))
+          : simplified,
       capturedAt: new Date().toISOString(),
-      exportProps: {
-        heroTitle: heroTitleProp.trim() || undefined,
-        heroSubtitle: heroSubtitleProp.trim() || undefined,
-        ctaLabel: ctaLabelProp.trim() || undefined,
-        ctaHref: ctaHrefProp.trim() || undefined,
-      },
+      exportProps,
+      project: project ?? undefined,
     };
 
     setBusy(true);
@@ -177,75 +224,66 @@ export function App() {
       </div>
 
       <details>
-        <summary style={{ cursor: "pointer" }}>Props</summary>
-        <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-          <label style={{ display: "grid", gap: 6 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.8 }}>
-              Hero title prop
-            </div>
-            <input
-              value={heroTitleProp}
-              onChange={(event) => setHeroTitleProp(event.target.value)}
-              style={{
-                height: 34,
-                padding: "0 10px",
-                borderRadius: 8,
-                border: "1px solid rgba(0,0,0,0.15)",
-                outline: "none",
-              }}
-            />
-          </label>
-
-          <label style={{ display: "grid", gap: 6 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.8 }}>
-              Hero subtitle prop
-            </div>
-            <input
-              value={heroSubtitleProp}
-              onChange={(event) => setHeroSubtitleProp(event.target.value)}
-              style={{
-                height: 34,
-                padding: "0 10px",
-                borderRadius: 8,
-                border: "1px solid rgba(0,0,0,0.15)",
-                outline: "none",
-              }}
-            />
-          </label>
-
-          <label style={{ display: "grid", gap: 6 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.8 }}>
-              CTA label prop
-            </div>
-            <input
-              value={ctaLabelProp}
-              onChange={(event) => setCtaLabelProp(event.target.value)}
-              style={{
-                height: 34,
-                padding: "0 10px",
-                borderRadius: 8,
-                border: "1px solid rgba(0,0,0,0.15)",
-                outline: "none",
-              }}
-            />
-          </label>
-
-          <label style={{ display: "grid", gap: 6 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.8 }}>
-              CTA href prop
-            </div>
-            <input
-              value={ctaHrefProp}
-              onChange={(event) => setCtaHrefProp(event.target.value)}
-              style={{
-                height: 34,
-                padding: "0 10px",
-                borderRadius: 8,
-                border: "1px solid rgba(0,0,0,0.15)",
-                outline: "none",
-              }}
-            />
-          </label>
+        <summary style={{ cursor: "pointer" }}>
+          Project {project ? `(${project.name})` : ""}
+        </summary>
+        <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+          <div style={{ fontSize: 12, opacity: 0.8 }}>
+            Components: <strong>{components.length}</strong>
+          </div>
+          <div
+            style={{
+              border: "1px solid rgba(0,0,0,0.12)",
+              borderRadius: 8,
+              maxHeight: 170,
+              overflow: "auto",
+            }}
+          >
+            {components.length === 0 ? (
+              <div style={{ padding: 10, fontSize: 12, opacity: 0.7 }}>
+                No components found yet.
+              </div>
+            ) : (
+              components.map((node) => {
+                const checked = selectedComponentIds.includes(node.id);
+                return (
+                  <label
+                    key={node.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "8px 10px",
+                      borderBottom: "1px solid rgba(0,0,0,0.06)",
+                      fontSize: 12,
+                      cursor: "pointer",
+                      userSelect: "none",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(event) => {
+                        const next = event.target.checked;
+                        setSelectedComponentIds((prev) => {
+                          if (next)
+                            return Array.from(new Set([...prev, node.id]));
+                          return prev.filter((id) => id !== node.id);
+                        });
+                      }}
+                    />
+                    <span style={{ fontWeight: 600 }}>
+                      {node.name ?? "(unnamed)"}
+                    </span>
+                  </label>
+                );
+              })
+            )}
+          </div>
+          <div style={{ fontSize: 11, opacity: 0.7, lineHeight: 1.4 }}>
+            Pick components here to export. If none are selected, we export the
+            current canvas selection.
+          </div>
         </div>
       </details>
 
@@ -302,4 +340,40 @@ function simplifySelection(nodes: CanvasNode[]): SelectionNode[] {
     }))
     .filter((node) => node.id.length > 0)
     .slice(0, 60);
+}
+
+function toPropKey(value: string) {
+  const cleaned = value
+    .trim()
+    .replace(/[^a-zA-Z0-9]+/g, " ")
+    .split(" ")
+    .filter(Boolean);
+  if (cleaned.length === 0) return "prop";
+  const [first, ...rest] = cleaned;
+  const camel =
+    first.toLowerCase() +
+    rest.map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join("");
+  return camel.replace(/^[^a-zA-Z]+/, "prop");
+}
+
+function inferExportPropsFromSelection(selection: CanvasNode[]) {
+  const textNodes = selection.filter((node) => isTextNode(node));
+  const firstH1 = textNodes.find((node) => (node as any).tag === "h1");
+  const firstH2 = textNodes.find(
+    (node) => (node as any).tag === "h2" || (node as any).tag === "h3",
+  );
+  const firstLink = textNodes.find(
+    (node) => typeof (node as any).link === "string" && (node as any).link,
+  );
+
+  const heroTitle = firstH1?.name ? toPropKey(firstH1.name) : "title";
+  const heroSubtitle = firstH2?.name ? toPropKey(firstH2.name) : "subtitle";
+  const ctaLabel = firstLink?.name ? toPropKey(firstLink.name) : "ctaLabel";
+
+  return {
+    heroTitle,
+    heroSubtitle,
+    ctaLabel,
+    ctaHref: "ctaHref",
+  };
 }
