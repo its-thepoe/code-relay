@@ -14,6 +14,7 @@ export type GeneratedProject = {
   projectDir: string;
   componentPath: string;
   cssPath: string;
+  dtsPath: string;
   previewHtmlPath: string;
 };
 
@@ -34,6 +35,7 @@ export async function generateNextProject(
     componentDir,
     `${input.ir.componentName}.module.css`,
   );
+  const dtsPath = path.join(componentDir, `${input.ir.componentName}.d.ts`);
   const previewHtmlPath = path.join(input.projectDir, "preview.html");
 
   const component = await formatTsx(createComponent(input.ir), "typescript");
@@ -46,6 +48,7 @@ export async function generateNextProject(
 
   await writeFile(componentPath, component);
   await writeFile(cssPath, css);
+  await writeFile(dtsPath, createDts(input.ir));
   await writeFile(path.join(appDir, "page.tsx"), page);
   await writeFile(path.join(appDir, "layout.tsx"), layout);
   await writeFile(path.join(appDir, "globals.css"), globalCss);
@@ -61,8 +64,18 @@ export async function generateNextProject(
     projectDir: input.projectDir,
     componentPath,
     cssPath,
+    dtsPath,
     previewHtmlPath,
   };
+}
+
+function createDts(ir: ExportIR) {
+  return `import type * as React from "react"
+
+export type ${ir.componentName}Props = Record<string, never>
+
+export declare function ${ir.componentName}(props: ${ir.componentName}Props): React.JSX.Element
+`;
 }
 
 function createComponent(ir: ExportIR) {
