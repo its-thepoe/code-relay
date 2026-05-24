@@ -142,7 +142,9 @@ export function App() {
       const effectiveSourceUrl =
         sourceUrl.trim() ||
         resolvedSourceUrl ||
-        (project ? `framer://project/${project.id}` : "framer://project/unknown");
+        (project
+          ? `framer://project/${project.id}`
+          : "framer://project/unknown");
       const response = await fetch(
         `${apiBaseUrl.replace(/\/$/, "")}/api/jobs`,
         {

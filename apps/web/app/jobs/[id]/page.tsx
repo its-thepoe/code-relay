@@ -21,32 +21,28 @@ export default async function JobPage({
   const hasPreview = Boolean(job.artifacts?.previewPath);
 
   return (
-    <main style={{ padding: 24, maxWidth: 1100, margin: "0 auto" }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "baseline",
-          justifyContent: "space-between",
-          gap: 16,
-        }}
-      >
-        <h1 style={{ margin: 0, fontSize: 22 }}>Job</h1>
-        <div style={{ display: "flex", gap: 12 }}>
-          <Link href="/jobs">Jobs</Link>
-          <Link href="/">Home</Link>
+    <main className="mx-auto w-full max-w-6xl px-4 py-8">
+      <div className="flex items-baseline justify-between gap-4">
+        <h1 className="text-3xl font-black tracking-tight">Job</h1>
+        <div className="flex gap-3 text-sm text-zinc-600">
+          <Link
+            className="underline underline-offset-4 hover:text-zinc-900"
+            href="/jobs"
+          >
+            Jobs
+          </Link>
+          <Link
+            className="underline underline-offset-4 hover:text-zinc-900"
+            href="/"
+          >
+            Home
+          </Link>
         </div>
       </div>
 
-      <div
-        style={{
-          marginTop: 14,
-          padding: 16,
-          border: "1px solid #eee",
-          borderRadius: 8,
-        }}
-      >
-        <div style={{ display: "grid", gap: 6 }}>
-          <Row label="ID" value={job.id} />
+      <div className="mt-4 rounded-[10px] border border-black/10 bg-white shadow-[0_10px_30px_rgba(0,0,0,0.06)]">
+        <div className="grid gap-2 p-4">
+          <Row label="ID" value={job.id} mono />
           <Row label="Status" value={job.status} />
           <Row label="Source URL" value={job.sourceUrl} />
           <Row label="Selector" value={job.selector ?? "-"} />
@@ -62,78 +58,75 @@ export default async function JobPage({
         </div>
       </div>
 
-      <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
-        <div style={{ fontWeight: 700 }}>Artifacts</div>
-        <div style={{ display: "grid", gap: 6, color: "#333" }}>
+      <div className="mt-4 grid gap-3">
+        <div className="text-sm font-extrabold text-zinc-700">Artifacts</div>
+        <div className="rounded-[10px] border border-black/10 bg-white p-4 text-sm shadow-[0_10px_30px_rgba(0,0,0,0.06)]">
           <div>
             ZIP:{" "}
             {hasZip ? (
-              <code>{job.artifacts!.zipPath}</code>
+              <code className="break-all">{job.artifacts!.zipPath}</code>
             ) : (
-              <span style={{ color: "#777" }}>pending</span>
+              <span className="text-zinc-500">pending</span>
             )}
           </div>
           <div>
             Report:{" "}
             {hasReport ? (
-              <code>{job.artifacts!.reportPath}</code>
+              <code className="break-all">{job.artifacts!.reportPath}</code>
             ) : (
-              <span style={{ color: "#777" }}>pending</span>
+              <span className="text-zinc-500">pending</span>
             )}
           </div>
           <div>
             Preview:{" "}
             {hasPreview ? (
-              <code>{job.artifacts!.previewPath}</code>
+              <code className="break-all">{job.artifacts!.previewPath}</code>
             ) : (
-              <span style={{ color: "#777" }}>pending</span>
+              <span className="text-zinc-500">pending</span>
             )}
           </div>
-        </div>
 
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          {hasPreview ? (
-            <a
-              href={`/api/jobs/${job.id}/artifact?type=preview`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Open Preview
-            </a>
-          ) : null}
-          {hasZip ? (
-            <a
-              href={`/api/jobs/${job.id}/artifact?type=zip`}
-              download
-              target="_blank"
-              rel="noreferrer"
-            >
-              Download ZIP
-            </a>
-          ) : null}
-          {hasReport ? (
-            <a
-              href={`/api/jobs/${job.id}/artifact?type=report`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Open Report JSON
-            </a>
-          ) : null}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {hasPreview ? (
+              <a
+                className="inline-flex h-[42px] items-center rounded-[10px] border border-black/15 bg-white px-3 text-sm font-bold text-zinc-950 hover:bg-zinc-50"
+                href={`/api/jobs/${job.id}/artifact?type=preview`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open Preview
+              </a>
+            ) : null}
+            {hasZip ? (
+              <a
+                className="inline-flex h-[42px] items-center rounded-[10px] border border-black/15 bg-zinc-950 px-3 text-sm font-extrabold text-white hover:bg-zinc-900"
+                href={`/api/jobs/${job.id}/artifact?type=zip`}
+                download
+                target="_blank"
+                rel="noreferrer"
+              >
+                Download ZIP
+              </a>
+            ) : null}
+            {hasReport ? (
+              <a
+                className="inline-flex h-[42px] items-center rounded-[10px] border border-black/15 bg-white px-3 text-sm font-bold text-zinc-950 hover:bg-zinc-50"
+                href={`/api/jobs/${job.id}/artifact?type=report`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open Report JSON
+              </a>
+            ) : null}
+          </div>
         </div>
       </div>
 
-      <details style={{ marginTop: 16 }}>
-        <summary style={{ cursor: "pointer" }}>Raw Job JSON</summary>
-        <pre
-          style={{
-            marginTop: 12,
-            padding: 12,
-            border: "1px solid #eee",
-            borderRadius: 8,
-            overflow: "auto",
-          }}
-        >
+      <details className="mt-4">
+        <summary className="cursor-pointer text-sm font-bold text-zinc-700">
+          Raw Job JSON
+        </summary>
+        <pre className="mt-3 overflow-auto rounded-[10px] border border-black/10 bg-white p-4 text-xs shadow-[0_10px_30px_rgba(0,0,0,0.06)]">
           {JSON.stringify(job, null, 2)}
         </pre>
       </details>
@@ -141,21 +134,20 @@ export default async function JobPage({
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function Row({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "160px 1fr",
-        gap: 12,
-        alignItems: "baseline",
-      }}
-    >
-      <div style={{ color: "#666", fontSize: 13 }}>{label}</div>
+    <div className="grid grid-cols-[160px_1fr] items-baseline gap-3">
+      <div className="text-xs font-extrabold text-zinc-600">{label}</div>
       <div
-        style={{
-          fontFamily: label === "ID" ? "ui-monospace, monospace" : "inherit",
-        }}
+        className={mono ? "break-all font-mono text-sm" : "break-all text-sm"}
       >
         {value}
       </div>
