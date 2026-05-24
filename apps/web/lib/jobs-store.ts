@@ -7,7 +7,7 @@ export type LocalJobStatus = "queued" | "running" | "completed" | "failed";
 export type LocalExportJob = {
   id: string;
   status: LocalJobStatus;
-  sourceUrl: string;
+  sourceUrl?: string;
   selector?: string;
   pluginCapture?: unknown;
   title?: string;
@@ -84,9 +84,9 @@ export async function createJobFromRequest(
     typeof input?.sourceUrl === "string" ? input.sourceUrl.trim() : "";
   const sourceUrl =
     sourceUrlRaw || (projectId ? `framer://project/${projectId}` : "");
-  if (!sourceUrl) {
+  if (!sourceUrl && !pluginCapture) {
     throw new Error(
-      "sourceUrl is required when project context cannot be resolved.",
+      "sourceUrl or pluginCapture is required.",
     );
   }
 
@@ -100,7 +100,7 @@ export async function createJobFromRequest(
   const job: LocalExportJob = {
     id,
     status: "queued",
-    sourceUrl,
+    sourceUrl: sourceUrl || undefined,
     selector,
     pluginCapture,
     createdAt: now,

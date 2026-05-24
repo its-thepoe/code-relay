@@ -39,6 +39,20 @@ export type RuntimeCapture = {
   nodes: RuntimeNode[];
 };
 
+export type PluginContextSnapshot = {
+  pluginMode?: string;
+  project?: {
+    id?: string;
+    name?: string;
+  };
+  selectionSnapshot?: Array<Record<string, unknown>>;
+  selectedComponents?: Array<Record<string, unknown>>;
+  componentCount?: number;
+  selectionCount?: number;
+  permissions?: Record<string, unknown>;
+  capabilities?: Record<string, unknown>;
+};
+
 export type PluginCanvasCapture = {
   mode: "simulated" | "canvas" | "framer-plugin";
   selectedNodes: Array<{
@@ -50,6 +64,7 @@ export type PluginCanvasCapture = {
     metadata?: Record<string, unknown>;
   }>;
   capturedAt: string;
+  context?: PluginContextSnapshot;
 };
 
 export type NodeMatch = {

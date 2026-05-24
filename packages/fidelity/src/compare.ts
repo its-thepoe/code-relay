@@ -23,6 +23,33 @@ const viewports: Record<ViewportName, { width: number; height: number }> = {
 export async function compareGeneratedPreview(
   input: CompareInput,
 ): Promise<FidelityScores> {
+  const hasOriginalScreens =
+    input.ir.runtimeCapture.viewports.desktop.screenshotPath.length > 0 &&
+    input.ir.runtimeCapture.viewports.mobile.screenshotPath.length > 0;
+  if (!hasOriginalScreens) {
+    const nodeMatch = average(
+      input.ir.nodeMatches.map((match) => match.confidence * 100),
+    );
+    const typography = typographyScore(input.ir);
+    const assets = assetScore(input.ir);
+    const baseline = weightedAverage([
+      [nodeMatch, 0.5],
+      [typography, 0.25],
+      [assets, 0.25],
+    ]);
+    return {
+      desktop: baseline,
+      mobile: baseline,
+      overall: baseline,
+      layout: baseline,
+      typography,
+      color: baseline,
+      assets,
+      motion: 0,
+      nodeMatch,
+    };
+  }
+
   const generated = await captureGeneratedPreview(
     input.previewHtmlPath,
     input.attemptDir,

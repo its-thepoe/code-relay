@@ -28,6 +28,7 @@ type PluginCapture = {
     id: string;
     name: string;
   };
+  context?: Record<string, unknown>;
 };
 
 function useSelection() {
@@ -121,6 +122,12 @@ export function App() {
     );
 
     const exportProps = inferExportPropsFromSelection(selection);
+    const context = await collectPluginContext({
+      selection,
+      project,
+      components,
+      selectedComponentIds,
+    });
 
     const pluginCapture: PluginCapture = {
       mode: "framer-plugin",
@@ -135,6 +142,7 @@ export function App() {
       capturedAt: new Date().toISOString(),
       exportProps,
       project: project ?? undefined,
+      context,
     };
 
     setBusy(true);
@@ -355,6 +363,144 @@ export function App() {
       </div>
     </main>
   );
+}
+
+async function collectPluginContext(input: {
+  selection: CanvasNode[];
+  project: { id: string; name: string } | null;
+  components: ComponentNode[];
+  selectedComponentIds: string[];
+}) {
+  const selectedComponents = input.components
+    .filter((node) => input.selectedComponentIds.includes(node.id))
+    .map((node) => sanitizeNode(node));
+  const selectionSnapshot = input.selection.map((node) => sanitizeNode(node));
+
+  const methodsToCheck = [
+    "ManagedCollection.setFields",
+    "ManagedCollection.addItems",
+    "ManagedCollection.removeItems",
+    "ManagedCollection.setPluginData",
+  ] as const;
+
+  const [projectInfo, managedCollections, collections, canSync] =
+    await Promise.all([
+      safeCall(() => framer.getProjectInfo()),
+      safeCall(() => framer.getManagedCollections()),
+      safeCall(() => framer.getCollections()),
+      safeCall(() => framer.isAllowedTo(...methodsToCheck)),
+    ]);
+
+  return {
+    capturedAt: new Date().toISOString(),
+    pluginMode: framer.mode,
+    project: input.project,
+    projectInfo: projectInfo.ok ? sanitizeObject(projectInfo.value) : null,
+    selectedComponents,
+    selectionSnapshot,
+    selectionCount: input.selection.length,
+    componentCount: input.components.length,
+    permissions: {
+      syncMethods: methodsToCheck,
+      canSync: canSync.ok ? canSync.value : false,
+    },
+    managedCollections: managedCollections.ok
+      ? managedCollections.value.map((collection) => ({
+          id: collection.id,
+        }))
+      : [],
+    collections: collections.ok
+      ? collections.value.map((collection) =>
+          sanitizeObject({
+            id: (collection as any)?.id,
+            name: (collection as any)?.name,
+            slug: (collection as any)?.slug,
+          }),
+        )
+      : [],
+    capabilities: {
+      hasProjectInfo: projectInfo.ok,
+      hasManagedCollections: managedCollections.ok,
+      hasCollections: collections.ok,
+      hasSyncPermissionInfo: canSync.ok,
+    },
+  };
+}
+
+async function safeCall<T>(fn: () => Promise<T>) {
+  try {
+    const value = await fn();
+    return { ok: true as const, value };
+  } catch (error) {
+    return {
+      ok: false as const,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function sanitizeNode(node: unknown) {
+  if (!node || typeof node !== "object") return {};
+  const raw = node as Record<string, unknown>;
+  return sanitizeObject({
+    id: raw.id,
+    name: raw.name,
+    type: raw.type,
+    visible: raw.visible,
+    locked: raw.locked,
+    position: raw.position,
+    size: raw.size,
+    opacity: raw.opacity,
+    rotation: raw.rotation,
+    componentIdentifier: raw.componentIdentifier,
+    text:
+      typeof raw.text === "string"
+        ? raw.text.slice(0, 400)
+        : typeof raw.characters === "string"
+          ? raw.characters.slice(0, 400)
+          : undefined,
+  });
+}
+
+function sanitizeObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object") return {};
+  const input = value as Record<string, unknown>;
+  const output: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(input)) {
+    if (entry == null) continue;
+    if (
+      typeof entry === "string" ||
+      typeof entry === "number" ||
+      typeof entry === "boolean"
+    ) {
+      output[key] = entry;
+      continue;
+    }
+    if (Array.isArray(entry)) {
+      output[key] = entry
+        .slice(0, 120)
+        .map((item) => {
+          if (
+            item == null ||
+            typeof item === "string" ||
+            typeof item === "number" ||
+            typeof item === "boolean"
+          ) {
+            return item;
+          }
+          if (typeof item === "object") {
+            return sanitizeObject(item);
+          }
+          return String(item);
+        })
+        .filter((item) => item !== undefined);
+      continue;
+    }
+    if (typeof entry === "object") {
+      output[key] = sanitizeObject(entry);
+    }
+  }
+  return output;
 }
 
 function inferPublishedUrl(projectInfo: unknown): string {

@@ -1,4 +1,6 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 /* App-wide base styling (Tailwind-first). Keep tiny, use classes for the rest. */
 html,

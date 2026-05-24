@@ -7,7 +7,7 @@ type LocalJobStatus = "queued" | "running" | "completed" | "failed";
 type LocalExportJob = {
   id: string;
   status: LocalJobStatus;
-  sourceUrl: string;
+  sourceUrl?: string;
   selector?: string;
   pluginCapture?: unknown;
   title?: string;
@@ -77,6 +77,7 @@ async function processJob(job: LocalExportJob) {
   try {
     const result = await runLocalExport({
       url: job.sourceUrl,
+      pluginCapture: job.pluginCapture as any,
       outDir,
       selector: job.selector,
       maxAttempts: 3,
@@ -114,7 +115,7 @@ async function main() {
     }
 
     // eslint-disable-next-line no-console
-    console.log(`[worker] processing ${job.id} (${job.sourceUrl})`);
+    console.log(`[worker] processing ${job.id} (${job.sourceUrl ?? "no-url"})`);
     await processJob(job);
     // eslint-disable-next-line no-console
     console.log(`[worker] done ${job.id}`);

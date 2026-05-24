@@ -9,6 +9,9 @@ import type {
   ExportIR,
   ExportWarning,
   FidelityScores,
+  PluginCanvasCapture,
+  RuntimeCapture,
+  RuntimeNode,
 } from "../../shared/src/types.js";
 import { captureRuntime, createSimulatedPluginCapture } from "./capture.js";
 import { buildIntermediateRepresentation } from "./ir.js";
@@ -16,7 +19,8 @@ import { zipDirectory } from "./package.js";
 import fs from "node:fs/promises";
 
 type LocalExportInput = {
-  url: string;
+  url?: string;
+  pluginCapture?: PluginCanvasCapture;
   outDir: string;
   name?: string;
   selector?: string;
@@ -51,18 +55,26 @@ export async function runLocalExport(
   await mkdirp(attemptsDir);
   await mkdirp(exportDir);
 
-  const runtimeCapture = await captureRuntime({
-    url: input.url,
-    workDir,
-    selector: input.selector,
-  });
-  const pluginCapture = createSimulatedPluginCapture(runtimeCapture.nodes);
+  const canCaptureFromUrl =
+    typeof input.url === "string" &&
+    /^https?:\/\//.test(input.url) &&
+    input.url.length > 0;
+  const runtimeCapture = canCaptureFromUrl
+    ? await captureRuntime({
+        url: input.url!,
+        workDir,
+        selector: input.selector,
+      })
+    : createRuntimeCaptureFromPluginContext(input.pluginCapture);
+  const pluginCapture =
+    input.pluginCapture ?? createSimulatedPluginCapture(runtimeCapture.nodes);
+  const sourceUrl = input.url ?? runtimeCapture.url;
   const nodeMatches = matchPluginNodesToDom(
     pluginCapture,
     runtimeCapture.nodes,
   );
   const ir = buildIntermediateRepresentation({
-    url: input.url,
+    url: sourceUrl,
     name: input.name,
     runtimeCapture,
     pluginCapture,
@@ -110,6 +122,116 @@ export async function runLocalExport(
     previewPath,
     bestAttempt,
   };
+}
+
+function createRuntimeCaptureFromPluginContext(
+  pluginCapture?: PluginCanvasCapture,
+): RuntimeCapture {
+  const context = pluginCapture?.context;
+  const snapshot = Array.isArray(context?.selectionSnapshot)
+    ? context.selectionSnapshot
+    : [];
+  const selectedComponents = Array.isArray(context?.selectedComponents)
+    ? context.selectedComponents
+    : [];
+  const rawNodes =
+    snapshot.length > 0
+      ? snapshot
+      : selectedComponents.length > 0
+        ? selectedComponents
+        : [];
+  const nodes: RuntimeNode[] = rawNodes
+    .map((entry, index) => toRuntimeNode(entry, index))
+    .filter(Boolean) as RuntimeNode[];
+
+  const projectName =
+    typeof context?.project?.name === "string"
+      ? context.project.name
+      : "Framer Project";
+  const projectId =
+    typeof context?.project?.id === "string" ? context.project.id : "unknown";
+
+  return {
+    url: `framer://project/${projectId}`,
+    title: projectName,
+    mode: "section",
+    viewports: {
+      desktop: {
+        screenshotPath: "",
+        width: 1440,
+        height: 900,
+      },
+      mobile: {
+        screenshotPath: "",
+        width: 390,
+        height: 844,
+      },
+    },
+    nodes,
+  };
+}
+
+function toRuntimeNode(
+  entry: Record<string, unknown>,
+  index: number,
+): RuntimeNode | null {
+  const id = typeof entry.id === "string" ? entry.id : `plugin-node-${index + 1}`;
+  const tag = normalizeTag(typeof entry.type === "string" ? entry.type : "div");
+  const text =
+    typeof entry.text === "string" && entry.text.trim().length > 0
+      ? entry.text.trim().slice(0, 500)
+      : undefined;
+  const position = asPoint(entry.position);
+  const size = asSize(entry.size);
+  const sectionName =
+    typeof entry.name === "string" && entry.name.trim().length > 0
+      ? entry.name.trim()
+      : "Selection";
+
+  return {
+    id,
+    tag,
+    domPath: `plugin > ${tag}:nth-child(${index + 1})`,
+    text,
+    sectionIndex: 0,
+    sectionName,
+    rect: {
+      x: position?.x ?? 0,
+      y: position?.y ?? index * 40,
+      width: size?.width ?? 320,
+      height: size?.height ?? 48,
+    },
+    attributes: {},
+    styles: {
+      fontSize: "16px",
+      lineHeight: "24px",
+    },
+  };
+}
+
+function normalizeTag(type: string) {
+  const lower = type.toLowerCase();
+  if (lower.includes("text")) return "p";
+  if (lower.includes("image")) return "img";
+  if (lower.includes("button")) return "button";
+  if (lower.includes("heading")) return "h2";
+  if (lower.includes("component")) return "section";
+  return "div";
+}
+
+function asPoint(value: unknown): { x: number; y: number } | null {
+  if (!value || typeof value !== "object") return null;
+  const input = value as Record<string, unknown>;
+  if (typeof input.x !== "number" || typeof input.y !== "number") return null;
+  return { x: input.x, y: input.y };
+}
+
+function asSize(value: unknown): { width: number; height: number } | null {
+  if (!value || typeof value !== "object") return null;
+  const input = value as Record<string, unknown>;
+  if (typeof input.width !== "number" || typeof input.height !== "number")
+    return null;
+  return { width: input.width, height: input.height };
 }
 
 async function runAttempts(input: {
