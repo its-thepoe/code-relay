@@ -8,10 +8,20 @@ import {
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import "./App.css";
 
+type DebugEvent = {
+  at: string;
+  level: "info" | "warn" | "error";
+  message: string;
+  data?: unknown;
+};
+
 type SelectionNode = {
   id: string;
   name?: string;
   type?: string;
+  text?: string;
+  bounds?: { x: number; y: number; width: number; height: number };
+  metadata?: Record<string, unknown>;
 };
 
 type PluginCapture = {
@@ -56,6 +66,8 @@ export function App() {
   const [apiBaseUrl, setApiBaseUrl] = useState("http://localhost:3000");
   const [busy, setBusy] = useState(false);
   const selection = useSelection();
+  const [debug, setDebug] = useState<DebugEvent[]>([]);
+  const [showDebug, setShowDebug] = useState(false);
   const [project, setProject] = useState<{ id: string; name: string } | null>(
     null,
   );
@@ -63,14 +75,37 @@ export function App() {
   const [selectedComponentIds, setSelectedComponentIds] = useState<string[]>(
     [],
   );
+  const [componentQuery, setComponentQuery] = useState("");
 
   const simplified = useMemo(() => simplifySelection(selection), [selection]);
   const selectionLabel =
     simplified.length === 1 ? "1 item" : `${simplified.length} items`;
 
+  const filteredComponents = useMemo(() => {
+    const query = componentQuery.trim().toLowerCase();
+    if (!query) return components;
+    return components.filter((node) =>
+      String(node.name ?? "")
+        .toLowerCase()
+        .includes(query),
+    );
+  }, [components, componentQuery]);
+
+  const log = (level: DebugEvent["level"], message: string, data?: unknown) => {
+    setDebug((prev) => {
+      const next: DebugEvent = {
+        at: new Date().toISOString(),
+        level,
+        message,
+        data,
+      };
+      return [...prev.slice(-199), next];
+    });
+  };
+
   useLayoutEffect(() => {
     framer.showUI({
-      width: 420,
+      width: 460,
       height: 520,
       resizable: true,
     });
@@ -81,9 +116,11 @@ export function App() {
 
     const load = async () => {
       try {
+        log("info", "Loading project context…");
         const info = await framer.getProjectInfo();
         if (!active) return;
         setProject({ id: info.id, name: info.name });
+        log("info", "Project info loaded", info);
         const publishInfo = await framer.getPublishInfo().catch(() => null);
         const publishUrl =
           publishInfo &&
@@ -92,15 +129,19 @@ export function App() {
             ? String((publishInfo as any).url)
             : undefined;
         if (publishUrl) setResolvedSourceUrl(publishUrl);
+        log("info", "Publish info loaded", publishInfo);
 
+        log("info", "Fetching ComponentNode list…");
         const nodes = await framer.getNodesWithType("ComponentNode");
         if (!active) return;
         const sorted = [...nodes].sort((a, b) =>
           (a.name ?? "").localeCompare(b.name ?? ""),
         );
         setComponents(sorted);
+        log("info", `Components loaded: ${sorted.length}`);
       } catch (error) {
         if (error instanceof FramerPluginClosedError) return;
+        log("error", "Failed to load project context", error);
         framer.notify(error instanceof Error ? error.message : String(error), {
           variant: "error",
         });
@@ -114,35 +155,53 @@ export function App() {
   }, []);
 
   async function onCreateJob() {
+    log("info", "Create export job clicked", {
+      selectedComponentIdsCount: selectedComponentIds.length,
+      selectionCount: selection.length,
+    });
     if (simplified.length === 0 && selectedComponentIds.length === 0) {
       framer.notify("Select a section or component on the canvas first.", {
         variant: "error",
       });
+      log("warn", "Blocked: no canvas selection or component selection");
       return;
     }
 
     setBusy(true);
     try {
       if (selectedComponentIds.length > 0) {
+        log("info", "Setting selection to chosen components…", {
+          selectedComponentIds,
+        });
         await framer.setSelection(selectedComponentIds);
       }
 
       const liveSelection = await readSelectionWithRetry();
+      log("info", "Read selection after retry", {
+        count: liveSelection.length,
+        ids: liveSelection.map((n: any) => n?.id).filter(Boolean),
+      });
       const liveSimplified = simplifySelection(liveSelection);
 
       if (liveSimplified.length === 0) {
         framer.notify("Selection is empty.", { variant: "error" });
+        log("error", "Selection still empty after retry");
         return;
       }
 
       const richSelectedNodes = await captureSelectionMetadata(liveSelection);
+      log("info", "Captured selection metadata", {
+        count: richSelectedNodes.length,
+      });
       const exportProps = inferExportPropsFromSelection(liveSelection);
+      log("info", "Inferred export props", exportProps);
       const context = await collectPluginContext({
         selection: liveSelection,
         project,
         components,
         selectedComponentIds,
       });
+      log("info", "Collected context", context);
 
       const pluginCapture: PluginCapture = {
         mode: "framer-plugin",
@@ -150,7 +209,7 @@ export function App() {
         capturedAt: new Date().toISOString(),
         exportProps,
         project: project ?? undefined,
-        context,
+        context: { ...(context ?? {}), debug },
       };
 
       const effectiveSourceUrl =
@@ -173,12 +232,17 @@ export function App() {
 
       if (!response.ok) {
         const text = await response.text().catch(() => "");
+        log("error", "API job creation failed", {
+          status: response.status,
+          text,
+        });
         throw new Error(
           `Job creation failed (${response.status}). ${text}`.trim(),
         );
       }
 
       const job = (await response.json()) as { id: string };
+      log("info", "Job created", job);
       const jobUrl = `${apiBaseUrl.replace(/\/$/, "")}/jobs/${job.id}`;
 
       try {
@@ -189,11 +253,34 @@ export function App() {
       }
     } catch (error) {
       if (error instanceof FramerPluginClosedError) return;
+      log("error", "Unhandled error in create job", error);
       framer.notify(error instanceof Error ? error.message : String(error), {
         variant: "error",
       });
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function onNavigateToComponent(componentId: string) {
+    log("info", "Navigate to component", { componentId });
+    try {
+      const node = await framer.getNode(componentId);
+      if (!node) {
+        framer.notify("Could not find that component node.", {
+          variant: "error",
+        });
+        log("error", "framer.getNode returned null", { componentId });
+        return;
+      }
+
+      await (node as any).navigateTo?.();
+    } catch (error) {
+      if (error instanceof FramerPluginClosedError) return;
+      log("error", "navigateTo failed", error);
+      framer.notify(error instanceof Error ? error.message : String(error), {
+        variant: "error",
+      });
     }
   }
 
@@ -207,7 +294,37 @@ export function App() {
         gridTemplateRows: "auto auto auto auto auto 1fr auto",
       }}
     >
-      <div style={{ fontWeight: 700, fontSize: 14 }}>Coderelay Export</div>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "baseline",
+          gap: 10,
+        }}
+      >
+        <div style={{ fontWeight: 700, fontSize: 14 }}>Coderelay Export</div>
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setShowDebug((v) => !v)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setShowDebug((v) => !v);
+            }
+          }}
+          style={{
+            fontSize: 12,
+            fontWeight: 800,
+            opacity: 0.75,
+            cursor: "pointer",
+            userSelect: "none",
+          }}
+          title="Toggle debug overlay"
+        >
+          Debug
+        </div>
+      </div>
 
       <label style={{ display: "grid", gap: 6 }}>
         <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.8 }}>
@@ -262,6 +379,24 @@ export function App() {
           Project {project ? `(${project.name})` : ""}
         </summary>
         <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+          <label style={{ display: "grid", gap: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.8 }}>
+              Search components
+            </div>
+            <input
+              value={componentQuery}
+              onChange={(event) => setComponentQuery(event.target.value)}
+              placeholder="Search…"
+              style={{
+                height: 34,
+                padding: "0 10px",
+                borderRadius: 8,
+                border: "1px solid rgba(0,0,0,0.15)",
+                outline: "none",
+              }}
+            />
+          </label>
+
           <div style={{ fontSize: 12, opacity: 0.8 }}>
             Components: <strong>{components.length}</strong>
           </div>
@@ -278,7 +413,7 @@ export function App() {
                 No components found yet.
               </div>
             ) : (
-              components.map((node) => {
+              filteredComponents.map((node) => {
                 const checked = selectedComponentIds.includes(node.id);
                 return (
                   <label
@@ -308,6 +443,38 @@ export function App() {
                     />
                     <span style={{ fontWeight: 600 }}>
                       {node.name ?? "(unnamed)"}
+                    </span>
+                    <span style={{ flex: 1 }} />
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      title="Go to component"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        void onNavigateToComponent(node.id);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          void onNavigateToComponent(node.id);
+                        }
+                      }}
+                      style={{
+                        width: 22,
+                        height: 22,
+                        borderRadius: 999,
+                        border: "1px solid rgba(0,0,0,0.18)",
+                        display: "grid",
+                        placeItems: "center",
+                        fontWeight: 900,
+                        fontSize: 12,
+                        opacity: 0.8,
+                        cursor: "pointer",
+                      }}
+                    >
+                      i
                     </span>
                   </label>
                 );
@@ -367,6 +534,83 @@ export function App() {
           local dashboard.
         </div>
       </div>
+
+      {showDebug ? (
+        <div
+          style={{
+            position: "absolute",
+            inset: 12,
+            borderRadius: 10,
+            border: "1px solid rgba(0,0,0,0.18)",
+            background: "rgba(255,255,255,0.96)",
+            padding: 10,
+            display: "grid",
+            gridTemplateRows: "auto 1fr",
+            gap: 8,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+            }}
+          >
+            <div style={{ fontWeight: 800, fontSize: 12 }}>Debug Log</div>
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => setShowDebug(false)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  setShowDebug(false);
+                }
+              }}
+              style={{
+                fontSize: 12,
+                fontWeight: 800,
+                cursor: "pointer",
+                opacity: 0.8,
+              }}
+            >
+              Close
+            </div>
+          </div>
+          <div
+            style={{
+              overflow: "auto",
+              borderRadius: 8,
+              border: "1px solid rgba(0,0,0,0.1)",
+              background: "#fff",
+              padding: 8,
+              fontFamily:
+                'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+              fontSize: 10,
+              lineHeight: 1.4,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+            }}
+          >
+            {debug.map((entry, index) => {
+              const prefix =
+                entry.level === "error"
+                  ? "ERR"
+                  : entry.level === "warn"
+                    ? "WRN"
+                    : "INF";
+              return (
+                <div key={index}>
+                  [{prefix}] {entry.at} {entry.message}
+                  {entry.data !== undefined
+                    ? `\n${JSON.stringify(entry.data, null, 2)}`
+                    : ""}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
