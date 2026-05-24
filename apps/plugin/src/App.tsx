@@ -51,6 +51,7 @@ function useSelection() {
 
 export function App() {
   const [sourceUrl, setSourceUrl] = useState("");
+  const [resolvedSourceUrl, setResolvedSourceUrl] = useState("");
   const [apiBaseUrl, setApiBaseUrl] = useState("http://localhost:3000");
   const [busy, setBusy] = useState(false);
   const selection = useSelection();
@@ -82,6 +83,10 @@ export function App() {
         const info = await framer.getProjectInfo();
         if (!active) return;
         setProject({ id: info.id, name: info.name });
+        const inferredUrl = inferPublishedUrl(info);
+        if (inferredUrl) {
+          setResolvedSourceUrl(inferredUrl);
+        }
 
         const nodes = await framer.getNodesWithType("ComponentNode");
         if (!active) return;
@@ -104,13 +109,6 @@ export function App() {
   }, []);
 
   async function onCreateJob() {
-    if (!sourceUrl.trim()) {
-      framer.notify("Paste the published page URL first.", {
-        variant: "error",
-      });
-      return;
-    }
-
     if (simplified.length === 0 && selectedComponentIds.length === 0) {
       framer.notify("Select a section or component on the canvas first.", {
         variant: "error",
@@ -141,13 +139,17 @@ export function App() {
 
     setBusy(true);
     try {
+      const effectiveSourceUrl =
+        sourceUrl.trim() ||
+        resolvedSourceUrl ||
+        (project ? `framer://project/${project.id}` : "framer://project/unknown");
       const response = await fetch(
         `${apiBaseUrl.replace(/\/$/, "")}/api/jobs`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            sourceUrl: sourceUrl.trim(),
+            sourceUrl: effectiveSourceUrl,
             pluginCapture,
           }),
         },
@@ -193,7 +195,7 @@ export function App() {
 
       <label style={{ display: "grid", gap: 6 }}>
         <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.8 }}>
-          Published page URL
+          Published page URL (optional override)
         </div>
         <input
           value={sourceUrl}
@@ -207,6 +209,14 @@ export function App() {
             outline: "none",
           }}
         />
+        <div style={{ fontSize: 11, opacity: 0.7 }}>
+          Using:{" "}
+          <code>
+            {sourceUrl.trim() ||
+              resolvedSourceUrl ||
+              (project ? `framer://project/${project.id}` : "project context")}
+          </code>
+        </div>
       </label>
 
       <label style={{ display: "grid", gap: 6 }}>
@@ -343,6 +353,27 @@ export function App() {
       </div>
     </main>
   );
+}
+
+function inferPublishedUrl(projectInfo: unknown): string {
+  if (!projectInfo || typeof projectInfo !== "object") return "";
+  const info = projectInfo as Record<string, unknown>;
+  const keys = [
+    "publishedUrl",
+    "publishUrl",
+    "siteUrl",
+    "url",
+    "previewUrl",
+  ] as const;
+
+  for (const key of keys) {
+    const value = info[key];
+    if (typeof value === "string" && /^https?:\/\//.test(value)) {
+      return value;
+    }
+  }
+
+  return "";
 }
 
 function simplifySelection(nodes: CanvasNode[]): SelectionNode[] {

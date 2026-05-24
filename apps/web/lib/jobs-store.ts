@@ -75,18 +75,25 @@ export async function writeJob(job: LocalExportJob) {
 export async function createJobFromRequest(
   input: any,
 ): Promise<LocalExportJob> {
-  const sourceUrl =
+  const pluginCapture = input?.pluginCapture;
+  const projectId =
+    typeof pluginCapture?.project?.id === "string"
+      ? pluginCapture.project.id
+      : undefined;
+  const sourceUrlRaw =
     typeof input?.sourceUrl === "string" ? input.sourceUrl.trim() : "";
+  const sourceUrl =
+    sourceUrlRaw || (projectId ? `framer://project/${projectId}` : "");
   if (!sourceUrl) {
-    throw new Error("sourceUrl is required");
+    throw new Error(
+      "sourceUrl is required when project context cannot be resolved.",
+    );
   }
 
   const selector =
     typeof input?.selector === "string" && input.selector.trim()
       ? input.selector.trim()
       : undefined;
-  const pluginCapture = input?.pluginCapture;
-
   const id = `job_${crypto.randomBytes(8).toString("hex")}`;
   const now = new Date().toISOString();
 
