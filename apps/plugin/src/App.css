@@ -7,4 +7,15 @@ main {
   padding: 0 15px 15px 15px;
   height: 100%;
   gap: 15px;
+  overflow: hidden;
+}
+
+/* Hide scrollbars but keep scrolling where needed */
+* {
+  scrollbar-width: none;
+}
+
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }

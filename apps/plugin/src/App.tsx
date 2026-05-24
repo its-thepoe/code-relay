@@ -70,7 +70,7 @@ export function App() {
 
   useLayoutEffect(() => {
     framer.showUI({
-      width: 360,
+      width: 420,
       height: 520,
       resizable: true,
     });
@@ -127,7 +127,7 @@ export function App() {
         await framer.setSelection(selectedComponentIds);
       }
 
-      const liveSelection = await framer.getSelection();
+      const liveSelection = await readSelectionWithRetry();
       const liveSimplified = simplifySelection(liveSelection);
 
       if (liveSimplified.length === 0) {
@@ -545,6 +545,17 @@ function simplifySelection(nodes: CanvasNode[]): SelectionNode[] {
     }))
     .filter((node) => node.id.length > 0)
     .slice(0, 60);
+}
+
+async function readSelectionWithRetry() {
+  const attempts = 6;
+  for (let i = 0; i < attempts; i += 1) {
+    const selection = await framer.getSelection().catch(() => []);
+    if (selection.length > 0) return selection;
+    // Framer sometimes applies setSelection asynchronously; give it a beat.
+    await new Promise((r) => setTimeout(r, 120));
+  }
+  return framer.getSelection().catch(() => []);
 }
 
 function toPropKey(value: string) {
