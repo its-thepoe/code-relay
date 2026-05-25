@@ -620,6 +620,13 @@ function sectionStyle(nodes: RuntimeNode[], index: number, ir: ExportIR) {
 }
 
 function repairSectionNodes(nodes: RuntimeNode[]) {
+  const pluginOrdered = nodes.every((node) => getSourceIndex(node) !== null);
+  if (pluginOrdered) {
+    return [...nodes].sort(
+      (first, second) => getSourceIndex(first)! - getSourceIndex(second)!,
+    );
+  }
+
   // Structural repair pass:
   // - reorder by source y/x
   // - preserve natural reading order (top-to-bottom, then left-to-right)
@@ -629,6 +636,13 @@ function repairSectionNodes(nodes: RuntimeNode[]) {
     if (Math.abs(yDelta) > 10) return yDelta;
     return first.rect.x - second.rect.x;
   });
+}
+
+function getSourceIndex(node: RuntimeNode) {
+  const value = node.styles.__coderelaySourceIndex;
+  if (typeof value !== "string") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function groupSectionNodes(nodes: RuntimeNode[]) {

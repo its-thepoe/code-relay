@@ -64,6 +64,12 @@ export type PluginCanvasCapture = {
     metadata?: Record<string, unknown>;
   }>;
   capturedAt: string;
+  exportProps?: {
+    heroTitle?: string;
+    heroSubtitle?: string;
+    ctaLabel?: string;
+    ctaHref?: string;
+  };
   context?: PluginContextSnapshot;
 };
 

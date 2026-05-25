@@ -6,13 +6,24 @@ main {
   align-items: start;
   padding: 0 15px 15px 15px;
   height: 100%;
+  width: 100%;
+  max-width: 100%;
   gap: 15px;
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 /* Hide scrollbars but keep scrolling where needed */
 * {
+  box-sizing: border-box;
+  min-width: 0;
   scrollbar-width: none;
+}
+
+input,
+textarea,
+select {
+  max-width: 100%;
 }
 
 *::-webkit-scrollbar {

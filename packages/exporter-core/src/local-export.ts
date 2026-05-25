@@ -128,6 +128,9 @@ function createRuntimeCaptureFromPluginContext(
   pluginCapture?: PluginCanvasCapture,
 ): RuntimeCapture {
   const context = pluginCapture?.context;
+  const capturedNodes = Array.isArray(pluginCapture?.selectedNodes)
+    ? pluginCapture.selectedNodes
+    : [];
   const snapshot = Array.isArray(context?.selectionSnapshot)
     ? context.selectionSnapshot
     : [];
@@ -135,11 +138,13 @@ function createRuntimeCaptureFromPluginContext(
     ? context.selectedComponents
     : [];
   const rawNodes =
-    snapshot.length > 0
-      ? snapshot
-      : selectedComponents.length > 0
-        ? selectedComponents
-        : [];
+    capturedNodes.length > 0
+      ? capturedNodes
+      : snapshot.length > 0
+        ? snapshot
+        : selectedComponents.length > 0
+          ? selectedComponents
+          : [];
   const nodes: RuntimeNode[] = rawNodes
     .map((entry, index) => toRuntimeNode(entry, index))
     .filter(Boolean) as RuntimeNode[];
@@ -184,6 +189,7 @@ function toRuntimeNode(
       : undefined;
   const position = asPoint(entry.position);
   const size = asSize(entry.size);
+  const bounds = asRect(entry.bounds);
   const sectionName =
     typeof entry.name === "string" && entry.name.trim().length > 0
       ? entry.name.trim()
@@ -197,15 +203,16 @@ function toRuntimeNode(
     sectionIndex: 0,
     sectionName,
     rect: {
-      x: position?.x ?? 0,
-      y: position?.y ?? index * 40,
-      width: size?.width ?? 320,
-      height: size?.height ?? 48,
+      x: bounds?.x ?? position?.x ?? 0,
+      y: bounds?.y ?? position?.y ?? index * 40,
+      width: bounds?.width ?? size?.width ?? 320,
+      height: bounds?.height ?? size?.height ?? 48,
     },
     attributes: {},
     styles: {
       fontSize: "16px",
       lineHeight: "24px",
+      __coderelaySourceIndex: String(index),
     },
   };
 }
@@ -233,6 +240,25 @@ function asSize(value: unknown): { width: number; height: number } | null {
   if (typeof input.width !== "number" || typeof input.height !== "number")
     return null;
   return { width: input.width, height: input.height };
+}
+
+function asRect(value: unknown): RuntimeNode["rect"] | null {
+  if (!value || typeof value !== "object") return null;
+  const input = value as Record<string, unknown>;
+  if (
+    typeof input.x !== "number" ||
+    typeof input.y !== "number" ||
+    typeof input.width !== "number" ||
+    typeof input.height !== "number"
+  ) {
+    return null;
+  }
+  return {
+    x: input.x,
+    y: input.y,
+    width: input.width,
+    height: input.height,
+  };
 }
 
 async function runAttempts(input: {

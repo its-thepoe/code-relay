@@ -17,7 +17,9 @@ type BuildIrInput = {
 };
 
 export function buildIntermediateRepresentation(input: BuildIrInput): ExportIR {
-  const contentNodes = pickContentNodes(input.runtimeCapture.nodes);
+  const contentNodes = promoteFallbackHeading(
+    pickContentNodes(input.runtimeCapture.nodes),
+  );
   const componentName = toComponentName(
     input.name ?? inferName(input.runtimeCapture.title, contentNodes),
   );
@@ -72,9 +74,53 @@ export function buildIntermediateRepresentation(input: BuildIrInput): ExportIR {
   };
 }
 
+function promoteFallbackHeading(nodes: RuntimeNode[]) {
+  if (nodes.some((node) => node.tag === "h1" || node.tag === "h2")) {
+    return nodes;
+  }
+
+  const headingIndex = nodes.findIndex((node) => {
+    const text = node.text?.trim();
+    if (!text) return false;
+    if (text.length < 8 || text.length > 120) return false;
+    if (/^(by|anonymous)$/i.test(text)) return false;
+    if (/^(lorem ipsum\b)/i.test(text)) return false;
+    return true;
+  });
+
+  if (headingIndex < 0) return nodes;
+
+  return nodes.map((node, index) =>
+    index === headingIndex ? { ...node, tag: "h1" } : node,
+  );
+}
+
 function readExportProps(
   pluginCapture: PluginCanvasCapture,
 ): ExportIR["exportProps"] {
+  if (pluginCapture.exportProps) {
+    const heroTitle =
+      typeof pluginCapture.exportProps.heroTitle === "string"
+        ? pluginCapture.exportProps.heroTitle
+        : undefined;
+    const heroSubtitle =
+      typeof pluginCapture.exportProps.heroSubtitle === "string"
+        ? pluginCapture.exportProps.heroSubtitle
+        : undefined;
+    const ctaLabel =
+      typeof pluginCapture.exportProps.ctaLabel === "string"
+        ? pluginCapture.exportProps.ctaLabel
+        : undefined;
+    const ctaHref =
+      typeof pluginCapture.exportProps.ctaHref === "string"
+        ? pluginCapture.exportProps.ctaHref
+        : undefined;
+
+    if (heroTitle || heroSubtitle || ctaLabel || ctaHref) {
+      return { heroTitle, heroSubtitle, ctaLabel, ctaHref };
+    }
+  }
+
   const meta = pluginCapture.selectedNodes[0]?.metadata;
   if (!meta || typeof meta !== "object") return undefined;
   const exportProps = (meta as any).exportProps;

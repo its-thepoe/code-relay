@@ -74,6 +74,13 @@ Framer plugin canvas selection data
 
 The plugin should capture design intent where the Framer Plugin SDK allows it. The worker should use the published site to verify how Framer actually renders the design. Screenshot comparison should judge whether the generated React output is close enough.
 
+The plugin must treat canvas selection and component-catalog selection as two
+separate capture sources. A component chosen from an in-plugin list should be
+read directly from Framer by id and included in the export payload; it should not
+depend on that component also becoming the current canvas selection. Empty
+selection failures should be based on failed metadata capture, not only on
+`framer.getSelection()` returning no nodes.
+
 ---
 
 ## 3. Problem Statement
@@ -628,8 +635,10 @@ Included:
 - User can open plugin inside Framer.
 - User can authenticate with the standalone web app.
 - Plugin can detect selected section/component.
+- Plugin can list known project components where the SDK allows it and export
+  selected component ids directly.
 - Plugin can validate whether selection is exportable.
-- Plugin can capture selection context from canvas mode without storing large payloads in Framer `pluginData`.
+- Plugin can capture selection context from canvas mode or component ids without storing large payloads in Framer `pluginData`.
 - Plugin can create an export job.
 - Plugin can link user to the web dashboard.
 

@@ -756,6 +756,20 @@ For MVP, there are two options:
 
 Use the plugin selection data as the preferred source of design intent.
 
+There are two valid plugin capture sources, and they must not be collapsed into
+one implementation path:
+
+1. **Canvas selection capture** uses `framer.getSelection()` and
+   `framer.subscribeToSelection()` for nodes the user selected directly on the
+   canvas.
+2. **Component catalog capture** uses Framer project/component discovery, then
+   reads selected component ids directly with `framer.getNode()`,
+   `framer.getChildren()`, `framer.getRect()`, and text-node reads. Do not
+   select component ids in the plugin UI and then require `framer.getSelection()`
+   to echo them back before creating a job. Component definitions and canvas
+   selections are different editor concepts, and relying on that round trip can
+   incorrectly produce an empty selection.
+
 The plugin runs in `canvas` mode and should use:
 
 ```ts
@@ -788,6 +802,15 @@ type PluginCanvasCapture = {
   capturedAt: string;
 };
 ```
+
+Validation should check the metadata actually captured for the chosen source:
+
+- component catalog export is valid when selected component ids can be resolved
+  and at least one node metadata object is captured.
+- canvas export is valid when the live or subscribed canvas selection contains
+  at least one readable node.
+- failed capture must block the job and show a debug reason instead of silently
+  sending an empty selection payload.
 
 Do not store large selection payloads in Framer `pluginData`. Use `localStorage` only for per-user session references/preferences, and send export payloads directly to the web API.
 
@@ -1173,10 +1196,12 @@ Button: Export to React
 6. Plugin receives short-lived session reference.
 7. Detect current selection with `framer.getSelection()`.
 8. Subscribe to selection changes with `framer.subscribeToSelection()`.
-9. Capture lightweight selected-node metadata.
-10. Validate selection.
-11. Send export job payload.
-12. Open dashboard job URL.
+9. Load available project components where the SDK allows it.
+10. Capture lightweight selected-node metadata from the active source:
+    canvas selection or directly selected component ids.
+11. Validate captured metadata instead of only checking editor selection count.
+12. Send export job payload.
+13. Open dashboard job URL.
 
 ### Payload Shape
 
@@ -1192,6 +1217,7 @@ type PluginExportPayload = {
     nodeIds: string[];
     label?: string;
     type?: "component" | "section" | "unknown";
+    captureSource?: "canvas-selection" | "component-catalog";
     nodes?: Array<{
       id?: string;
       name?: string;
@@ -1539,19 +1565,25 @@ Let users start exports from inside Framer.
 6. Store only short-lived session references/preferences in `localStorage`.
 7. Detect selection with `framer.getSelection()`.
 8. Subscribe to selection updates with `framer.subscribeToSelection()`.
-9. Capture lightweight selected-node metadata.
-10. Validate selection.
-11. Add export settings.
-12. Create export job from plugin.
-13. Open dashboard job page.
-14. Handle `FramerPluginClosedError` silently.
-15. Handle other errors with `framer.notify()`.
+9. Load project component list where available.
+10. Allow component-list selection without requiring it to become canvas
+    selection.
+11. Capture lightweight selected-node metadata from canvas selection or direct
+    component ids.
+12. Validate captured metadata and block empty payloads.
+13. Add export settings.
+14. Create export job from plugin.
+15. Open dashboard job page.
+16. Handle `FramerPluginClosedError` silently.
+17. Handle other errors with `framer.notify()`.
 
 ### Exit Criteria
 
 - User can open plugin.
 - User can authenticate.
 - User can select a section/component.
+- User can select known project components from the plugin and export them even
+  when `framer.getSelection()` is empty.
 - Plugin payload includes lightweight selection metadata.
 - User can create an export job.
 - User can download output from dashboard.

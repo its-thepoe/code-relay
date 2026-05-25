@@ -41,6 +41,8 @@ type PluginCapture = {
   context?: Record<string, unknown>;
 };
 
+type CapturableNode = CanvasNode | ComponentNode | unknown;
+
 function useSelection() {
   const [selection, setSelection] = useState<CanvasNode[]>([]);
 
@@ -75,21 +77,10 @@ export function App() {
   const [selectedComponentIds, setSelectedComponentIds] = useState<string[]>(
     [],
   );
-  const [componentQuery, setComponentQuery] = useState("");
 
   const simplified = useMemo(() => simplifySelection(selection), [selection]);
   const selectionLabel =
     simplified.length === 1 ? "1 item" : `${simplified.length} items`;
-
-  const filteredComponents = useMemo(() => {
-    const query = componentQuery.trim().toLowerCase();
-    if (!query) return components;
-    return components.filter((node) =>
-      String(node.name ?? "")
-        .toLowerCase()
-        .includes(query),
-    );
-  }, [components, componentQuery]);
 
   const log = (level: DebugEvent["level"], message: string, data?: unknown) => {
     setDebug((prev) => {
@@ -105,8 +96,8 @@ export function App() {
 
   useLayoutEffect(() => {
     framer.showUI({
-      width: 460,
-      height: 520,
+      width: 520,
+      height: 780,
       resizable: true,
     });
   }, []);
@@ -155,10 +146,16 @@ export function App() {
   }, []);
 
   async function onCreateJob() {
+    const captureSource =
+      selectedComponentIds.length > 0
+        ? "component-catalog"
+        : "canvas-selection";
     log("info", "Create export job clicked", {
+      captureSource,
       selectedComponentIdsCount: selectedComponentIds.length,
       selectionCount: selection.length,
     });
+
     if (simplified.length === 0 && selectedComponentIds.length === 0) {
       framer.notify("Select a section or component on the canvas first.", {
         variant: "error",
@@ -169,37 +166,54 @@ export function App() {
 
     setBusy(true);
     try {
+      let sourceNodes: CapturableNode[] = [];
+
       if (selectedComponentIds.length > 0) {
-        log("info", "Setting selection to chosen components…", {
+        log("info", "Reading chosen components directly by id", {
           selectedComponentIds,
         });
-        await framer.setSelection(selectedComponentIds);
+        sourceNodes = await readNodesByIds(selectedComponentIds, components);
+        log("info", "Read chosen component nodes", {
+          requested: selectedComponentIds.length,
+          found: sourceNodes.length,
+          ids: sourceNodes.map((n: any) => n?.id).filter(Boolean),
+        });
+      } else {
+        sourceNodes = await readSelectionWithRetry(selection);
+        log("info", "Read canvas selection after retry", {
+          count: sourceNodes.length,
+          ids: sourceNodes.map((n: any) => n?.id).filter(Boolean),
+        });
       }
 
-      const liveSelection = await readSelectionWithRetry();
-      log("info", "Read selection after retry", {
-        count: liveSelection.length,
-        ids: liveSelection.map((n: any) => n?.id).filter(Boolean),
-      });
-      const liveSimplified = simplifySelection(liveSelection);
+      const liveSimplified = simplifySelection(sourceNodes);
 
       if (liveSimplified.length === 0) {
-        framer.notify("Selection is empty.", { variant: "error" });
-        log("error", "Selection still empty after retry");
+        const reason =
+          selectedComponentIds.length > 0
+            ? "Chosen components could not be read from Framer."
+            : "Canvas selection is empty.";
+        framer.notify(reason, { variant: "error" });
+        log("error", "Blocked: no readable export nodes", {
+          captureSource,
+          selectedComponentIds,
+          subscribedSelection: simplified,
+        });
         return;
       }
 
-      const richSelectedNodes = await captureSelectionMetadata(liveSelection);
+      const richSelectedNodes = await captureSelectionMetadata(sourceNodes);
       log("info", "Captured selection metadata", {
         count: richSelectedNodes.length,
       });
-      const exportProps = inferExportPropsFromSelection(liveSelection);
+      const exportProps = inferExportPropsFromSelection(sourceNodes);
       log("info", "Inferred export props", exportProps);
       const context = await collectPluginContext({
-        selection: liveSelection,
+        selection: sourceNodes,
         project,
         components,
         selectedComponentIds,
+        captureSource,
       });
       log("info", "Collected context", context);
 
@@ -274,7 +288,23 @@ export function App() {
         return;
       }
 
-      await (node as any).navigateTo?.();
+      let navigated = false;
+      if (typeof (node as any).navigateTo === "function") {
+        await (node as any).navigateTo();
+        navigated = true;
+      }
+      if (typeof (framer as any).zoomIntoView === "function") {
+        await (framer as any).zoomIntoView(componentId).catch(() => null);
+        navigated = true;
+      }
+      if (!navigated) {
+        framer.notify("Framer did not expose navigation for that component.", {
+          variant: "error",
+        });
+        log("warn", "No navigateTo or zoomIntoView capability available", {
+          componentId,
+        });
+      }
     } catch (error) {
       if (error instanceof FramerPluginClosedError) return;
       log("error", "navigateTo failed", error);
@@ -291,6 +321,11 @@ export function App() {
         display: "grid",
         gap: 10,
         height: "100%",
+        width: "100%",
+        maxWidth: "100%",
+        boxSizing: "border-box",
+        overflow: "hidden",
+        position: "relative",
         gridTemplateRows: "auto auto auto auto auto 1fr auto",
       }}
     >
@@ -336,6 +371,8 @@ export function App() {
           placeholder="https://your-site.framer.website/"
           style={{
             height: 36,
+            minWidth: 0,
+            width: "100%",
             padding: "0 10px",
             borderRadius: 8,
             border: "1px solid rgba(0,0,0,0.15)",
@@ -344,7 +381,7 @@ export function App() {
         />
         <div style={{ fontSize: 11, opacity: 0.7 }}>
           Using:{" "}
-          <code>
+          <code style={{ overflowWrap: "anywhere" }}>
             {sourceUrl.trim() ||
               resolvedSourceUrl ||
               (project ? `framer://project/${project.id}` : "project context")}
@@ -362,6 +399,8 @@ export function App() {
           placeholder="http://localhost:3000"
           style={{
             height: 36,
+            minWidth: 0,
+            width: "100%",
             padding: "0 10px",
             borderRadius: 8,
             border: "1px solid rgba(0,0,0,0.15)",
@@ -379,24 +418,6 @@ export function App() {
           Project {project ? `(${project.name})` : ""}
         </summary>
         <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
-          <label style={{ display: "grid", gap: 6 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.8 }}>
-              Search components
-            </div>
-            <input
-              value={componentQuery}
-              onChange={(event) => setComponentQuery(event.target.value)}
-              placeholder="Search…"
-              style={{
-                height: 34,
-                padding: "0 10px",
-                borderRadius: 8,
-                border: "1px solid rgba(0,0,0,0.15)",
-                outline: "none",
-              }}
-            />
-          </label>
-
           <div style={{ fontSize: 12, opacity: 0.8 }}>
             Components: <strong>{components.length}</strong>
           </div>
@@ -404,7 +425,7 @@ export function App() {
             style={{
               border: "1px solid rgba(0,0,0,0.12)",
               borderRadius: 8,
-              maxHeight: 170,
+              maxHeight: 300,
               overflow: "auto",
             }}
           >
@@ -413,7 +434,7 @@ export function App() {
                 No components found yet.
               </div>
             ) : (
-              filteredComponents.map((node) => {
+              components.map((node) => {
                 const checked = selectedComponentIds.includes(node.id);
                 return (
                   <label
@@ -422,6 +443,7 @@ export function App() {
                       display: "flex",
                       alignItems: "center",
                       gap: 8,
+                      maxWidth: "100%",
                       padding: "8px 10px",
                       borderBottom: "1px solid rgba(0,0,0,0.06)",
                       fontSize: 12,
@@ -441,7 +463,15 @@ export function App() {
                         });
                       }}
                     />
-                    <span style={{ fontWeight: 600 }}>
+                    <span
+                      style={{
+                        fontWeight: 600,
+                        minWidth: 0,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
                       {node.name ?? "(unnamed)"}
                     </span>
                     <span style={{ flex: 1 }} />
@@ -616,10 +646,11 @@ export function App() {
 }
 
 async function collectPluginContext(input: {
-  selection: CanvasNode[];
+  selection: CapturableNode[];
   project: { id: string; name: string } | null;
   components: ComponentNode[];
   selectedComponentIds: string[];
+  captureSource: "component-catalog" | "canvas-selection";
 }) {
   const selectedComponents = input.components
     .filter((node) => input.selectedComponentIds.includes(node.id))
@@ -644,6 +675,7 @@ async function collectPluginContext(input: {
   return {
     capturedAt: new Date().toISOString(),
     pluginMode: framer.mode,
+    captureSource: input.captureSource,
     project: input.project,
     projectInfo: projectInfo.ok ? sanitizeObject(projectInfo.value) : null,
     selectedComponents,
@@ -774,7 +806,7 @@ function inferPublishedUrl(projectInfo: unknown): string {
   return "";
 }
 
-function simplifySelection(nodes: CanvasNode[]): SelectionNode[] {
+function simplifySelection(nodes: CapturableNode[]): SelectionNode[] {
   return nodes
     .map((node) => ({
       id: String((node as any)?.id ?? ""),
@@ -791,7 +823,24 @@ function simplifySelection(nodes: CanvasNode[]): SelectionNode[] {
     .slice(0, 60);
 }
 
-async function readSelectionWithRetry() {
+async function readNodesByIds(ids: string[], knownComponents: ComponentNode[]) {
+  const nodes: CapturableNode[] = [];
+  for (const id of ids) {
+    const node = await framer.getNode(id).catch(() => null);
+    if (node) {
+      nodes.push(node);
+      continue;
+    }
+
+    const knownComponent = knownComponents.find(
+      (component) => component.id === id,
+    );
+    if (knownComponent) nodes.push(knownComponent);
+  }
+  return nodes;
+}
+
+async function readSelectionWithRetry(fallback: CanvasNode[]) {
   const attempts = 6;
   for (let i = 0; i < attempts; i += 1) {
     const selection = await framer.getSelection().catch(() => []);
@@ -799,7 +848,8 @@ async function readSelectionWithRetry() {
     // Framer sometimes applies setSelection asynchronously; give it a beat.
     await new Promise((r) => setTimeout(r, 120));
   }
-  return framer.getSelection().catch(() => []);
+  const finalSelection = await framer.getSelection().catch(() => []);
+  return finalSelection.length > 0 ? finalSelection : fallback;
 }
 
 function toPropKey(value: string) {
@@ -816,7 +866,7 @@ function toPropKey(value: string) {
   return camel.replace(/^[^a-zA-Z]+/, "prop");
 }
 
-function inferExportPropsFromSelection(selection: CanvasNode[]) {
+function inferExportPropsFromSelection(selection: CapturableNode[]) {
   const textNodes = selection.filter((node) => isTextNode(node));
   const firstH1 = textNodes.find((node) => (node as any).tag === "h1");
   const firstH2 = textNodes.find(
@@ -838,7 +888,7 @@ function inferExportPropsFromSelection(selection: CanvasNode[]) {
   };
 }
 
-async function captureSelectionMetadata(selection: CanvasNode[]) {
+async function captureSelectionMetadata(selection: CapturableNode[]) {
   const nodes: SelectionNode[] = [];
   const seen = new Set<string>();
 
@@ -849,7 +899,7 @@ async function captureSelectionMetadata(selection: CanvasNode[]) {
     nodes.push(node);
   };
 
-  const queue: CanvasNode[] = [...selection];
+  const queue: CapturableNode[] = [...selection];
   const maxNodes = 120;
 
   while (queue.length > 0 && nodes.length < maxNodes) {
