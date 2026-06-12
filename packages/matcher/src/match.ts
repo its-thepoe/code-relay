@@ -1,4 +1,5 @@
 import type {
+  FramerTreeNode,
   NodeMatch,
   PluginCanvasCapture,
   RuntimeNode,
@@ -8,8 +9,9 @@ export function matchPluginNodesToDom(
   pluginCapture: PluginCanvasCapture,
   runtimeNodes: RuntimeNode[],
 ): NodeMatch[] {
+  const pluginNodes = getMatchablePluginNodes(pluginCapture);
   // Build all candidate pairs so we can enforce uniqueness and reject low-confidence merges.
-  const candidates = pluginCapture.selectedNodes
+  const candidates = pluginNodes
     .filter((node) => typeof node.id === "string" && node.id.length > 0)
     .flatMap((pluginNode) =>
       runtimeNodes.map((runtimeNode) =>
@@ -44,7 +46,7 @@ export function matchPluginNodesToDom(
     picks.set(candidate.framerNodeId, candidate);
   }
 
-  return pluginCapture.selectedNodes.map((pluginNode) => {
+  return pluginNodes.map((pluginNode) => {
     const pluginId = typeof pluginNode.id === "string" ? pluginNode.id : "";
     if (!pluginId) {
       return { framerNodeId: undefined, confidence: 0, matchReasons: [] };
@@ -58,6 +60,99 @@ export function matchPluginNodesToDom(
       }
     );
   });
+}
+
+function getMatchablePluginNodes(pluginCapture: PluginCanvasCapture) {
+  const selectedNodes = Array.isArray(pluginCapture.selectedNodes)
+    ? pluginCapture.selectedNodes
+    : [];
+  const framerTree = Array.isArray(pluginCapture.context?.framerTree)
+    ? pluginCapture.context.framerTree
+    : [];
+  const selectedById = new Map(
+    selectedNodes
+      .filter((node): node is typeof node & { id: string } => typeof node.id === "string")
+      .map((node) => [node.id, node] as const),
+  );
+
+  const merged = new Map<string, PluginCanvasCapture["selectedNodes"][number]>();
+
+  for (const node of selectedNodes) {
+    if (typeof node.id !== "string" || node.id.length === 0) continue;
+    merged.set(node.id, node);
+  }
+
+  for (const treeNode of framerTree) {
+    const existing = merged.get(treeNode.id);
+    const metadata =
+      existing?.metadata && typeof existing.metadata === "object"
+        ? (existing.metadata as Record<string, unknown>)
+        : {};
+
+    merged.set(treeNode.id, {
+      id: treeNode.id,
+      name: existing?.name ?? treeNode.name,
+      type: existing?.type ?? treeNode.type,
+      text: existing?.text ?? treeNode.text,
+      bounds: existing?.bounds ?? treeNode.rect,
+      metadata: {
+        ...metadata,
+        src: metadata.src ?? treeNode.asset?.src,
+        alt: metadata.alt ?? treeNode.asset?.alt,
+        rootId: metadata.rootId ?? treeNode.rootId,
+        rootName: metadata.rootName ?? treeNode.rootName,
+        rootKind: metadata.rootKind ?? treeNode.rootKind,
+        parentId: metadata.parentId ?? treeNode.parentId,
+        childIds:
+          Array.isArray(metadata.childIds) && metadata.childIds.length > 0
+            ? metadata.childIds
+            : treeNode.childIds,
+        depth: metadata.depth ?? treeNode.depth,
+        path: metadata.path ?? treeNode.path,
+        sectionName:
+          metadata.sectionName ??
+          treeNode.rootName ??
+          treeNode.name ??
+          "Selection",
+        domPath:
+          typeof metadata.domPath === "string" && metadata.domPath.trim().length > 0
+            ? metadata.domPath
+            : buildPluginDomPath(
+                inferPluginTag(existing?.type ?? treeNode.type, treeNode),
+                treeNode.path,
+              ),
+      },
+    });
+  }
+
+  return Array.from(merged.values());
+}
+
+function inferPluginTag(type: string | undefined, treeNode: FramerTreeNode) {
+  if (treeNode.asset?.kind === "image") return "img";
+  const lower = String(type ?? treeNode.type ?? "").toLowerCase();
+  if (lower.includes("text")) return "p";
+  if (lower.includes("image")) return "img";
+  if (lower.includes("button")) return "button";
+  if (lower.includes("svg")) return "svg";
+  if (lower.includes("component")) return "section";
+  return "div";
+}
+
+function buildPluginDomPath(tag: string, path: string) {
+  const tokens = path
+    .split(".")
+    .map((part) => {
+      const match = part.match(/(\d+)$/);
+      return match ? Number(match[1]) : null;
+    })
+    .filter((value): value is number => value != null);
+  if (tokens.length === 0) return `plugin > ${tag}`;
+  return `plugin > ${tokens
+    .map((token, index) =>
+      `${index === tokens.length - 1 ? tag : "div"}:nth-child(${token})`,
+    )
+    .join(" > ")}`;
 }
 
 function scoreMatch(

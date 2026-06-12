@@ -57,9 +57,16 @@ export default async function JobPage({
           </div>
           <div className="mt-4 grid gap-3">
             <Row label="Source URL" value={job.sourceUrl ?? "-"} />
+            <Row label="Export mode" value={job.exportMode ?? "selection"} />
             <Row label="Selector" value={job.selector ?? "-"} />
-            <Row label="Created" value={new Date(job.createdAt).toLocaleString()} />
-            <Row label="Updated" value={new Date(job.updatedAt).toLocaleString()} />
+            <Row
+              label="Created"
+              value={new Date(job.createdAt).toLocaleString()}
+            />
+            <Row
+              label="Updated"
+              value={new Date(job.updatedAt).toLocaleString()}
+            />
             <Row label="Error" value={job.errorMessage ?? "-"} />
           </div>
         </div>
@@ -67,15 +74,20 @@ export default async function JobPage({
         <div className="rounded-xl border border-black/10 bg-white p-5 shadow-sm">
           <div className="text-sm font-extrabold text-zinc-950">Actions</div>
           <div className="mt-4 grid gap-2">
-            <Link
-              className="inline-flex h-10 items-center justify-center rounded-lg border border-black/10 bg-white px-3 text-sm font-bold text-zinc-950 hover:bg-zinc-50"
-              href={`/api/jobs/${job.id}/artifact?type=preview`}
-              target="_blank"
-              rel="noreferrer"
-              aria-disabled={!hasPreview}
-            >
-              Open Preview
-            </Link>
+            {hasPreview ? (
+              <Link
+                className="inline-flex h-10 items-center justify-center rounded-lg border border-black/10 bg-white px-3 text-sm font-bold text-zinc-950 hover:bg-zinc-50"
+                href={`/api/jobs/${job.id}/artifact?type=preview`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open Preview
+              </Link>
+            ) : (
+              <div className="inline-flex h-10 items-center justify-center rounded-lg border border-dashed border-black/10 bg-zinc-50 px-3 text-sm font-semibold text-zinc-500">
+                Preview unavailable
+              </div>
+            )}
             <Link
               className="inline-flex h-10 items-center justify-center rounded-lg bg-zinc-950 px-3 text-sm font-extrabold text-white hover:bg-zinc-900"
               href={`/api/jobs/${job.id}/artifact?type=zip`}

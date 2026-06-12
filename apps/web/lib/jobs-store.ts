@@ -1,14 +1,17 @@
 import fs from "node:fs/promises";
+import fssync from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 
 export type LocalJobStatus = "queued" | "running" | "completed" | "failed";
+export type LocalExportMode = "selection" | "components" | "full-site";
 
 export type LocalExportJob = {
   id: string;
   status: LocalJobStatus;
   sourceUrl?: string;
   selector?: string;
+  exportMode?: LocalExportMode;
   pluginCapture?: unknown;
   title?: string;
   createdAt: string;
@@ -22,8 +25,23 @@ export type LocalExportJob = {
   };
 };
 
-const rootDir = process.cwd();
-const jobsDir = path.join(rootDir, ".coderelay", "jobs");
+function resolveRepoRoot() {
+  let current = process.cwd();
+  for (let depth = 0; depth < 8; depth += 1) {
+    const marker = path.join(current, "apps", "web");
+    if (fssync.existsSync(marker)) {
+      return current;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return process.cwd();
+}
+
+const repoRoot = resolveRepoRoot();
+const jobsDir = path.join(repoRoot, ".coderelay", "jobs");
+const legacyJobsDir = path.join(process.cwd(), ".coderelay", "jobs");
 
 async function ensureDirs() {
   await fs.mkdir(jobsDir, { recursive: true });
@@ -35,13 +53,22 @@ function jobPath(id: string) {
 
 export async function readAllJobs(): Promise<LocalExportJob[]> {
   await ensureDirs();
-  const files = await fs.readdir(jobsDir).catch(() => []);
-  const jsonFiles = files.filter((file) => file.endsWith(".json"));
+  const dirs = legacyJobsDir === jobsDir ? [jobsDir] : [jobsDir, legacyJobsDir];
+  const jsonFiles = (
+    await Promise.all(
+      dirs.map(async (dir) => {
+        const files = await fs.readdir(dir).catch(() => []);
+        return files
+          .filter((file) => file.endsWith(".json"))
+          .map((file) => path.join(dir, file));
+      }),
+    )
+  ).flat();
 
   const jobs = await Promise.all(
-    jsonFiles.map(async (file) => {
+    jsonFiles.map(async (filePath) => {
       try {
-        const raw = await fs.readFile(path.join(jobsDir, file), "utf8");
+        const raw = await fs.readFile(filePath, "utf8");
         return JSON.parse(raw) as LocalExportJob;
       } catch {
         return null;
@@ -49,11 +76,18 @@ export async function readAllJobs(): Promise<LocalExportJob[]> {
     }),
   );
 
-  return jobs
-    .filter(Boolean)
-    .sort((a, b) =>
-      b!.createdAt.localeCompare(a!.createdAt),
-    ) as LocalExportJob[];
+  const byId = new Map<string, LocalExportJob>();
+  for (const job of jobs) {
+    if (!job) continue;
+    const existing = byId.get(job.id);
+    if (!existing || job.updatedAt > existing.updatedAt) {
+      byId.set(job.id, job);
+    }
+  }
+
+  return Array.from(byId.values()).sort((a, b) =>
+    b.createdAt.localeCompare(a.createdAt),
+  );
 }
 
 export async function readJob(id: string): Promise<LocalExportJob | null> {
@@ -82,8 +116,24 @@ export async function createJobFromRequest(
       : undefined;
   const sourceUrlRaw =
     typeof input?.sourceUrl === "string" ? input.sourceUrl.trim() : "";
+  const publishedUrlFromContext =
+    typeof pluginCapture?.context?.publishedUrl === "string"
+      ? pluginCapture.context.publishedUrl.trim()
+      : "";
+  const productionUrlFromContext =
+    typeof pluginCapture?.context?.publishInfo?.production?.url === "string"
+      ? pluginCapture.context.publishInfo.production.url.trim()
+      : "";
+  const stagingUrlFromContext =
+    typeof pluginCapture?.context?.publishInfo?.staging?.url === "string"
+      ? pluginCapture.context.publishInfo.staging.url.trim()
+      : "";
   const sourceUrl =
-    sourceUrlRaw || (projectId ? `framer://project/${projectId}` : "");
+    sourceUrlRaw ||
+    publishedUrlFromContext ||
+    productionUrlFromContext ||
+    stagingUrlFromContext ||
+    (projectId ? `framer://project/${projectId}` : "");
   if (!sourceUrl && !pluginCapture) {
     throw new Error("sourceUrl or pluginCapture is required.");
   }
@@ -92,6 +142,9 @@ export async function createJobFromRequest(
     typeof input?.selector === "string" && input.selector.trim()
       ? input.selector.trim()
       : undefined;
+  const exportMode = normalizeExportMode(
+    input?.exportMode ?? pluginCapture?.context?.exportMode,
+  );
   const id = `job_${crypto.randomBytes(8).toString("hex")}`;
   const now = new Date().toISOString();
 
@@ -100,6 +153,7 @@ export async function createJobFromRequest(
     status: "queued",
     sourceUrl: sourceUrl || undefined,
     selector,
+    exportMode,
     pluginCapture,
     createdAt: now,
     updatedAt: now,
@@ -107,4 +161,10 @@ export async function createJobFromRequest(
 
   await writeJob(job);
   return job;
+}
+
+function normalizeExportMode(value: unknown): LocalExportMode {
+  if (value === "full-site") return "full-site";
+  if (value === "components") return "components";
+  return "selection";
 }

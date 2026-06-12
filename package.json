@@ -8,6 +8,7 @@
     "dev:web": "cd apps/web && next dev -p 3000",
     "dev:worker": "tsx apps/worker/src/index.ts",
     "dev": "npm run dev:web",
+    "test:exporter": "node --import tsx --test packages/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.json",
     "format": "prettier --write ."

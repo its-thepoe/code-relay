@@ -1,14 +1,17 @@
 import path from "node:path";
 import fs from "node:fs/promises";
+import fssync from "node:fs";
 import { runLocalExport } from "../../../packages/exporter-core/src/local-export.js";
 
 type LocalJobStatus = "queued" | "running" | "completed" | "failed";
+type LocalExportMode = "selection" | "components" | "full-site";
 
 type LocalExportJob = {
   id: string;
   status: LocalJobStatus;
   sourceUrl?: string;
   selector?: string;
+  exportMode?: LocalExportMode;
   pluginCapture?: unknown;
   title?: string;
   createdAt: string;
@@ -22,9 +25,24 @@ type LocalExportJob = {
   };
 };
 
-const rootDir = process.cwd();
-const jobsDir = path.join(rootDir, ".coderelay", "jobs");
-const artifactsDir = path.join(rootDir, ".coderelay", "artifacts");
+function resolveRepoRoot() {
+  let current = process.cwd();
+  for (let depth = 0; depth < 8; depth += 1) {
+    const marker = path.join(current, "apps", "web");
+    if (fssync.existsSync(marker)) {
+      return current;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return process.cwd();
+}
+
+const repoRoot = resolveRepoRoot();
+const jobsDir = path.join(repoRoot, ".coderelay", "jobs");
+const artifactsDir = path.join(repoRoot, ".coderelay", "artifacts");
+const legacyJobsDir = path.join(process.cwd(), ".coderelay", "jobs");
 
 async function sleep(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -55,18 +73,30 @@ async function writeJob(job: LocalExportJob) {
 }
 
 async function claimNextJob(): Promise<LocalExportJob | null> {
-  const files = await fs.readdir(jobsDir).catch(() => []);
-  for (const file of files) {
-    if (!file.endsWith(".json")) continue;
-    const full = path.join(jobsDir, file);
-    const job = await readJobFile(full);
-    if (!job) continue;
-    if (job.status !== "queued") continue;
+  const dirs = legacyJobsDir === jobsDir ? [jobsDir] : [jobsDir, legacyJobsDir];
 
-    job.status = "running";
-    await writeJob(job);
-    return job;
+  for (const dir of dirs) {
+    const files = await fs.readdir(dir).catch(() => []);
+    for (const file of files) {
+      if (!file.endsWith(".json")) continue;
+      const full = path.join(dir, file);
+      const job = await readJobFile(full);
+      if (!job) continue;
+      if (job.status !== "queued") continue;
+
+      job.status = "running";
+      await writeJob(job);
+
+      // If this job lived in a legacy directory, delete the stale copy after
+      // writing the authoritative version under repoRoot.
+      if (dir !== jobsDir) {
+        await fs.unlink(full).catch(() => undefined);
+      }
+
+      return job;
+    }
   }
+
   return null;
 }
 
@@ -80,6 +110,7 @@ async function processJob(job: LocalExportJob) {
       pluginCapture: job.pluginCapture as any,
       outDir,
       selector: job.selector,
+      exportMode: job.exportMode,
       maxAttempts: 3,
       targetFidelity: 0.95,
     });

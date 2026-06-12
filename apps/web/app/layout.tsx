@@ -13,7 +13,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body>
         <div className="min-h-dvh bg-zinc-50">
           <div className="mx-auto flex w-full max-w-[1280px] gap-10 px-6 py-6">

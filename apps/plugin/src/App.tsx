@@ -1,11 +1,16 @@
 import {
   framer,
   isTextNode,
+  isComponentInstanceNode,
+  isComponentNode,
+  isFrameNode,
+  isSVGNode,
   FramerPluginClosedError,
   type ComponentNode,
   type CanvasNode,
 } from "framer-plugin";
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { extractFramerNodeStyles } from "./framer-style-extraction";
 import "./App.css";
 
 type DebugEvent = {
@@ -42,6 +47,36 @@ type PluginCapture = {
 };
 
 type CapturableNode = CanvasNode | ComponentNode | unknown;
+type ExportMode = "selection" | "components" | "full-site";
+type ExportEngine =
+  | "component-module"
+  | "page-node-tree"
+  | "published-runtime"
+  | "hybrid"
+  | "plugin-approximation";
+type ComponentModuleManifest = {
+  id?: string;
+  name: string;
+  source:
+    | "component-node"
+    | "component-instance"
+    | "code-file-export"
+    | "selected-component";
+  insertURL: string;
+  componentIdentifier?: string;
+  componentName?: string;
+  codeFileId?: string;
+  codeFileName?: string;
+  isDefaultExport?: boolean;
+  controls?: Record<string, unknown>;
+  typedControls?: Record<string, unknown>;
+};
+type FullSiteRoots = {
+  roots: CapturableNode[];
+  pages: CapturableNode[];
+  components: CapturableNode[];
+  rootKinds: Record<string, "page" | "component" | "canvas-root">;
+};
 
 function useSelection() {
   const [selection, setSelection] = useState<CanvasNode[]>([]);
@@ -67,6 +102,7 @@ export function App() {
   const [resolvedSourceUrl, setResolvedSourceUrl] = useState("");
   const [apiBaseUrl, setApiBaseUrl] = useState("http://localhost:3000");
   const [busy, setBusy] = useState(false);
+  const [exportMode, setExportMode] = useState<ExportMode>("selection");
   const selection = useSelection();
   const [debug, setDebug] = useState<DebugEvent[]>([]);
   const [showDebug, setShowDebug] = useState(false);
@@ -81,6 +117,9 @@ export function App() {
   const simplified = useMemo(() => simplifySelection(selection), [selection]);
   const selectionLabel =
     simplified.length === 1 ? "1 item" : `${simplified.length} items`;
+
+  const allComponentsSelected =
+    components.length > 0 && selectedComponentIds.length === components.length;
 
   const log = (level: DebugEvent["level"], message: string, data?: unknown) => {
     setDebug((prev) => {
@@ -113,12 +152,7 @@ export function App() {
         setProject({ id: info.id, name: info.name });
         log("info", "Project info loaded", info);
         const publishInfo = await framer.getPublishInfo().catch(() => null);
-        const publishUrl =
-          publishInfo &&
-          typeof (publishInfo as any).url === "string" &&
-          (publishInfo as any).url.length > 0
-            ? String((publishInfo as any).url)
-            : undefined;
+        const publishUrl = getPublishUrl(publishInfo);
         if (publishUrl) setResolvedSourceUrl(publishUrl);
         log("info", "Publish info loaded", publishInfo);
 
@@ -147,16 +181,19 @@ export function App() {
 
   async function onCreateJob() {
     const captureSource =
-      selectedComponentIds.length > 0
-        ? "component-catalog"
-        : "canvas-selection";
+      exportMode === "full-site"
+        ? "full-site"
+        : exportMode === "components" || selectedComponentIds.length > 0
+          ? "component-catalog"
+          : "canvas-selection";
     log("info", "Create export job clicked", {
+      exportMode,
       captureSource,
       selectedComponentIdsCount: selectedComponentIds.length,
       selectionCount: selection.length,
     });
 
-    if (simplified.length === 0 && selectedComponentIds.length === 0) {
+    if (exportMode === "selection" && simplified.length === 0) {
       framer.notify("Select a section or component on the canvas first.", {
         variant: "error",
       });
@@ -164,17 +201,47 @@ export function App() {
       return;
     }
 
+    if (
+      exportMode === "components" &&
+      selectedComponentIds.length === 0 &&
+      components.length === 0
+    ) {
+      framer.notify("No Framer components were found in this project.", {
+        variant: "error",
+      });
+      log("warn", "Blocked: no project components to export");
+      return;
+    }
+
     setBusy(true);
     try {
       let sourceNodes: CapturableNode[] = [];
+      let fullSiteRoots: FullSiteRoots | null = null;
 
-      if (selectedComponentIds.length > 0) {
-        log("info", "Reading chosen components directly by id", {
-          selectedComponentIds,
+      if (exportMode === "full-site") {
+        log("info", "Reading full site roots from Framer");
+        fullSiteRoots = await readFullSiteRoots(components);
+        sourceNodes = fullSiteRoots.roots;
+        log("info", "Read full site roots", {
+          roots: sourceNodes.length,
+          pages: fullSiteRoots.pages.length,
+          components: fullSiteRoots.components.length,
+          ids: sourceNodes.map((n: any) => n?.id).filter(Boolean),
         });
-        sourceNodes = await readNodesByIds(selectedComponentIds, components);
+      } else if (
+        exportMode === "components" ||
+        selectedComponentIds.length > 0
+      ) {
+        const componentIds =
+          selectedComponentIds.length > 0
+            ? selectedComponentIds
+            : components.map((node) => node.id);
+        log("info", "Reading chosen components directly by id", {
+          componentIds,
+        });
+        sourceNodes = await readNodesByIds(componentIds, components);
         log("info", "Read chosen component nodes", {
-          requested: selectedComponentIds.length,
+          requested: componentIds.length,
           found: sourceNodes.length,
           ids: sourceNodes.map((n: any) => n?.id).filter(Boolean),
         });
@@ -190,9 +257,11 @@ export function App() {
 
       if (liveSimplified.length === 0) {
         const reason =
-          selectedComponentIds.length > 0
-            ? "Chosen components could not be read from Framer."
-            : "Canvas selection is empty.";
+          exportMode === "full-site"
+            ? "Could not read any pages or components from this Framer project."
+            : exportMode === "components" || selectedComponentIds.length > 0
+              ? "Chosen components could not be read from Framer."
+              : "Canvas selection is empty.";
         framer.notify(reason, { variant: "error" });
         log("error", "Blocked: no readable export nodes", {
           captureSource,
@@ -202,18 +271,28 @@ export function App() {
         return;
       }
 
-      const richSelectedNodes = await captureSelectionMetadata(sourceNodes);
+      const richSelectedNodes = await captureSelectionMetadata(sourceNodes, {
+        rootKinds: fullSiteRoots?.rootKinds,
+      });
       log("info", "Captured selection metadata", {
         count: richSelectedNodes.length,
+        textNodes: richSelectedNodes.filter((node) => node.text).length,
       });
       const exportProps = inferExportPropsFromSelection(sourceNodes);
       log("info", "Inferred export props", exportProps);
       const context = await collectPluginContext({
+        exportMode,
         selection: sourceNodes,
         project,
         components,
-        selectedComponentIds,
+        selectedComponentIds:
+          exportMode === "full-site"
+            ? components.map((node) => node.id)
+            : selectedComponentIds,
         captureSource,
+        sitePages: fullSiteRoots?.pages ?? [],
+        sourceUrl: sourceUrl.trim(),
+        resolvedSourceUrl,
       });
       log("info", "Collected context", context);
 
@@ -239,6 +318,7 @@ export function App() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             sourceUrl: effectiveSourceUrl,
+            exportMode,
             pluginCapture,
           }),
         },
@@ -389,6 +469,64 @@ export function App() {
         </div>
       </label>
 
+      <div style={{ display: "grid", gap: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.8 }}>
+          Export mode
+        </div>
+        <div
+          role="radiogroup"
+          aria-label="Export mode"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr 1fr",
+            gap: 6,
+          }}
+        >
+          {(
+            [
+              ["selection", "Selection"],
+              ["components", "Components"],
+              ["full-site", "Full site"],
+            ] as const
+          ).map(([value, label]) => {
+            const active = exportMode === value;
+            return (
+              <div
+                key={value}
+                role="radio"
+                aria-checked={active}
+                tabIndex={0}
+                onClick={() => setExportMode(value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setExportMode(value);
+                  }
+                }}
+                style={{
+                  height: 34,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  borderRadius: 8,
+                  border: active
+                    ? "1px solid rgba(0,0,0,0.82)"
+                    : "1px solid rgba(0,0,0,0.15)",
+                  background: active ? "#111" : "rgba(255,255,255,0.92)",
+                  color: active ? "#fff" : "#111",
+                  fontSize: 12,
+                  fontWeight: 800,
+                  cursor: "pointer",
+                  userSelect: "none",
+                }}
+              >
+                {label}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       <label style={{ display: "grid", gap: 6 }}>
         <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.8 }}>
           API base URL
@@ -418,8 +556,69 @@ export function App() {
           Project {project ? `(${project.name})` : ""}
         </summary>
         <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
-          <div style={{ fontSize: 12, opacity: 0.8 }}>
-            Components: <strong>{components.length}</strong>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+              fontSize: 12,
+              opacity: 0.9,
+            }}
+          >
+            <div style={{ opacity: 0.9 }}>
+              Components: <strong>{components.length}</strong>
+              {components.length > 0 ? (
+                <>
+                  {" "}
+                  <span style={{ opacity: 0.7 }}>
+                    ({selectedComponentIds.length} selected)
+                  </span>
+                </>
+              ) : null}
+            </div>
+
+            {components.length > 0 ? (
+              <span
+                role="button"
+                tabIndex={0}
+                title={allComponentsSelected ? "Unselect all" : "Select all"}
+                onClick={(event) => {
+                  event.preventDefault();
+                  if (allComponentsSelected) {
+                    setSelectedComponentIds([]);
+                  } else {
+                    setSelectedComponentIds(components.map((node) => node.id));
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    if (allComponentsSelected) {
+                      setSelectedComponentIds([]);
+                    } else {
+                      setSelectedComponentIds(
+                        components.map((node) => node.id),
+                      );
+                    }
+                  }
+                }}
+                style={{
+                  height: 28,
+                  padding: "0 10px",
+                  borderRadius: 999,
+                  border: "1px solid rgba(0,0,0,0.18)",
+                  background: "rgba(255,255,255,0.9)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  fontWeight: 800,
+                  cursor: "pointer",
+                  userSelect: "none",
+                }}
+              >
+                {allComponentsSelected ? "Unselect all" : "Select all"}
+              </span>
+            ) : null}
           </div>
           <div
             style={{
@@ -512,8 +711,8 @@ export function App() {
             )}
           </div>
           <div style={{ fontSize: 11, opacity: 0.7, lineHeight: 1.4 }}>
-            Pick components here to export. If none are selected, we export the
-            current canvas selection.
+            Component mode exports checked components. Full site mode exports
+            project pages and component definitions from Framer.
           </div>
         </div>
       </details>
@@ -554,14 +753,20 @@ export function App() {
             opacity: busy ? 0.7 : 1,
           }}
         >
-          {busy ? "Creating…" : "Create Export Job"}
+          {busy
+            ? "Creating…"
+            : exportMode === "full-site"
+              ? "Export Full Site"
+              : exportMode === "components"
+                ? "Export Components"
+                : "Export Selection"}
         </div>
 
         <div
           style={{ fontSize: 11, opacity: 0.7, lineHeight: 1.4, marginTop: 8 }}
         >
-          MVP test: no auth. Sends lightweight selection metadata + URL to the
-          local dashboard.
+          No auth locally. Sends Framer project metadata to the dashboard
+          worker.
         </div>
       </div>
 
@@ -646,16 +851,25 @@ export function App() {
 }
 
 async function collectPluginContext(input: {
+  exportMode: ExportMode;
   selection: CapturableNode[];
   project: { id: string; name: string } | null;
   components: ComponentNode[];
   selectedComponentIds: string[];
-  captureSource: "component-catalog" | "canvas-selection";
+  captureSource: "component-catalog" | "canvas-selection" | "full-site";
+  sitePages?: CapturableNode[];
+  sourceUrl?: string;
+  resolvedSourceUrl?: string;
 }) {
   const selectedComponents = input.components
     .filter((node) => input.selectedComponentIds.includes(node.id))
     .map((node) => sanitizeNode(node));
   const selectionSnapshot = input.selection.map((node) => sanitizeNode(node));
+  const selectedComponentNodes = input.components.filter((node) =>
+    input.selectedComponentIds.includes(node.id),
+  );
+  const selectedOrAllComponents =
+    selectedComponentNodes.length > 0 ? selectedComponentNodes : input.components;
 
   const methodsToCheck = [
     "ManagedCollection.setFields",
@@ -664,21 +878,71 @@ async function collectPluginContext(input: {
     "ManagedCollection.setPluginData",
   ] as const;
 
-  const [projectInfo, managedCollections, collections, canSync] =
-    await Promise.all([
-      safeCall(() => framer.getProjectInfo()),
-      safeCall(() => framer.getManagedCollections()),
-      safeCall(() => framer.getCollections()),
-      safeCall(() => framer.isAllowedTo(...methodsToCheck)),
-    ]);
+  const [
+    projectInfo,
+    publishInfo,
+    managedCollections,
+    collections,
+    canSync,
+    codeFiles,
+    colorStyles,
+    textStyles,
+    fonts,
+  ] = await Promise.all([
+    safeCall(() => framer.getProjectInfo()),
+    safeCall(() => framer.getPublishInfo()),
+    safeCall(() => framer.getManagedCollections()),
+    safeCall(() => framer.getCollections()),
+    safeCall(() => framer.isAllowedTo(...methodsToCheck)),
+    safeCall(() => framer.getCodeFiles()),
+    safeCall(() => framer.getColorStyles()),
+    safeCall(() => framer.getTextStyles()),
+    safeCall(() => framer.getFonts()),
+  ]);
+
+  const componentModules = collectComponentModules({
+    components: selectedOrAllComponents,
+    selection: input.selection,
+    codeFiles: codeFiles.ok ? codeFiles.value : [],
+  });
+  const hasPublishedUrl = Boolean(
+    input.sourceUrl?.match(/^https?:\/\//) ||
+      input.resolvedSourceUrl?.match(/^https?:\/\//) ||
+      (publishInfo.ok && getPublishUrl(publishInfo.value)),
+  );
+  const exportEngine = chooseExportEngine({
+    exportMode: input.exportMode,
+    hasPublishedUrl,
+    componentModules,
+  });
+  const cmsCollections = await collectCmsCollections({
+    managedCollections: managedCollections.ok ? managedCollections.value : [],
+    collections: collections.ok ? collections.value : [],
+  });
 
   return {
     capturedAt: new Date().toISOString(),
     pluginMode: framer.mode,
+    exportMode: input.exportMode,
+    captureMode: hasPublishedUrl ? "runtime-first" : "plugin-only",
+    exportEngine,
     captureSource: input.captureSource,
     project: input.project,
     projectInfo: projectInfo.ok ? sanitizeObject(projectInfo.value) : null,
+    publishInfo: publishInfo.ok ? sanitizeObject(publishInfo.value) : null,
+    publishedUrl: publishInfo.ok ? getPublishUrl(publishInfo.value) : null,
     selectedComponents,
+    componentModules,
+    codeFiles: codeFiles.ok ? codeFiles.value.map(sanitizeCodeFile) : [],
+    colorStyles: colorStyles.ok
+      ? colorStyles.value.map((style) => sanitizeObject(style))
+      : [],
+    textStyles: textStyles.ok
+      ? textStyles.value.map((style) => sanitizeObject(style))
+      : [],
+    fonts: fonts.ok ? fonts.value.map((font) => sanitizeObject(font)) : [],
+    cmsCollections,
+    sitePages: (input.sitePages ?? []).map((node) => sanitizeNode(node)),
     selectionSnapshot,
     selectionCount: input.selection.length,
     componentCount: input.components.length,
@@ -705,11 +969,174 @@ async function collectPluginContext(input: {
       hasManagedCollections: managedCollections.ok,
       hasCollections: collections.ok,
       hasSyncPermissionInfo: canSync.ok,
+      hasCodeFiles: codeFiles.ok,
+      hasColorStyles: colorStyles.ok,
+      hasTextStyles: textStyles.ok,
+      hasFonts: fonts.ok,
+      hasCmsCollections: cmsCollections.length > 0,
     },
   };
 }
 
-async function safeCall<T>(fn: () => Promise<T>) {
+async function collectCmsCollections(input: {
+  managedCollections: readonly unknown[];
+  collections: readonly unknown[];
+}) {
+  const managed = await Promise.all(
+    input.managedCollections.map((entry) => collectManagedCmsCollection(entry)),
+  );
+  const unmanaged = await Promise.all(
+    input.collections.map((entry) => collectUnmanagedCmsCollection(entry)),
+  );
+
+  const output = [...managed, ...unmanaged].filter(
+    (entry): entry is Record<string, unknown> => Boolean(entry),
+  );
+  const deduped = new Map<string, Record<string, unknown>>();
+  for (const collection of output) {
+    const id =
+      typeof collection.id === "string" && collection.id.trim()
+        ? collection.id.trim()
+        : undefined;
+    if (!id || deduped.has(id)) continue;
+    deduped.set(id, collection);
+  }
+  return Array.from(deduped.values());
+}
+
+async function collectManagedCmsCollection(entry: unknown) {
+  if (!entry || typeof entry !== "object") return null;
+  const collection = entry as Record<string, unknown>;
+  const getFields = typeof collection.getFields === "function" ? collection.getFields : null;
+  const getItemIds =
+    typeof collection.getItemIds === "function" ? collection.getItemIds : null;
+  const getPluginDataKeys =
+    typeof collection.getPluginDataKeys === "function"
+      ? collection.getPluginDataKeys
+      : null;
+  const getPluginData =
+    typeof collection.getPluginData === "function"
+      ? (collection.getPluginData as (
+          this: unknown,
+          key: string,
+        ) => Promise<string | null>)
+      : null;
+
+  const [fieldsResult, itemIdsResult, pluginDataKeysResult] = await Promise.all([
+    safeCall(() => (getFields ? getFields.call(entry) : [])),
+    safeCall(() => (getItemIds ? getItemIds.call(entry) : [])),
+    safeCall(() => (getPluginDataKeys ? getPluginDataKeys.call(entry) : [])),
+  ]);
+
+  const pluginData = await readPluginDataRecord({
+    owner: entry,
+    keys: pluginDataKeysResult.ok ? pluginDataKeysResult.value : [],
+    getPluginData,
+  });
+
+  return sanitizeObject({
+    id: collection.id,
+    name: collection.name,
+    managed: true,
+    pluginData,
+    itemIds: itemIdsResult.ok
+      ? itemIdsResult.value.filter(
+          (itemId: unknown): itemId is string =>
+            typeof itemId === "string" && itemId.trim().length > 0,
+        )
+      : [],
+    fields: fieldsResult.ok
+      ? fieldsResult.value.map((field: unknown) => sanitizeCmsField(field))
+      : [],
+    items: [],
+  });
+}
+
+async function collectUnmanagedCmsCollection(entry: unknown) {
+  if (!entry || typeof entry !== "object") return null;
+  const collection = entry as Record<string, unknown>;
+  const getFields = typeof collection.getFields === "function" ? collection.getFields : null;
+  const getItems = typeof collection.getItems === "function" ? collection.getItems : null;
+  const getPluginDataKeys =
+    typeof collection.getPluginDataKeys === "function"
+      ? collection.getPluginDataKeys
+      : null;
+  const getPluginData =
+    typeof collection.getPluginData === "function"
+      ? (collection.getPluginData as (
+          this: unknown,
+          key: string,
+        ) => Promise<string | null>)
+      : null;
+
+  const [fieldsResult, itemsResult, pluginDataKeysResult] = await Promise.all([
+    safeCall(() => (getFields ? getFields.call(entry) : [])),
+    safeCall(() => (getItems ? getItems.call(entry) : [])),
+    safeCall(() => (getPluginDataKeys ? getPluginDataKeys.call(entry) : [])),
+  ]);
+
+  const pluginData = await readPluginDataRecord({
+    owner: entry,
+    keys: pluginDataKeysResult.ok ? pluginDataKeysResult.value : [],
+    getPluginData,
+  });
+
+  return sanitizeObject({
+    id: collection.id,
+    name: collection.name,
+    managed: collection.managedBy && collection.managedBy !== "user",
+    pluginData,
+    fields: fieldsResult.ok
+      ? fieldsResult.value.map((field: unknown) => sanitizeCmsField(field))
+      : [],
+    items: itemsResult.ok
+      ? itemsResult.value.map((item: unknown) => sanitizeCmsItem(item))
+      : [],
+  });
+}
+
+async function readPluginDataRecord(input: {
+  owner: unknown;
+  keys: readonly unknown[];
+  getPluginData: ((this: unknown, key: string) => Promise<string | null>) | null;
+}) {
+  if (!input.getPluginData) return {};
+  const keys = input.keys.filter((key): key is string => typeof key === "string");
+  const entries = await Promise.all(
+    keys.map(async (key) => {
+      const result = await safeCall(() => input.getPluginData!.call(input.owner, key));
+      if (!result.ok || result.value == null) return null;
+      return [key, result.value] as const;
+    }),
+  );
+  return Object.fromEntries(entries.filter(Boolean) as Array<readonly [string, string]>);
+}
+
+function sanitizeCmsField(field: unknown) {
+  if (!field || typeof field !== "object") return {};
+  const raw = field as Record<string, unknown>;
+  return sanitizeObject({
+    id: raw.id,
+    name: raw.name,
+    type: raw.type,
+    userEditable: raw.userEditable,
+    collectionId: raw.collectionId,
+    cases: raw.cases,
+  });
+}
+
+function sanitizeCmsItem(item: unknown) {
+  if (!item || typeof item !== "object") return {};
+  const raw = item as Record<string, unknown>;
+  return sanitizeObject({
+    id: raw.id,
+    slug: raw.slug,
+    draft: raw.draft,
+    fieldData: raw.fieldData,
+  });
+}
+
+async function safeCall<T>(fn: () => T | Promise<T>) {
   try {
     const value = await fn();
     return { ok: true as const, value };
@@ -734,7 +1161,48 @@ function sanitizeNode(node: unknown) {
     size: raw.size,
     opacity: raw.opacity,
     rotation: raw.rotation,
+    zIndex: raw.zIndex,
+    overflow: raw.overflow,
+    backgroundColor: raw.backgroundColor,
+    backgroundImage: raw.backgroundImage,
+    backgroundGradient: raw.backgroundGradient,
+    borderRadius: raw.borderRadius,
+    border: raw.border,
+    link: raw.link,
+    linkOpenInNewTab: raw.linkOpenInNewTab,
+    layout: raw.layout,
+    gap: raw.gap,
+    padding: raw.padding,
+    width: raw.width,
+    height: raw.height,
+    minWidth: raw.minWidth,
+    maxWidth: raw.maxWidth,
+    minHeight: raw.minHeight,
+    maxHeight: raw.maxHeight,
+    aspectRatio: raw.aspectRatio,
+    top: raw.top,
+    right: raw.right,
+    bottom: raw.bottom,
+    left: raw.left,
+    centerX: raw.centerX,
+    centerY: raw.centerY,
+    gridItemFillCellWidth: raw.gridItemFillCellWidth,
+    gridItemFillCellHeight: raw.gridItemFillCellHeight,
+    gridItemHorizontalAlignment: raw.gridItemHorizontalAlignment,
+    gridItemVerticalAlignment: raw.gridItemVerticalAlignment,
+    gridItemColumnSpan: raw.gridItemColumnSpan,
+    gridItemRowSpan: raw.gridItemRowSpan,
     componentIdentifier: raw.componentIdentifier,
+    componentName: raw.componentName,
+    insertURL: raw.insertURL,
+    controls: raw.controls,
+    typedControls: raw.typedControls,
+    isVariant: raw.isVariant,
+    isPrimaryVariant: raw.isPrimaryVariant,
+    gesture: raw.gesture,
+    inheritsFromId: raw.inheritsFromId,
+    font: raw.font,
+    inlineTextStyle: raw.inlineTextStyle,
     text:
       typeof raw.text === "string"
         ? raw.text.slice(0, 400)
@@ -742,6 +1210,151 @@ function sanitizeNode(node: unknown) {
           ? raw.characters.slice(0, 400)
           : undefined,
   });
+}
+
+function getPublishUrl(value: unknown) {
+  if (!value || typeof value !== "object") return "";
+  const raw = value as Record<string, unknown>;
+  const direct = typeof raw.url === "string" ? raw.url : "";
+  if (/^https?:\/\//.test(direct)) return direct;
+  for (const key of ["production", "staging"] as const) {
+    const publish = raw[key];
+    if (!publish || typeof publish !== "object") continue;
+    const url = (publish as Record<string, unknown>).url;
+    if (typeof url === "string" && /^https?:\/\//.test(url)) return url;
+  }
+  return "";
+}
+
+function sanitizeCodeFile(codeFile: unknown) {
+  if (!codeFile || typeof codeFile !== "object") return {};
+  const raw = codeFile as Record<string, unknown>;
+  return sanitizeObject({
+    id: raw.id,
+    name: raw.name,
+    path: raw.path,
+    versionId: raw.versionId,
+    exports: raw.exports,
+  });
+}
+
+function chooseExportEngine(input: {
+  exportMode: ExportMode;
+  hasPublishedUrl: boolean;
+  componentModules: ComponentModuleManifest[];
+}): ExportEngine {
+  if (input.exportMode === "components" && input.componentModules.length > 0) {
+    return "component-module";
+  }
+  if (input.exportMode === "full-site" && input.hasPublishedUrl) {
+    return "hybrid";
+  }
+  if (input.exportMode === "full-site") return "page-node-tree";
+  if (input.hasPublishedUrl) return "published-runtime";
+  return input.componentModules.length > 0
+    ? "component-module"
+    : "plugin-approximation";
+}
+
+function collectComponentModules(input: {
+  components: CapturableNode[];
+  selection: CapturableNode[];
+  codeFiles: readonly unknown[];
+}) {
+  const modules = new Map<string, ComponentModuleManifest>();
+
+  const add = (entry: ComponentModuleManifest) => {
+    if (!entry.insertURL || !/^https?:\/\//.test(entry.insertURL)) return;
+    const key = `${entry.source}:${entry.insertURL}:${entry.name}`;
+    if (!modules.has(key)) modules.set(key, entry);
+  };
+
+  for (const node of input.components) {
+    const raw = node as Record<string, unknown>;
+    const insertURL = typeof raw.insertURL === "string" ? raw.insertURL : "";
+    add({
+      id: typeof raw.id === "string" ? raw.id : undefined,
+      name:
+        typeof raw.name === "string" && raw.name.trim()
+          ? raw.name.trim()
+          : typeof raw.componentName === "string" && raw.componentName.trim()
+            ? raw.componentName.trim()
+            : "FramerComponent",
+      source: "component-node",
+      insertURL,
+      componentIdentifier:
+        typeof raw.componentIdentifier === "string"
+          ? raw.componentIdentifier
+          : undefined,
+      componentName:
+        typeof raw.componentName === "string" ? raw.componentName : undefined,
+      controls: sanitizeRecord(raw.controls),
+      typedControls: sanitizeRecord(raw.typedControls),
+    });
+  }
+
+  for (const node of input.selection) {
+    const raw = node as Record<string, unknown>;
+    const insertURL = typeof raw.insertURL === "string" ? raw.insertURL : "";
+    add({
+      id: typeof raw.id === "string" ? raw.id : undefined,
+      name:
+        typeof raw.componentName === "string" && raw.componentName.trim()
+          ? raw.componentName.trim()
+          : typeof raw.name === "string" && raw.name.trim()
+            ? raw.name.trim()
+            : "FramerComponent",
+      source: isComponentInstanceNode(node)
+        ? "component-instance"
+        : "selected-component",
+      insertURL,
+      componentIdentifier:
+        typeof raw.componentIdentifier === "string"
+          ? raw.componentIdentifier
+          : undefined,
+      componentName:
+        typeof raw.componentName === "string" ? raw.componentName : undefined,
+      controls: sanitizeRecord(raw.controls),
+      typedControls: sanitizeRecord(raw.typedControls),
+    });
+  }
+
+  for (const codeFile of input.codeFiles) {
+    if (!codeFile || typeof codeFile !== "object") continue;
+    const raw = codeFile as Record<string, unknown>;
+    const exports = Array.isArray(raw.exports) ? raw.exports : [];
+    for (const exported of exports) {
+      if (!exported || typeof exported !== "object") continue;
+      const item = exported as Record<string, unknown>;
+      if (item.type !== "component") continue;
+      const insertURL =
+        typeof item.insertURL === "string" ? item.insertURL : "";
+      add({
+        id: typeof raw.id === "string" ? raw.id : undefined,
+        name:
+          typeof item.name === "string" && item.name.trim()
+            ? item.name.trim()
+            : "FramerComponent",
+        source: "code-file-export",
+        insertURL,
+        codeFileId: typeof raw.id === "string" ? raw.id : undefined,
+        codeFileName: typeof raw.name === "string" ? raw.name : undefined,
+        isDefaultExport:
+          typeof item.isDefaultExport === "boolean"
+            ? item.isDefaultExport
+            : undefined,
+      });
+    }
+  }
+
+  return Array.from(modules.values());
+}
+
+function sanitizeRecord(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return sanitizeObject(value);
 }
 
 function sanitizeObject(value: unknown): Record<string, unknown> {
@@ -785,27 +1398,6 @@ function sanitizeObject(value: unknown): Record<string, unknown> {
   return output;
 }
 
-function inferPublishedUrl(projectInfo: unknown): string {
-  if (!projectInfo || typeof projectInfo !== "object") return "";
-  const info = projectInfo as Record<string, unknown>;
-  const keys = [
-    "publishedUrl",
-    "publishUrl",
-    "siteUrl",
-    "url",
-    "previewUrl",
-  ] as const;
-
-  for (const key of keys) {
-    const value = info[key];
-    if (typeof value === "string" && /^https?:\/\//.test(value)) {
-      return value;
-    }
-  }
-
-  return "";
-}
-
 function simplifySelection(nodes: CapturableNode[]): SelectionNode[] {
   return nodes
     .map((node) => ({
@@ -838,6 +1430,55 @@ async function readNodesByIds(ids: string[], knownComponents: ComponentNode[]) {
     if (knownComponent) nodes.push(knownComponent);
   }
   return nodes;
+}
+
+async function readFullSiteRoots(
+  knownComponents: ComponentNode[],
+): Promise<FullSiteRoots> {
+  const [webPages, designPages, canvasRoot] = await Promise.all([
+    framer.getNodesWithType("WebPageNode").catch(() => []),
+    framer.getNodesWithType("DesignPageNode").catch(() => []),
+    framer.getCanvasRoot().catch(() => null),
+  ]);
+
+  const pageRoots: CapturableNode[] =
+    webPages.length > 0
+      ? webPages
+      : designPages.length > 0
+        ? designPages
+        : canvasRoot
+          ? ((await framer
+              .getChildren((canvasRoot as any).id)
+              .catch(() => [])) ?? [])
+          : [];
+  const componentRoots = await readNodesByIds(
+    knownComponents.map((node) => node.id),
+    knownComponents,
+  );
+  const roots = [...pageRoots, ...componentRoots].filter(Boolean);
+  const rootKinds: FullSiteRoots["rootKinds"] = {};
+
+  for (const node of pageRoots) {
+    const id = String((node as any)?.id ?? "");
+    if (id) rootKinds[id] = "page";
+  }
+
+  for (const node of componentRoots) {
+    const id = String((node as any)?.id ?? "");
+    if (id) rootKinds[id] = "component";
+  }
+
+  if (canvasRoot) {
+    const id = String((canvasRoot as any)?.id ?? "");
+    if (id && !rootKinds[id]) rootKinds[id] = "canvas-root";
+  }
+
+  return {
+    roots,
+    pages: pageRoots,
+    components: componentRoots,
+    rootKinds,
+  };
 }
 
 async function readSelectionWithRetry(fallback: CanvasNode[]) {
@@ -888,68 +1529,316 @@ function inferExportPropsFromSelection(selection: CapturableNode[]) {
   };
 }
 
-async function captureSelectionMetadata(selection: CapturableNode[]) {
-  const nodes: SelectionNode[] = [];
-  const seen = new Set<string>();
+async function captureSelectionMetadata(
+  selection: CapturableNode[],
+  options: {
+    rootKinds?: Record<string, "page" | "component" | "canvas-root">;
+  } = {},
+) {
+  const richNodes: SelectionNode[] = [];
+  const structuralNodes: SelectionNode[] = [];
+  const seenOutput = new Set<string>();
 
-  const push = (node: SelectionNode) => {
+  const push = (node: SelectionNode, rich: boolean) => {
     if (!node.id) return;
-    if (seen.has(node.id)) return;
-    seen.add(node.id);
-    nodes.push(node);
+    const rootId =
+      typeof node.metadata?.rootId === "string" ? node.metadata.rootId : "";
+    const key = `${rootId}:${node.id}`;
+    if (seenOutput.has(key)) return;
+    seenOutput.add(key);
+    if (rich) richNodes.push(node);
+    else structuralNodes.push(node);
   };
 
-  const queue: CapturableNode[] = [...selection];
-  const maxNodes = 120;
+  const totalMaxNodes = 3000;
+  const maxNodesPerRoot = Math.max(
+    24,
+    Math.min(260, Math.floor(totalMaxNodes / Math.max(1, selection.length))),
+  );
 
-  while (queue.length > 0 && nodes.length < maxNodes) {
-    const node = queue.shift()!;
-    const id = String((node as any).id ?? "");
-    if (!id || seen.has(id)) continue;
+  for (const [rootIndex, root] of selection.entries()) {
+    if (richNodes.length + structuralNodes.length >= totalMaxNodes) break;
 
-    const name =
-      typeof (node as any).name === "string" ? (node as any).name : undefined;
-    const type =
-      typeof (node as any).type === "string"
-        ? (node as any).type
-        : node.constructor?.name;
+    const rootId = String((root as any)?.id ?? "");
+    if (!rootId) continue;
 
-    const rect = await framer.getRect(id).catch(() => null);
-    const bounds =
-      rect && typeof (rect as any).width === "number"
-        ? {
-            x: Number((rect as any).x ?? 0),
-            y: Number((rect as any).y ?? 0),
-            width: Number((rect as any).width ?? 0),
-            height: Number((rect as any).height ?? 0),
-          }
-        : undefined;
+    const rootName =
+      typeof (root as any)?.name === "string"
+        ? String((root as any).name)
+        : `Root ${rootIndex + 1}`;
+    const rootKind = options.rootKinds?.[rootId] ?? "component";
+    const queue: Array<{
+      node: CapturableNode;
+      depth: number;
+      parentId?: string;
+      path: string;
+    }> = [{ node: root, depth: 0, path: String(rootIndex + 1) }];
+    const seenVisit = new Set<string>();
+    let capturedForRoot = 0;
 
-    if (isTextNode(node)) {
-      const text = (await node.getText().catch(() => null)) ?? undefined;
-      push({
-        id,
-        name,
-        type: "TextNode",
-        text: typeof text === "string" ? text : undefined,
-        bounds,
-        metadata: {
-          tag: (node as any).tag,
-          link: (node as any).link,
-        },
-      } as any);
-    } else {
-      push({
-        id,
-        name,
-        type: typeof type === "string" ? type : undefined,
-        bounds,
-      } as any);
+    while (
+      queue.length > 0 &&
+      capturedForRoot < maxNodesPerRoot &&
+      richNodes.length + structuralNodes.length < totalMaxNodes
+    ) {
+      const current = queue.shift()!;
+      const node = current.node;
+      const id = String((node as any).id ?? "");
+      if (!id || seenVisit.has(id)) continue;
+      seenVisit.add(id);
+
+      const name =
+        typeof (node as any).name === "string" ? (node as any).name : undefined;
+      const type = getReadableNodeType(node);
+
+      const rect = await framer.getRect(id).catch(() => null);
+      const bounds =
+        rect && typeof (rect as any).width === "number"
+          ? {
+              x: Number((rect as any).x ?? 0),
+              y: Number((rect as any).y ?? 0),
+              width: Number((rect as any).width ?? 0),
+              height: Number((rect as any).height ?? 0),
+            }
+          : undefined;
+      const children = await framer.getChildren(id).catch(() => []);
+      const childIds = children
+        .map((child: any) => (typeof child?.id === "string" ? child.id : ""))
+        .filter(Boolean);
+      const image = getBackgroundImage(node);
+      const nodeStyles = getNodeStyles(node);
+      const nodeTraits = getNodeTraits(node, childIds);
+      const component = getNodeComponentModule(node);
+      const metadata = {
+        rootId,
+        rootName,
+        rootKind,
+        sourceIndex: rootIndex,
+        depth: current.depth,
+        parentId: current.parentId,
+        path: current.path,
+        isRoot: current.depth === 0,
+        childIds,
+        link: (node as any).link,
+        linkOpenInNewTab: (node as any).linkOpenInNewTab,
+        backgroundColor: (node as any).backgroundColor,
+        opacity: (node as any).opacity,
+        rotation: (node as any).rotation,
+        traits: nodeTraits,
+        component,
+        styles: nodeStyles,
+      };
+
+      if (isTextNode(node)) {
+        const text = (await node.getText().catch(() => null)) ?? undefined;
+        push(
+          {
+            id,
+            name,
+            type: "TextNode",
+            text: typeof text === "string" ? text : undefined,
+            bounds,
+            metadata: {
+              ...metadata,
+              tag: (node as any).tag,
+            },
+          } as any,
+          true,
+        );
+      } else if (image) {
+        push(
+          {
+            id,
+            name,
+            type: "ImageNode",
+            bounds,
+            metadata: {
+              ...metadata,
+              src: image.src,
+              alt: image.alt,
+            },
+          },
+          true,
+        );
+      } else if (isSVGNode(node)) {
+        push(
+          {
+            id,
+            name,
+            type: "SVGNode",
+            text: node.svg?.slice(0, 500),
+            bounds,
+            metadata,
+          } as any,
+          true,
+        );
+      } else {
+        push(
+          {
+            id,
+            name,
+            type: typeof type === "string" ? type : undefined,
+            bounds,
+            metadata,
+          } as any,
+          false,
+        );
+      }
+
+      capturedForRoot += 1;
+
+      children.forEach((child, childIndex) => {
+        queue.push({
+          node: child,
+          depth: current.depth + 1,
+          parentId: id,
+          path: `${current.path}.${childIndex + 1}`,
+        });
+      });
+
+      for (const [descendantIndex, descendant] of (
+        await getScopedRichDescendants(node)
+      ).entries()) {
+        queue.push({
+          node: descendant,
+          depth: current.depth + 1,
+          parentId: id,
+          path: `${current.path}.d${descendantIndex + 1}`,
+        });
+      }
     }
-
-    const children = await framer.getChildren(id).catch(() => []);
-    for (const child of children) queue.push(child);
   }
 
-  return nodes;
+  return [...richNodes, ...structuralNodes].slice(0, totalMaxNodes);
+}
+
+async function getScopedRichDescendants(node: CapturableNode) {
+  const getNodesWithType = (node as any)?.getNodesWithType;
+  if (typeof getNodesWithType !== "function") return [];
+
+  const groups = await Promise.all([
+    getNodesWithType.call(node, "TextNode").catch(() => []),
+    getNodesWithType.call(node, "FrameNode").catch(() => []),
+    getNodesWithType.call(node, "SVGNode").catch(() => []),
+    getNodesWithType.call(node, "ComponentInstanceNode").catch(() => []),
+  ]);
+
+  return groups.flat();
+}
+
+function getReadableNodeType(node: CapturableNode) {
+  if (isTextNode(node)) return "TextNode";
+  if (isFrameNode(node)) return "FrameNode";
+  if (isSVGNode(node)) return "SVGNode";
+  if (isComponentNode(node)) return "ComponentNode";
+  if (isComponentInstanceNode(node)) return "ComponentInstanceNode";
+  return typeof (node as any)?.type === "string"
+    ? (node as any).type
+    : node?.constructor?.name;
+}
+
+function getNodeComponentModule(node: CapturableNode) {
+  const raw = node as Record<string, unknown>;
+  const insertURL = typeof raw.insertURL === "string" ? raw.insertURL : "";
+  const hasComponentIdentity =
+    insertURL ||
+    typeof raw.componentIdentifier === "string" ||
+    typeof raw.componentName === "string";
+  if (!hasComponentIdentity) return undefined;
+  return sanitizeObject({
+    id: raw.id,
+    name: raw.name,
+    source: isComponentInstanceNode(node)
+      ? "component-instance"
+      : isComponentNode(node)
+        ? "component-node"
+        : "selected-component",
+    insertURL,
+    componentIdentifier: raw.componentIdentifier,
+    componentName: raw.componentName,
+    controls: raw.controls,
+    typedControls: raw.typedControls,
+  });
+}
+
+function getNodeTraits(node: CapturableNode, childIds: string[]) {
+  const raw = node as Record<string, unknown>;
+  return sanitizeObject({
+    nodeClass: getReadableNodeType(node),
+    id: raw.id,
+    name: raw.name,
+    visible: raw.visible,
+    locked: raw.locked,
+    childIds,
+    componentIdentifier: raw.componentIdentifier,
+    componentName: raw.componentName,
+    insertURL: raw.insertURL,
+    controls: raw.controls,
+    typedControls: raw.typedControls,
+    isVariant: raw.isVariant,
+    isPrimaryVariant: raw.isPrimaryVariant,
+    gesture: raw.gesture,
+    inheritsFromId: raw.inheritsFromId,
+    layout: raw.layout,
+    gap: raw.gap,
+    padding: raw.padding,
+    position: raw.position,
+    top: raw.top,
+    right: raw.right,
+    bottom: raw.bottom,
+    left: raw.left,
+    centerX: raw.centerX,
+    centerY: raw.centerY,
+    width: raw.width,
+    height: raw.height,
+    minWidth: raw.minWidth,
+    maxWidth: raw.maxWidth,
+    minHeight: raw.minHeight,
+    maxHeight: raw.maxHeight,
+    aspectRatio: raw.aspectRatio,
+    zIndex: raw.zIndex,
+    overflow: raw.overflow,
+    backgroundColor: raw.backgroundColor,
+    backgroundImage: raw.backgroundImage,
+    backgroundGradient: raw.backgroundGradient,
+    border: raw.border,
+    borderRadius: raw.borderRadius,
+    opacity: raw.opacity,
+    rotation: raw.rotation,
+    imageRendering: raw.imageRendering,
+    font: raw.font,
+    inlineTextStyle: raw.inlineTextStyle,
+    textTruncation: raw.textTruncation,
+    gridItemFillCellWidth: raw.gridItemFillCellWidth,
+    gridItemFillCellHeight: raw.gridItemFillCellHeight,
+    gridItemHorizontalAlignment: raw.gridItemHorizontalAlignment,
+    gridItemVerticalAlignment: raw.gridItemVerticalAlignment,
+    gridItemColumnSpan: raw.gridItemColumnSpan,
+    gridItemRowSpan: raw.gridItemRowSpan,
+    breakpoint: raw.breakpoint,
+    link: raw.link,
+    linkOpenInNewTab: raw.linkOpenInNewTab,
+  });
+}
+
+function getBackgroundImage(node: CapturableNode) {
+  if (!isFrameNode(node)) return null;
+  const image = node.backgroundImage;
+  if (!image) return null;
+  const src =
+    typeof (image as any).url === "string"
+      ? (image as any).url
+      : typeof (image as any).thumbnailUrl === "string"
+        ? (image as any).thumbnailUrl
+        : "";
+  if (!src) return null;
+  return {
+    src,
+    alt: typeof image.altText === "string" ? image.altText : undefined,
+  };
+}
+
+function getNodeStyles(node: CapturableNode) {
+  const raw = node as Record<string, unknown>;
+  return extractFramerNodeStyles(raw);
 }

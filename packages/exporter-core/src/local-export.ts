@@ -5,17 +5,29 @@ import { generateNextProject } from "../../codegen/src/next-project.js";
 import { compareGeneratedPreview } from "../../fidelity/src/compare.js";
 import { matchPluginNodesToDom } from "../../matcher/src/match.js";
 import type {
+  ComparisonDiagnostics,
   ExportAttemptResult,
   ExportIR,
+  ExportMode,
+  ExportTreeNode,
+  FramerTreeNode,
+  MotionStyles,
   ExportWarning,
   FidelityScores,
   PluginCanvasCapture,
+  PreviewValidationResult,
   RuntimeCapture,
   RuntimeNode,
 } from "../../shared/src/types.js";
 import { captureRuntime, createSimulatedPluginCapture } from "./capture.js";
 import { buildIntermediateRepresentation } from "./ir.js";
 import { zipDirectory } from "./package.js";
+import {
+  applyAttemptPlan,
+  baselineStrategy,
+  buildAttemptPlan,
+  detectAttemptPlateau,
+} from "./attempt-planner.js";
 import fs from "node:fs/promises";
 
 type LocalExportInput = {
@@ -24,6 +36,7 @@ type LocalExportInput = {
   outDir: string;
   name?: string;
   selector?: string;
+  exportMode?: ExportMode;
   maxAttempts: number;
   targetFidelity: number;
 };
@@ -36,11 +49,36 @@ type LocalExportResult = {
   bestAttempt: ExportAttemptResult;
 };
 
-const strategies = [
-  "semantic-layout",
-  "landing-page-structured",
-  "spacing-typography-correction",
-];
+type DebugArtifactsManifest = {
+  manifestPath: string;
+  bestAttempt: number;
+  sourceScreenshots: string[];
+  attempts: Array<{
+    attempt: number;
+    dir: string;
+    compareDiagnostics?: string;
+    generatedScreenshots: string[];
+    summary: string;
+  }>;
+};
+
+type BestAttemptResetInput = {
+  current: FidelityScores;
+  best: FidelityScores;
+  targetFidelity: number;
+};
+
+type ComparableFidelityKey =
+  | "layout"
+  | "typography"
+  | "color"
+  | "assets"
+  | "motion"
+  | "nodeMatch"
+  | "desktop"
+  | "laptop"
+  | "tablet"
+  | "mobile";
 
 export async function runLocalExport(
   input: LocalExportInput,
@@ -76,6 +114,8 @@ export async function runLocalExport(
   const ir = buildIntermediateRepresentation({
     url: sourceUrl,
     name: input.name,
+    exportMode: input.exportMode,
+    captureMode: canCaptureFromUrl ? "runtime-first" : "plugin-only",
     runtimeCapture,
     pluginCapture,
     nodeMatches,
@@ -87,11 +127,34 @@ export async function runLocalExport(
     targetFidelity: input.targetFidelity,
   });
   const bestAttempt = selectBestAttempt(attempts);
-  const report = createReport(ir, attempts, bestAttempt);
 
   await copy(bestAttempt.projectDir, exportDir);
+  const debugArtifacts = await bundleDebugArtifacts({
+    workDir,
+    attemptsDir,
+    exportDir,
+    attempts,
+    bestAttempt,
+  });
+  const report = createReport(ir, attempts, bestAttempt, debugArtifacts);
+  await writeFile(
+    path.join(exportDir, "raw-plugin-payload.json"),
+    `${JSON.stringify(pluginCapture, null, 2)}\n`,
+  );
+  await writeFile(
+    path.join(exportDir, "raw-runtime-capture.json"),
+    `${JSON.stringify(runtimeCapture, null, 2)}\n`,
+  );
+  await writeFile(
+    path.join(exportDir, "normalized-ir.json"),
+    `${JSON.stringify(ir, null, 2)}\n`,
+  );
   const reportPath = path.join(exportDir, "export-report.json");
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
+  await writeFile(
+    path.join(exportDir, "patch-history.json"),
+    `${JSON.stringify(createPatchHistory(attempts), null, 2)}\n`,
+  );
   await writeFile(
     path.join(exportDir, "README.md"),
     createReadme(ir, bestAttempt),
@@ -124,6 +187,143 @@ export async function runLocalExport(
   };
 }
 
+async function bundleDebugArtifacts(input: {
+  workDir: string;
+  attemptsDir: string;
+  exportDir: string;
+  attempts: ExportAttemptResult[];
+  bestAttempt: ExportAttemptResult;
+}): Promise<DebugArtifactsManifest> {
+  const debugDir = path.join(input.exportDir, "debug");
+  const sourceDir = path.join(debugDir, "source");
+  const attemptsDir = path.join(debugDir, "attempts");
+
+  await mkdirp(debugDir);
+  await mkdirp(sourceDir);
+  await mkdirp(attemptsDir);
+
+  const sourceScreenshotPaths = await copyDirectoryIfExists(
+    path.join(input.workDir, "original"),
+    sourceDir,
+  );
+
+  const attemptArtifacts = await Promise.all(
+    input.attempts.map(async (attempt) => {
+      const sourceAttemptDir = path.join(
+        input.attemptsDir,
+        `attempt-${attempt.attemptNumber}`,
+      );
+      const targetAttemptDir = path.join(
+        attemptsDir,
+        `attempt-${attempt.attemptNumber}`,
+      );
+      await mkdirp(targetAttemptDir);
+
+      const compareDiagnostics = await copyFileIfExists(
+        path.join(sourceAttemptDir, "compare-diagnostics.json"),
+        path.join(targetAttemptDir, "compare-diagnostics.json"),
+      );
+
+      const generatedScreenshots = (
+        await Promise.all(
+          ["desktop", "laptop", "tablet", "mobile"].map((viewport) =>
+            copyFileIfExists(
+              path.join(sourceAttemptDir, `generated-${viewport}.png`),
+              path.join(targetAttemptDir, `generated-${viewport}.png`),
+            ),
+          ),
+        )
+      ).filter(Boolean) as string[];
+
+      const summary = {
+        attempt: attempt.attemptNumber,
+        strategy: attempt.strategy,
+        overall: attempt.fidelity.overall,
+        fidelity: attempt.fidelity,
+        warningCount: attempt.warnings.length,
+        previewValidation: attempt.previewValidation,
+        diagnosis: attempt.diagnosis,
+        diagnosisDetails: attempt.diagnosisDetails,
+        patchOperations: attempt.patchOperations,
+        patchTargets: attempt.patchTargets,
+        patchPropertyHints: attempt.patchPropertyHints,
+        stopReason: attempt.stopReason,
+        resetToBestStateForNextAttempt: attempt.resetToBestStateForNextAttempt,
+        selectedAsBest: attempt.id === input.bestAttempt.id,
+      };
+
+      await writeFile(
+        path.join(targetAttemptDir, "summary.json"),
+        `${JSON.stringify(summary, null, 2)}\n`,
+      );
+
+      return {
+        attempt: attempt.attemptNumber,
+        dir: relativeToExport(input.exportDir, targetAttemptDir),
+        compareDiagnostics: compareDiagnostics
+          ? relativeToExport(input.exportDir, compareDiagnostics)
+          : undefined,
+        generatedScreenshots: generatedScreenshots.map((filePath) =>
+          relativeToExport(input.exportDir, filePath),
+        ),
+        summary: relativeToExport(
+          input.exportDir,
+          path.join(targetAttemptDir, "summary.json"),
+        ),
+      };
+    }),
+  );
+
+  const manifest = {
+    bestAttempt: input.bestAttempt.attemptNumber,
+    sourceScreenshots: sourceScreenshotPaths.map((filePath) =>
+      relativeToExport(input.exportDir, filePath),
+    ),
+    attempts: attemptArtifacts,
+  };
+
+  const manifestPath = path.join(debugDir, "manifest.json");
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  return {
+    manifestPath: relativeToExport(input.exportDir, manifestPath),
+    ...manifest,
+  };
+}
+
+async function copyDirectoryIfExists(sourceDir: string, targetDir: string) {
+  const entries = await readDirSafe(sourceDir);
+  const copied: string[] = [];
+  for (const entry of entries) {
+    if (entry.isDirectory()) continue;
+    const source = path.join(sourceDir, entry.name);
+    const target = path.join(targetDir, entry.name);
+    await fs.copyFile(source, target);
+    copied.push(target);
+  }
+  return copied;
+}
+
+async function copyFileIfExists(source: string, target: string) {
+  try {
+    await fs.copyFile(source, target);
+    return target;
+  } catch {
+    return undefined;
+  }
+}
+
+async function readDirSafe(targetPath: string) {
+  try {
+    return await fs.readdir(targetPath, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+}
+
+function relativeToExport(exportDir: string, targetPath: string) {
+  return path.relative(exportDir, targetPath) || ".";
+}
+
 function createRuntimeCaptureFromPluginContext(
   pluginCapture?: PluginCanvasCapture,
 ): RuntimeCapture {
@@ -131,6 +331,7 @@ function createRuntimeCaptureFromPluginContext(
   const capturedNodes = Array.isArray(pluginCapture?.selectedNodes)
     ? pluginCapture.selectedNodes
     : [];
+  const framerTree = Array.isArray(context?.framerTree) ? context.framerTree : [];
   const snapshot = Array.isArray(context?.selectionSnapshot)
     ? context.selectionSnapshot
     : [];
@@ -138,7 +339,9 @@ function createRuntimeCaptureFromPluginContext(
     ? context.selectedComponents
     : [];
   const rawNodes =
-    capturedNodes.length > 0
+    framerTree.length > 0
+      ? createFallbackNodesFromFramerTree(framerTree, capturedNodes)
+      : capturedNodes.length > 0
       ? capturedNodes
       : snapshot.length > 0
         ? snapshot
@@ -166,6 +369,16 @@ function createRuntimeCaptureFromPluginContext(
         width: 1440,
         height: 900,
       },
+      laptop: {
+        screenshotPath: "",
+        width: 1280,
+        height: 900,
+      },
+      tablet: {
+        screenshotPath: "",
+        width: 768,
+        height: 1024,
+      },
       mobile: {
         screenshotPath: "",
         width: 390,
@@ -173,7 +386,114 @@ function createRuntimeCaptureFromPluginContext(
       },
     },
     nodes,
+    nodesByViewport: {
+      desktop: nodes,
+      laptop: nodes,
+      tablet: nodes,
+      mobile: nodes,
+    },
+    captureDiagnostics: {
+      breakpointsCaptured: ["desktop", "laptop", "tablet", "mobile"],
+      fontReadiness: {
+        desktop: false,
+        laptop: false,
+        tablet: false,
+        mobile: false,
+      },
+      stylesheetCount: {
+        desktop: 0,
+        laptop: 0,
+        tablet: 0,
+        mobile: 0,
+      },
+      nodeCount: {
+        desktop: nodes.length,
+        laptop: nodes.length,
+        tablet: nodes.length,
+        mobile: nodes.length,
+      },
+    },
   };
+}
+
+function createFallbackNodesFromFramerTree(
+  tree: FramerTreeNode[],
+  selectedNodes: Array<PluginCanvasCapture["selectedNodes"][number]>,
+) {
+  const selectedById = new Map(
+    selectedNodes
+      .filter((node): node is typeof node & { id: string } => typeof node.id === "string")
+      .map((node) => [node.id, node] as const),
+  );
+  const childIdsByParent = new Map<string, string[]>();
+  const treeById = new Map(tree.map((node) => [node.id, node] as const));
+
+  for (const node of tree) {
+    if (!node.parentId) continue;
+    childIdsByParent.set(node.parentId, [
+      ...(childIdsByParent.get(node.parentId) ?? []),
+      node.id,
+    ]);
+  }
+
+  const ordered = [...tree].sort((first, second) => compareTreePath(first.path, second.path));
+
+  return ordered.map((treeNode) => {
+    const selected = selectedById.get(treeNode.id);
+    const selectedMeta =
+      selected?.metadata && typeof selected.metadata === "object"
+        ? (selected.metadata as Record<string, unknown>)
+        : {};
+
+    return {
+      id: treeNode.id,
+      name: selected?.name ?? treeNode.name,
+      type: selected?.type ?? treeNode.type,
+      text: selected?.text ?? treeNode.text,
+      bounds: selected?.bounds ?? treeNode.rect,
+      metadata: {
+        ...selectedMeta,
+        rootId: selectedMeta.rootId ?? treeNode.rootId,
+        rootName: selectedMeta.rootName ?? treeNode.rootName,
+        rootKind: selectedMeta.rootKind ?? treeNode.rootKind,
+        parentId: selectedMeta.parentId ?? treeNode.parentId,
+        childIds:
+          Array.isArray(selectedMeta.childIds) && selectedMeta.childIds.length > 0
+            ? selectedMeta.childIds
+            : childIdsByParent.get(treeNode.id) ?? treeNode.childIds,
+        depth: selectedMeta.depth ?? treeNode.depth,
+        path: selectedMeta.path ?? treeNode.path,
+        styles: {
+          ...treeNode.styles,
+          ...asStyleRecord(selectedMeta.styles),
+        },
+        traits: {
+          ...treeNode.traits,
+          ...asRecord(selectedMeta.traits),
+        },
+        component: selectedMeta.component ?? treeNode.component,
+        src: selectedMeta.src ?? treeNode.asset?.src,
+        alt: selectedMeta.alt ?? treeNode.asset?.alt,
+      },
+    };
+  });
+}
+
+function compareTreePath(first: string, second: string) {
+  const tokenize = (value: string) =>
+    value
+      .split(/[^0-9]+/)
+      .filter(Boolean)
+      .map((part) => Number(part));
+  const firstParts = tokenize(first);
+  const secondParts = tokenize(second);
+  const max = Math.max(firstParts.length, secondParts.length);
+  for (let index = 0; index < max; index += 1) {
+    const a = firstParts[index] ?? -1;
+    const b = secondParts[index] ?? -1;
+    if (a !== b) return a - b;
+  }
+  return first.localeCompare(second);
 }
 
 function toRuntimeNode(
@@ -182,25 +502,63 @@ function toRuntimeNode(
 ): RuntimeNode | null {
   const id =
     typeof entry.id === "string" ? entry.id : `plugin-node-${index + 1}`;
-  const tag = normalizeTag(typeof entry.type === "string" ? entry.type : "div");
   const text =
     typeof entry.text === "string" && entry.text.trim().length > 0
       ? entry.text.trim().slice(0, 500)
       : undefined;
+  const metadata =
+    entry.metadata && typeof entry.metadata === "object"
+      ? (entry.metadata as Record<string, unknown>)
+      : {};
+  const capturedStyles = asStyleRecord(metadata.styles);
+  const capturedMotion = asMotionRecord(metadata.motion);
+  const imageSrc =
+    typeof metadata.src === "string" && metadata.src.length > 0
+      ? metadata.src
+      : undefined;
+  const imageAlt =
+    typeof metadata.alt === "string" && metadata.alt.length > 0
+      ? metadata.alt
+      : undefined;
+  const href =
+    typeof metadata.link === "string" && metadata.link.length > 0
+      ? metadata.link
+      : undefined;
   const position = asPoint(entry.position);
   const size = asSize(entry.size);
   const bounds = asRect(entry.bounds);
+  const sourceIndex =
+    typeof metadata.sourceIndex === "number" ? metadata.sourceIndex : index;
+  const rootName =
+    typeof metadata.rootName === "string" && metadata.rootName.trim().length > 0
+      ? metadata.rootName.trim()
+      : undefined;
   const sectionName =
-    typeof entry.name === "string" && entry.name.trim().length > 0
+    rootName ??
+    (typeof entry.name === "string" && entry.name.trim().length > 0
       ? entry.name.trim()
-      : "Selection";
+      : "Selection");
+
+  const explicitTag =
+    typeof metadata.tag === "string" && metadata.tag.trim().length > 0
+      ? metadata.tag.trim().toLowerCase()
+      : undefined;
+  const path = typeof metadata.path === "string" ? metadata.path : undefined;
+  const runtimeTag = imageSrc
+    ? "img"
+    : explicitTag ?? normalizeTag(typeof entry.type === "string" ? entry.type : "div");
 
   return {
     id,
-    tag,
-    domPath: `plugin > ${tag}:nth-child(${index + 1})`,
-    text,
-    sectionIndex: 0,
+    tag: runtimeTag,
+    domPath:
+      typeof metadata.domPath === "string" && metadata.domPath.trim().length > 0
+        ? metadata.domPath
+        : path
+          ? buildPluginDomPath(runtimeTag, path)
+          : `plugin > ${runtimeTag}:nth-child(${index + 1})`,
+    text: imageSrc ? undefined : text,
+    sectionIndex: sourceIndex,
     sectionName,
     rect: {
       x: bounds?.x ?? position?.x ?? 0,
@@ -208,13 +566,106 @@ function toRuntimeNode(
       width: bounds?.width ?? size?.width ?? 320,
       height: bounds?.height ?? size?.height ?? 48,
     },
-    attributes: {},
-    styles: {
-      fontSize: "16px",
-      lineHeight: "24px",
-      __coderelaySourceIndex: String(index),
+    attributes: {
+      src: imageSrc,
+      alt: imageAlt,
+      href,
+      className:
+        typeof metadata.className === "string" && metadata.className.length > 0
+          ? metadata.className
+          : undefined,
+      dataFramerName:
+        typeof metadata.dataFramerName === "string" &&
+        metadata.dataFramerName.length > 0
+          ? metadata.dataFramerName
+          : undefined,
     },
+    styles: {
+      ...capturedStyles,
+      backgroundColor:
+        capturedStyles.backgroundColor ??
+        (typeof metadata.backgroundColor === "string"
+          ? metadata.backgroundColor
+          : undefined),
+      opacity:
+        capturedStyles.opacity ??
+        (typeof metadata.opacity === "number"
+          ? String(metadata.opacity)
+          : undefined),
+      __coderelaySourceIndex: String(index),
+      __coderelayRootId:
+        typeof metadata.rootId === "string" ? metadata.rootId : "",
+      __coderelayRootKind:
+        typeof metadata.rootKind === "string" ? metadata.rootKind : "",
+      __coderelayDepth:
+        typeof metadata.depth === "number" ? String(metadata.depth) : "",
+      __coderelayParentId:
+        typeof metadata.parentId === "string" ? metadata.parentId : "",
+      __coderelayPath: typeof metadata.path === "string" ? metadata.path : "",
+    },
+    motion: capturedMotion,
   };
+}
+
+function buildPluginDomPath(tag: string, path: string) {
+  const tokens = path
+    .split(".")
+    .map((part) => {
+      const match = part.match(/(\d+)$/);
+      return match ? Number(match[1]) : null;
+    })
+    .filter((value): value is number => value != null);
+  if (tokens.length === 0) return `plugin > ${tag}`;
+  return `plugin > ${tokens
+    .map((token, index) =>
+      `${index === tokens.length - 1 ? tag : "div"}:nth-child(${token})`,
+    )
+    .join(" > ")}`;
+}
+
+function asStyleRecord(value: unknown) {
+  if (!value || typeof value !== "object") return {};
+  const output: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === "string" && entry.trim()) {
+      output[key] = entry.trim();
+    }
+  }
+  return output;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function asMotionRecord(value: unknown): MotionStyles | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const output: MotionStyles = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof entry !== "string" || !entry.trim()) continue;
+    switch (key) {
+      case "transitionProperty":
+      case "transitionDuration":
+      case "transitionTimingFunction":
+      case "transitionDelay":
+      case "animationName":
+      case "animationDuration":
+      case "animationTimingFunction":
+      case "animationDelay":
+      case "animationIterationCount":
+      case "animationDirection":
+      case "animationFillMode":
+      case "transformOrigin":
+        output[key] = entry.trim();
+        break;
+      default:
+        break;
+    }
+  }
+  return Object.keys(output).length > 0 ? output : undefined;
 }
 
 function normalizeTag(type: string) {
@@ -268,48 +719,115 @@ async function runAttempts(input: {
   targetFidelity: number;
 }) {
   const attempts: ExportAttemptResult[] = [];
-  const maxAttempts = Math.max(
-    1,
-    Math.min(input.maxAttempts, strategies.length),
-  );
+  const maxAttempts = Math.max(1, input.maxAttempts);
+  let workingState = {
+    ir: input.ir,
+    strategy: baselineStrategy,
+  };
+  let bestWorkingState = cloneWorkingAttemptState(workingState);
+  let bestFidelity: FidelityScores | undefined;
 
   for (let index = 0; index < maxAttempts; index += 1) {
     const attemptNumber = index + 1;
-    const strategy = strategies[index] ?? strategies[0];
+    const previousAttempt = attempts.at(-1);
+    const plan = buildAttemptPlan({
+      previousAttempt: previousAttempt
+        ? {
+            strategy: {
+              id: previousAttempt.strategy,
+              structuredLayout: previousAttempt.strategy.includes("structured"),
+              compactSpacing:
+                previousAttempt.strategy.includes("compact") ||
+                previousAttempt.strategy.includes("spacing-typography-correction"),
+              aggressiveMobileStacking:
+                previousAttempt.strategy.includes("mobile-repair"),
+              preserveImageAspectRatio:
+                !previousAttempt.strategy.includes("fluid-images"),
+            },
+            fidelity: previousAttempt.fidelity,
+            warnings: previousAttempt.warnings,
+            comparisonDiagnostics: previousAttempt.comparisonDiagnostics,
+            previewValidation: previousAttempt.previewValidation,
+          }
+        : undefined,
+      attemptNumber,
+    });
+    workingState = applyAttemptPlan(workingState, plan);
     const attemptDir = path.join(input.attemptsDir, `attempt-${attemptNumber}`);
     const projectDir = path.join(attemptDir, "project");
 
     await mkdirp(projectDir);
 
     const generated = await generateNextProject({
-      ir: input.ir,
+      ir: workingState.ir,
       projectDir,
-      strategy,
+      strategy: workingState.strategy,
     });
-    const fidelity = await compareGeneratedPreview({
-      ir: input.ir,
+    const comparison = await compareGeneratedPreview({
+      ir: workingState.ir,
       previewHtmlPath: generated.previewHtmlPath,
       attemptDir,
     });
-    const warnings = warningsForAttempt(input.ir, fidelity);
+    const fidelity = comparison.fidelity;
+    const warnings = warningsForAttempt(
+      workingState.ir,
+      fidelity,
+      comparison.diagnostics,
+      comparison.previewValidation,
+    );
     const rerunReason = getRerunReason(
       fidelity,
       input.targetFidelity,
       warnings,
     );
+    const plateau = detectAttemptPlateau(
+      [...attempts.map((attempt) => attempt.fidelity.overall), fidelity.overall],
+    );
+    const stopReason = plateau
+      ? "Fidelity improvements plateaued across the last three attempts."
+      : !rerunReason
+        ? "Target fidelity reached or no rerun required."
+        : undefined;
+    const improvedBest =
+      !bestFidelity || fidelity.overall >= bestFidelity.overall;
+    if (improvedBest) {
+      bestFidelity = fidelity;
+      bestWorkingState = cloneWorkingAttemptState(workingState);
+    }
+    const resetToBestStateForNextAttempt =
+      !improvedBest &&
+      shouldResetToBestAttempt({
+        current: fidelity,
+        best: bestFidelity!,
+        targetFidelity: input.targetFidelity,
+      });
 
     attempts.push({
       id: `attempt-${attemptNumber}`,
       attemptNumber,
-      strategy,
+      strategy: workingState.strategy.id,
       projectDir,
       fidelity,
       warnings,
-      rerunReason,
+      rerunReason: plateau ? undefined : rerunReason,
+      diagnosis: plan.diagnosis,
+      patchesApplied: plan.patchesApplied,
+      diagnosisDetails: plan.diagnosisDetails,
+      patchOperations: plan.patchOperations,
+      patchTargets: plan.patchTargets,
+      patchPropertyHints: plan.patchPropertyHints,
+      comparisonDiagnostics: comparison.diagnostics,
+      previewValidation: comparison.previewValidation,
+      stopReason,
+      resetToBestStateForNextAttempt,
     });
 
-    if (!rerunReason) {
+    if (!rerunReason || plateau) {
       break;
+    }
+
+    if (resetToBestStateForNextAttempt) {
+      workingState = cloneWorkingAttemptState(bestWorkingState);
     }
   }
 
@@ -328,9 +846,35 @@ function selectBestAttempt(attempts: ExportAttemptResult[]) {
   return best;
 }
 
+export function shouldResetToBestAttempt(input: BestAttemptResetInput) {
+  const target =
+    input.targetFidelity <= 1 ? input.targetFidelity * 100 : input.targetFidelity;
+  const current = input.current;
+  const best = input.best;
+
+  if (current.overall >= best.overall) return false;
+
+  const overallDrop = best.overall - current.overall;
+  if (overallDrop >= 1) {
+    return true;
+  }
+
+  const weakCategoryRegression =
+    collectComparableFidelityMetrics(best)
+      .filter((entry) => entry.best < target)
+      .some((entry) => {
+        const currentValue = readComparableFidelityMetric(current, entry.key);
+        return typeof currentValue === "number" && entry.best - currentValue >= 2;
+      });
+
+  return weakCategoryRegression;
+}
+
 function warningsForAttempt(
   ir: ExportIR,
   fidelity: FidelityScores,
+  comparisonDiagnostics?: ComparisonDiagnostics,
+  previewValidation?: PreviewValidationResult,
 ): ExportWarning[] {
   const warnings = [...ir.warnings];
 
@@ -342,21 +886,77 @@ function warningsForAttempt(
     });
   }
 
-  if (fidelity.mobile < fidelity.desktop - 8) {
+  const tabletLag =
+    typeof fidelity.tablet === "number" ? fidelity.tablet < fidelity.desktop - 6 : false;
+  if (fidelity.mobile < fidelity.desktop - 8 || tabletLag) {
     warnings.push({
       type: "responsive_mismatch",
       severity: "warning",
-      message: "Mobile fidelity is meaningfully lower than desktop fidelity.",
+      message:
+        "Responsive fidelity is meaningfully lower than desktop fidelity on one or more smaller breakpoints.",
     });
   }
 
-  if (fidelity.motion === 0) {
+  if (fidelity.motion < 60) {
     warnings.push({
       type: "unsupported_animation",
       severity: "info",
       message:
-        "Motion is not recreated in MVP-A. Review Framer animations manually.",
+        "Motion fidelity is limited for this export. Review Framer animations manually.",
     });
+  }
+
+  if ((comparisonDiagnostics?.summary.missingNodes ?? 0) > 0) {
+    warnings.push({
+      type: "generated_node_missing",
+      severity: "warning",
+      message: `${comparisonDiagnostics!.summary.missingNodes} generated nodes could not be found during computed-style comparison.`,
+    });
+  }
+
+  if (comparisonDiagnostics && (comparisonDiagnostics.summary.nodesCompared ?? 0) > 0) {
+    const previewMissingAllNodes = comparisonDiagnostics.summary.missingNodes >=
+      comparisonDiagnostics.summary.nodesCompared;
+    if (previewMissingAllNodes) {
+      warnings.push({
+        type: "generated_node_missing",
+        severity: "warning",
+        message:
+          "Generated preview validation could not find any exported nodes during computed-style inspection.",
+      });
+    }
+  }
+
+  if (previewValidation?.status === "blocked") {
+    warnings.push({
+      type: "preview_validation_blocked",
+      severity: "info",
+      message:
+        "Rendered preview validation could not run in this environment. Review preview validation evidence manually.",
+    });
+  }
+
+  if (
+    previewValidation?.status === "validated" &&
+    previewValidation.summary.inspectedNodes > 0
+  ) {
+    if (previewValidation.summary.foundNodes === 0) {
+      warnings.push({
+        type: "preview_validation_missing_nodes",
+        severity: "warning",
+        message:
+          "Rendered preview validation did not find any exported nodes in the generated preview DOM.",
+      });
+    }
+
+    if (previewValidation.summary.nodesWithNonDefaultStyles === 0) {
+      warnings.push({
+        type: "preview_validation_unstyled",
+        severity: "warning",
+        message:
+          "Rendered preview validation found exported nodes, but none resolved to non-default visual styles.",
+      });
+    }
   }
 
   const weakSections = ir.component.sections.filter(
@@ -392,6 +992,9 @@ function getRerunReason(
     fidelity.typography < target ? "typography" : undefined,
     fidelity.layout < target ? "layout" : undefined,
     fidelity.mobile < target ? "mobile spacing" : undefined,
+    typeof fidelity.tablet === "number" && fidelity.tablet < target
+      ? "tablet layout"
+      : undefined,
     fidelity.assets < target ? "assets" : undefined,
     fidelity.nodeMatch < 70 ? "section mapping" : undefined,
   ].filter(Boolean);
@@ -403,12 +1006,69 @@ function createReport(
   ir: ExportIR,
   attempts: ExportAttemptResult[],
   bestAttempt: ExportAttemptResult,
+  debugArtifacts: DebugArtifactsManifest,
 ) {
+  const styleStats = summarizeStyleExtraction(ir);
   return {
     jobId: ir.jobId,
-    exportType: "component",
+    exportType:
+      ir.exportMode === "full-site"
+        ? "full-site"
+        : ir.libraryComponents
+          ? "component-library"
+          : "component",
     sourceUrl: ir.sourceUrl,
+    captureMode: ir.captureMode ?? "plugin-only",
+    exportEngine: ir.exportEngine ?? "plugin-approximation",
     componentName: ir.componentName,
+    componentFileCount: ir.libraryComponents?.length ?? 1,
+    pageFileCount: ir.sitePages?.length ?? 0,
+    componentModuleCount: ir.componentModules?.length ?? 0,
+    codeFileCount: ir.codeFiles?.length ?? 0,
+    fontCount: ir.fonts?.length ?? 0,
+    cmsCollectionCount: ir.cmsCollections?.length ?? 0,
+    framerTreeNodeCount: ir.framerTree?.length ?? 0,
+    exportTreeNodeCount: ir.exportTreeDiagnostics?.totalNodes ?? 0,
+    componentModules: (ir.componentModules ?? []).map((module) => ({
+      name: module.name,
+      source: module.source,
+      insertURL: module.insertURL,
+      componentIdentifier: module.componentIdentifier,
+      codeFileName: module.codeFileName,
+    })),
+    codeFiles: (ir.codeFiles ?? []).map((file) => ({
+      id: file.id,
+      name: file.name,
+      path: file.path,
+      exports: file.exports,
+      insertURL: file.insertURL,
+      source: file.source,
+    })),
+    fonts: (ir.fonts ?? []).map((font) => ({
+      id: font.id,
+      name: font.name,
+      family: font.family,
+      source: font.source,
+      weight: font.weight,
+      style: font.style,
+    })),
+    cmsCollections: (ir.cmsCollections ?? []).map((collection) => ({
+      id: collection.id,
+      name: collection.name,
+      managed: collection.managed ?? false,
+      fieldCount: collection.fields.length,
+      itemCount: collection.items?.length ?? 0,
+      itemIds: collection.itemIds ?? [],
+      pluginData: collection.pluginData ?? {},
+      pluginDataKeys: collection.pluginDataKeys ?? [],
+      fields: collection.fields.map((field) => ({
+        id: field.id,
+        name: field.name,
+        type: field.type,
+        userEditable: field.userEditable ?? false,
+        collectionId: field.collectionId,
+      })),
+    })),
     createdAt: new Date().toISOString(),
     bestAttempt: bestAttempt.attemptNumber,
     visualFidelity: bestAttempt.fidelity,
@@ -417,10 +1077,22 @@ function createReport(
       strategy: attempt.strategy,
       overall: attempt.fidelity.overall,
       desktop: attempt.fidelity.desktop,
+      laptop: attempt.fidelity.laptop,
+      tablet: attempt.fidelity.tablet,
       mobile: attempt.fidelity.mobile,
       rerunReason: attempt.rerunReason,
       selectedAsBest: attempt.id === bestAttempt.id,
       warningCount: attempt.warnings.length,
+      previewValidation: attempt.previewValidation,
+      diagnosis: attempt.diagnosis,
+      diagnosisDetails: attempt.diagnosisDetails,
+      patchesApplied: attempt.patchesApplied,
+      patchOperations: attempt.patchOperations,
+      patchTargets: attempt.patchTargets,
+      patchPropertyHints: attempt.patchPropertyHints,
+      comparisonDiagnostics: attempt.comparisonDiagnostics,
+      stopReason: attempt.stopReason,
+      resetToBestStateForNextAttempt: attempt.resetToBestStateForNextAttempt,
     })),
     nodeMatching: {
       matched: ir.nodeMatches.filter((match) => match.confidence >= 0.45)
@@ -431,6 +1103,18 @@ function createReport(
         ir.nodeMatches.map((match) => match.confidence),
       ),
     },
+    styleExtraction: styleStats,
+    motionExtraction: summarizeMotionExtraction(ir),
+    exportTree: ir.exportTreeDiagnostics,
+    runtimeCapture: {
+      breakpointsCaptured:
+        ir.runtimeCapture.captureDiagnostics?.breakpointsCaptured ?? [],
+      stylesheetCount: ir.runtimeCapture.captureDiagnostics?.stylesheetCount,
+      nodeCount: ir.runtimeCapture.captureDiagnostics?.nodeCount,
+      fontsReady: ir.runtimeCapture.captureDiagnostics?.fontReadiness,
+    },
+    previewValidation: bestAttempt.previewValidation,
+    debugArtifacts,
     sections: ir.component.sections.map((section) => ({
       index: section.index,
       name: section.name,
@@ -444,14 +1128,162 @@ function createReport(
       linked: ir.assets.length,
       failed: 0,
     },
+    patchHistoryPath: "patch-history.json",
     warnings: bestAttempt.warnings,
   };
+}
+
+function createPatchHistory(attempts: ExportAttemptResult[]) {
+  return attempts.map((attempt) => ({
+    attempt: attempt.attemptNumber,
+    strategy: attempt.strategy,
+    patchesApplied: attempt.patchesApplied ?? [],
+    patchOperations: attempt.patchOperations ?? [],
+    patchTargets: attempt.patchTargets,
+    patchPropertyHints: attempt.patchPropertyHints,
+    diagnosis: attempt.diagnosis ?? [],
+    diagnosisDetails: attempt.diagnosisDetails ?? [],
+    stopReason: attempt.stopReason,
+    rerunReason: attempt.rerunReason,
+    resetToBestStateForNextAttempt:
+      attempt.resetToBestStateForNextAttempt ?? false,
+  }));
+}
+
+function summarizeStyleExtraction(ir: ExportIR) {
+  const runtimeNodes = ir.runtimeCapture.nodes;
+  const componentNodes = ir.component.nodes;
+  const nonMetaEntries = (styles: Record<string, string>) =>
+    Object.keys(styles).filter((key) => !key.startsWith("__coderelay"));
+  const styledRuntimeNodes = runtimeNodes.filter(
+    (node) => nonMetaEntries(node.styles).length > 0,
+  );
+  const styledComponentNodes = componentNodes.filter(
+    (node) => nonMetaEntries(node.styles).length > 0,
+  );
+  const surfaceNodes = componentNodes.filter((node) => isVisualSurfaceNode(node));
+
+  return {
+    runtimeNodeCount: runtimeNodes.length,
+    componentNodeCount: componentNodes.length,
+    runtimeNodesWithStyles: styledRuntimeNodes.length,
+    componentNodesWithStyles: styledComponentNodes.length,
+    visualSurfaceNodeCount: surfaceNodes.length,
+    topStyledNodes: styledComponentNodes.slice(0, 12).map((node) => ({
+      id: node.id,
+      tag: node.tag,
+      text: node.text?.slice(0, 80),
+      styleKeys: nonMetaEntries(node.styles),
+    })),
+  };
+}
+
+function summarizeMotionExtraction(ir: ExportIR) {
+  const runtimeNodesWithMotion = ir.runtimeCapture.nodes.filter((node) =>
+    hasMotionStyles(node.motion) || hasInteractionStateStyles(node.interactionStyles),
+  );
+  const exportNodesWithMotion = flattenExportTree(ir.exportTree ?? []).filter(
+    (node) => hasMotionStyles(node.motion) || hasInteractionStateStyles(node.interactionStyles),
+  );
+
+  return {
+    runtimeNodesWithMotion: runtimeNodesWithMotion.length,
+    exportNodesWithMotion: exportNodesWithMotion.length,
+    topMotionNodes: runtimeNodesWithMotion.slice(0, 12).map((node) => ({
+      id: node.id,
+      tag: node.tag,
+      text: node.text?.slice(0, 80),
+      motion: node.motion,
+      interactionStyles: node.interactionStyles,
+    })),
+  };
+}
+
+function hasMotionStyles(motion: RuntimeNode["motion"] | ExportTreeNode["motion"]) {
+  if (!motion) return false;
+  return Object.values(motion).some(
+    (value) =>
+      typeof value === "string" &&
+      value.trim().length > 0 &&
+      value !== "all 0s ease 0s" &&
+      value !== "0s" &&
+      value !== "none" &&
+      value !== "normal" &&
+      value !== "1" &&
+      value !== "running",
+  );
+}
+
+function hasInteractionStateStyles(
+  interactionStyles: RuntimeNode["interactionStyles"] | ExportTreeNode["interactionStyles"],
+) {
+  if (!interactionStyles) return false;
+  return ["hover", "focus"].some((state) => {
+    const styles = interactionStyles[state as "hover" | "focus"];
+    return Boolean(styles && Object.values(styles).some((value) => Boolean(value)));
+  });
+}
+
+function flattenExportTree(nodes: ExportTreeNode[]): ExportTreeNode[] {
+  return nodes.flatMap((node) => [node, ...flattenExportTree(node.children)]);
+}
+
+function isVisualSurfaceNode(node: RuntimeNode) {
+  if (node.text?.trim()) return false;
+  if (node.tag === "img" || node.tag === "a" || node.tag === "button") {
+    return false;
+  }
+  return Boolean(
+    node.styles.backgroundColor ||
+      node.styles.backgroundImage ||
+      node.styles.border ||
+      node.styles.borderRadius ||
+      node.styles.boxShadow,
+  );
+}
+
+function cloneWorkingAttemptState(state: {
+  ir: ExportIR;
+  strategy: typeof baselineStrategy;
+}) {
+  return {
+    ir: structuredClone(state.ir),
+    strategy: { ...state.strategy },
+  };
+}
+
+function collectComparableFidelityMetrics(fidelity: FidelityScores) {
+  const metrics = [
+    { key: "layout", best: fidelity.layout },
+    { key: "typography", best: fidelity.typography },
+    { key: "color", best: fidelity.color },
+    { key: "assets", best: fidelity.assets },
+    { key: "motion", best: fidelity.motion },
+    { key: "nodeMatch", best: fidelity.nodeMatch },
+    { key: "desktop", best: fidelity.desktop },
+    { key: "laptop", best: fidelity.laptop },
+    { key: "tablet", best: fidelity.tablet },
+    { key: "mobile", best: fidelity.mobile },
+  ] satisfies Array<{ key: ComparableFidelityKey; best: number | undefined }>;
+
+  return metrics.filter(
+    (entry): entry is { key: ComparableFidelityKey; best: number } =>
+      typeof entry.best === "number",
+  );
+}
+
+function readComparableFidelityMetric(
+  fidelity: FidelityScores,
+  key: ComparableFidelityKey,
+) {
+  const value = fidelity[key];
+  return typeof value === "number" ? value : undefined;
 }
 
 function createReadme(ir: ExportIR, bestAttempt: ExportAttemptResult) {
   return `# ${ir.componentName}
 
-Generated by Coderelay MVP-A from:
+Generated by Coderelay from:
 
 ${ir.sourceUrl}
 
@@ -462,14 +1294,27 @@ npm install
 npm run dev
 \`\`\`
 
-This export is a Next.js App Router project using TypeScript and CSS Modules.
+This export is a Vite + React + TypeScript project using CSS Modules and Framer Motion.
 
 ## Important files
 
-- \`app/page.tsx\`
-- \`components/${ir.componentName}.tsx\`
-- \`components/${ir.componentName}.module.css\`
+- \`src/App.tsx\`
+- \`src/main.tsx\`
+- \`src/styles.css\`
+- \`pages/\`
+- \`components/\`
+- \`framer-modules/\`
+- \`framer-component-modules.json\`
+- \`framer-code-files.json\`
+- \`framer-fonts.json\`
+- \`framer-cms-collections.json\`
+- \`raw-runtime-capture.json\`
+- \`framer-tree.json\`
+- \`export-tree.json\`
+- \`asset-manifest.json\`
+- \`patch-history.json\`
 - \`export-report.json\`
+- \`debug/manifest.json\`
 - \`AGENT_BRIEF.md\`
 
 ## Fidelity
@@ -478,6 +1323,15 @@ This export is a Next.js App Router project using TypeScript and CSS Modules.
 - Overall: ${bestAttempt.fidelity.overall}%
 - Desktop: ${bestAttempt.fidelity.desktop}%
 - Mobile: ${bestAttempt.fidelity.mobile}%
+- Capture mode: ${ir.captureMode ?? "plugin-only"}
+- Export engine: ${ir.exportEngine ?? "plugin-approximation"}
+- Framer component modules: ${ir.componentModules?.length ?? 0}
+- Framer code files: ${ir.codeFiles?.length ?? 0}
+- Framer fonts: ${ir.fonts?.length ?? 0}
+- Framer CMS collections: ${ir.cmsCollections?.length ?? 0}
+- Runtime breakpoints captured: ${ir.runtimeCapture.captureDiagnostics?.breakpointsCaptured?.join(", ") || "none"}
+- Framer tree nodes: ${ir.framerTree?.length ?? 0}
+- Export tree nodes: ${ir.exportTreeDiagnostics?.totalNodes ?? 0}
 
 Review \`export-report.json\` before editing.
 `;
@@ -490,8 +1344,21 @@ This code was exported from a Framer design. Preserve visual fidelity unless ins
 
 ## Main files
 
-- Component: \`components/${ir.componentName}.tsx\`
-- Styles: \`components/${ir.componentName}.module.css\`
+- Preview app: \`src/App.tsx\`
+- Pages: \`pages/\`
+- Components: \`components/\`
+- Framer remote module wrappers: \`framer-modules/\`
+- Framer component manifest: \`framer-component-modules.json\`
+- Framer code file manifest: \`framer-code-files.json\`
+- Framer font manifest: \`framer-fonts.json\`
+- Framer CMS manifest: \`framer-cms-collections.json\`
+- Raw runtime capture: \`raw-runtime-capture.json\`
+- Framer tree manifest: \`framer-tree.json\`
+- Merged export tree manifest: \`export-tree.json\`
+- Asset manifest: \`asset-manifest.json\`
+- Patch history: \`patch-history.json\`
+- Debug artifact manifest: \`debug/manifest.json\`
+- Shared preview styles: \`src/styles.css\`
 - Report: \`export-report.json\`
 
 ## Guidance
@@ -500,6 +1367,14 @@ This code was exported from a Framer design. Preserve visual fidelity unless ins
 - Keep spacing, typography, and responsive behavior close to the original.
 - Reconnect forms, analytics, custom embeds, and advanced motion manually if needed.
 - This MVP-A export links remote assets instead of bundling them.
+- Capture mode: \`${ir.captureMode ?? "plugin-only"}\`.
+- Export engine: \`${ir.exportEngine ?? "plugin-approximation"}\`.
+- Component modules detected: ${ir.componentModules?.length ?? 0}.
+- Code files detected: ${ir.codeFiles?.length ?? 0}.
+- Fonts detected: ${ir.fonts?.length ?? 0}.
+- CMS collections detected: ${ir.cmsCollections?.length ?? 0}.
+- Tree nodes preserved: ${ir.framerTree?.length ?? 0}.
+- Merged export tree nodes: ${ir.exportTreeDiagnostics?.totalNodes ?? 0}.
 - Best attempt was ${bestAttempt.attemptNumber} using \`${bestAttempt.strategy}\`.
 `;
 }

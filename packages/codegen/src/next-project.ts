@@ -2,12 +2,27 @@ import { mkdirp } from "fs-extra";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import prettier from "prettier";
-import type { ExportIR, RuntimeNode } from "../../shared/src/types.js";
+import type {
+  ExportIR,
+  FramerCmsCollection,
+  ExportTreeNode,
+  FramerComponentModule,
+  RuntimeNode,
+  ViewportName,
+} from "../../shared/src/types.js";
 
 type GenerateInput = {
   ir: ExportIR;
   projectDir: string;
-  strategy: string;
+  strategy: ExportStrategyConfig;
+};
+
+export type ExportStrategyConfig = {
+  id: string;
+  structuredLayout: boolean;
+  compactSpacing: boolean;
+  aggressiveMobileStacking: boolean;
+  preserveImageAspectRatio: boolean;
 };
 
 export type GeneratedProject = {
@@ -22,10 +37,16 @@ export async function generateNextProject(
   input: GenerateInput,
 ): Promise<GeneratedProject> {
   const componentDir = path.join(input.projectDir, "components");
-  const appDir = path.join(input.projectDir, "app");
+  const moduleDir = path.join(input.projectDir, "framer-modules");
+  const pageDir = path.join(input.projectDir, "pages");
+  const srcDir = path.join(input.projectDir, "src");
+  const framerDataDir = path.join(srcDir, "framer-data");
 
   await mkdirp(componentDir);
-  await mkdirp(appDir);
+  await mkdirp(moduleDir);
+  await mkdirp(pageDir);
+  await mkdirp(srcDir);
+  await mkdirp(framerDataDir);
 
   const componentPath = path.join(
     componentDir,
@@ -38,27 +59,203 @@ export async function generateNextProject(
   const dtsPath = path.join(componentDir, `${input.ir.componentName}.d.ts`);
   const previewHtmlPath = path.join(input.projectDir, "preview.html");
 
-  const component = await formatTsx(createComponent(input.ir), "typescript");
-  const css = createCss(input.ir, input.strategy);
-  const page = await formatTsx(createPage(input.ir), "typescript");
-  const layout = await formatTsx(createLayout(input.ir), "typescript");
+  const isLibrary =
+    Array.isArray(input.ir.libraryComponents) &&
+    input.ir.libraryComponents.length > 0;
+  const sitePages = Array.isArray(input.ir.sitePages)
+    ? input.ir.sitePages.map((entry) =>
+        deriveIrForComponent(input.ir, entry.componentName, entry.nodes),
+      )
+    : [];
+  const isFullSite =
+    input.ir.exportMode === "full-site" && sitePages.length > 0;
+
+  const entries = isLibrary
+    ? input.ir.libraryComponents!.map((entry) =>
+        deriveIrForComponent(input.ir, entry.componentName, entry.nodes),
+      )
+    : [input.ir];
+
+  const componentEntries = isFullSite && !isLibrary ? [] : entries;
+  const componentModules = Array.isArray(input.ir.componentModules)
+    ? input.ir.componentModules
+    : [];
+
+  await writeFile(
+    path.join(input.projectDir, "framer-component-modules.json"),
+    `${JSON.stringify(componentModules, null, 2)}\n`,
+  );
+  await writeFile(
+    path.join(input.projectDir, "framer-code-files.json"),
+    `${JSON.stringify(input.ir.codeFiles ?? [], null, 2)}\n`,
+  );
+  await writeFile(
+    path.join(input.projectDir, "framer-fonts.json"),
+    `${JSON.stringify(input.ir.fonts ?? [], null, 2)}\n`,
+  );
+  await writeFile(
+    path.join(input.projectDir, "framer-cms-collections.json"),
+    `${JSON.stringify(input.ir.cmsCollections ?? [], null, 2)}\n`,
+  );
+  await writeFile(
+    path.join(input.projectDir, "framer-tree.json"),
+    `${JSON.stringify(input.ir.framerTree ?? [], null, 2)}\n`,
+  );
+  await writeFile(
+    path.join(input.projectDir, "export-tree.json"),
+    `${JSON.stringify(input.ir.exportTree ?? [], null, 2)}\n`,
+  );
+  await writeFile(
+    path.join(input.projectDir, "motion-manifest.json"),
+    `${JSON.stringify(createMotionManifest(input.ir), null, 2)}\n`,
+  );
+  await writeFile(
+    path.join(input.projectDir, "asset-manifest.json"),
+    `${JSON.stringify(createAssetManifest(input.ir), null, 2)}\n`,
+  );
+
+  for (const module of componentModules) {
+    const modulePath = path.join(
+      moduleDir,
+      `${toSafeIdentifier(module.name)}Remote.tsx`,
+    );
+    await writeFile(
+      modulePath,
+      await formatTsx(createRemoteModuleWrapper(module), "typescript"),
+    );
+  }
+
+  for (const entry of componentEntries) {
+    const entryComponentPath = path.join(
+      componentDir,
+      `${entry.componentName}.tsx`,
+    );
+    const entryCssPath = path.join(
+      componentDir,
+      `${entry.componentName}.module.css`,
+    );
+    const entryDtsPath = path.join(componentDir, `${entry.componentName}.d.ts`);
+
+    const component = await formatTsx(createComponent(entry), "typescript");
+    const css = createCss(entry, input.strategy);
+    await writeFile(entryComponentPath, component);
+    await writeFile(entryCssPath, css);
+    await writeFile(entryDtsPath, createDts(entry));
+  }
+
+  for (const entry of sitePages) {
+    const entryComponentPath = path.join(pageDir, `${entry.componentName}.tsx`);
+    const entryCssPath = path.join(
+      pageDir,
+      `${entry.componentName}.module.css`,
+    );
+    const entryDtsPath = path.join(pageDir, `${entry.componentName}.d.ts`);
+    const pageComponent = await formatTsx(
+      createComponent(entry, {
+        cssImportPath: `./${entry.componentName}.module.css`,
+      }),
+      "typescript",
+    );
+    await writeFile(entryComponentPath, pageComponent);
+    await writeFile(entryCssPath, createCss(entry, input.strategy));
+    await writeFile(entryDtsPath, createDts(entry));
+  }
+
+  const app = await formatTsx(
+    isFullSite
+      ? createViteSiteApp(input.ir, sitePages)
+      : createViteApp(
+          entries,
+          input.ir.exportMode === "selection" ? "selection" : "components",
+          componentModules,
+        ),
+    "typescript",
+  );
+  const framerStyleCss = input.ir.runtimeCapture.framerStyleCss?.trim() ?? "";
+  const main = await formatTsx(
+    createViteMain(Boolean(framerStyleCss)),
+    "typescript",
+  );
   const globalCss = createGlobalCss();
   const packageJson = `${JSON.stringify(createPackageJson(input.ir), null, 2)}\n`;
   const tsconfig = `${JSON.stringify(createTsConfig(), null, 2)}\n`;
 
-  await writeFile(componentPath, component);
-  await writeFile(cssPath, css);
-  await writeFile(dtsPath, createDts(input.ir));
-  await writeFile(path.join(appDir, "page.tsx"), page);
-  await writeFile(path.join(appDir, "layout.tsx"), layout);
-  await writeFile(path.join(appDir, "globals.css"), globalCss);
+  await writeFile(path.join(srcDir, "App.tsx"), app);
+  await writeFile(
+    path.join(framerDataDir, "component-modules.ts"),
+    await formatTsx(createComponentModulesDataModule(componentModules), "typescript"),
+  );
+  await writeFile(
+    path.join(framerDataDir, "component-registry.ts"),
+    await formatTsx(
+      createComponentRegistryModule(componentModules),
+      "typescript",
+    ),
+  );
+  await writeFile(
+    path.join(framerDataDir, "component-runtime.tsx"),
+    await formatTsx(
+      createComponentRuntimeModule(componentModules),
+      "typescript",
+    ),
+  );
+  await writeFile(
+    path.join(framerDataDir, "code-files.ts"),
+    await formatTsx(createCodeFilesDataModule(input.ir), "typescript"),
+  );
+  await writeFile(
+    path.join(framerDataDir, "code-files-runtime.tsx"),
+    await formatTsx(createCodeFilesRuntimeModule(input.ir), "typescript"),
+  );
+  await writeFile(
+    path.join(framerDataDir, "fonts.ts"),
+    await formatTsx(createFontsDataModule(input.ir), "typescript"),
+  );
+  await writeFile(
+    path.join(framerDataDir, "cms.ts"),
+    await formatTsx(createCmsDataModule(input.ir), "typescript"),
+  );
+  await writeFile(
+    path.join(framerDataDir, "cms-runtime.tsx"),
+    await formatTsx(createCmsRuntimeModule(input.ir), "typescript"),
+  );
+  await writeFile(
+    path.join(framerDataDir, "cms-sections.tsx"),
+    await formatTsx(createCmsSectionsModule(input.ir), "typescript"),
+  );
+  await writeFile(
+    path.join(framerDataDir, "index.ts"),
+    await formatTsx(createFramerDataIndexModule(input.ir), "typescript"),
+  );
+  await writeFile(path.join(srcDir, "main.tsx"), main);
+  await writeFile(path.join(srcDir, "styles.css"), globalCss);
+  if (framerStyleCss) {
+    await writeFile(path.join(srcDir, "framer-styles.css"), framerStyleCss);
+  }
+  await writeFile(path.join(srcDir, "vite-env.d.ts"), createViteEnv());
+  await writeFile(
+    path.join(input.projectDir, "index.html"),
+    createIndexHtml(input.ir),
+  );
   await writeFile(path.join(input.projectDir, "package.json"), packageJson);
   await writeFile(path.join(input.projectDir, "tsconfig.json"), tsconfig);
   await writeFile(
-    path.join(input.projectDir, "next.config.ts"),
-    createNextConfig(),
+    path.join(input.projectDir, "vite.config.ts"),
+    createViteConfig(),
   );
-  await writeFile(previewHtmlPath, createPreviewHtml(input.ir, css));
+  await writeFile(
+    previewHtmlPath,
+    isFullSite
+      ? createMultiEntryPreviewHtml(input.ir, sitePages, input.strategy, "Page")
+      : isLibrary
+        ? createMultiEntryPreviewHtml(
+            input.ir,
+            entries,
+            input.strategy,
+            "Component",
+          )
+        : createPreviewHtml(input.ir, createCss(input.ir, input.strategy)),
+  );
 
   return {
     projectDir: input.projectDir,
@@ -67,6 +264,177 @@ export async function generateNextProject(
     dtsPath,
     previewHtmlPath,
   };
+}
+
+function deriveIrForComponent(
+  base: ExportIR,
+  componentName: string,
+  nodes: RuntimeNode[],
+): ExportIR {
+  return {
+    ...base,
+    componentName,
+    component: {
+      semanticType: base.component.semanticType,
+      nodes,
+      sections: [
+        {
+          index: 0,
+          name: componentName,
+          kind: "content",
+          confidence: 1,
+          nodes,
+        },
+      ],
+    },
+  };
+}
+
+function createRemoteModuleWrapper(module: FramerComponentModule) {
+  const exportName = module.isDefaultExport
+    ? "default"
+    : module.componentName ?? module.name;
+  const safeName = toSafeIdentifier(module.name);
+
+  return `import * as React from 'react'
+
+type RemoteProps = Record<string, unknown>
+type RemoteComponentModule = Record<string, unknown> & {
+  default?: React.ComponentType<RemoteProps>
+}
+
+function resolveComponent(mod: RemoteComponentModule) {
+  const named = ${JSON.stringify(exportName)} !== 'default' ? mod[${JSON.stringify(exportName)}] : undefined
+  const candidate = named ?? mod.default ?? Object.values(mod).find((value) => typeof value === 'function')
+  return candidate as React.ComponentType<RemoteProps>
+}
+
+const RemoteComponent = React.lazy(async () => {
+  const mod = await import(/* @vite-ignore */ ${JSON.stringify(module.insertURL)}) as RemoteComponentModule
+  return { default: resolveComponent(mod) }
+})
+
+export const framerModuleInfo = ${JSON.stringify(module, null, 2)} as const
+
+export function ${safeName}Remote(props: RemoteProps) {
+  return (
+    <React.Suspense fallback={<div data-framer-module-loading="${escapeAttribute(module.name)}">${escapeText(module.name)}</div>}>
+      <RemoteComponent {...props} />
+    </React.Suspense>
+  )
+}
+`;
+}
+
+function createAssetManifest(ir: ExportIR) {
+  const runtimeAssets = ir.runtimeCapture.nodes
+    .flatMap((node) => {
+      const assets: Array<{
+        nodeId: string;
+        kind: "image" | "link";
+        url: string;
+        alt?: string;
+        source: "runtime";
+      }> = [];
+
+      if (node.attributes.src) {
+        assets.push({
+          nodeId: node.id,
+          kind: "image",
+          url: node.attributes.src,
+          alt: node.attributes.alt,
+          source: "runtime",
+        });
+      }
+
+      const backgroundUrl = extractFirstCssUrl(node.styles.backgroundImage);
+      if (backgroundUrl) {
+        assets.push({
+          nodeId: node.id,
+          kind: "image",
+          url: backgroundUrl,
+          source: "runtime",
+        });
+      }
+
+      if (node.attributes.href) {
+        assets.push({
+          nodeId: node.id,
+          kind: "link",
+          url: node.attributes.href,
+          source: "runtime",
+        });
+      }
+
+      return assets;
+    })
+    .filter((asset, index, assets) => {
+      return (
+        assets.findIndex(
+          (entry) =>
+            entry.nodeId === asset.nodeId &&
+            entry.kind === asset.kind &&
+            entry.url === asset.url,
+        ) === index
+      );
+    });
+  const cmsAssets = (ir.cmsCollections ?? [])
+    .flatMap((collection) =>
+      (collection.items ?? []).flatMap((item) =>
+        Object.entries(item.fieldData ?? {}).flatMap(([fieldId, entry]) => {
+          if (!entry || typeof entry !== "object") return [];
+          const fieldEntry = entry as Record<string, unknown>;
+          const type = fieldEntry.type;
+          const value = fieldEntry.value;
+          if (
+            (type === "image" || type === "file" || type === "link") &&
+            typeof value === "string" &&
+            value.trim().length > 0
+          ) {
+            return [
+              {
+                collectionId: collection.id,
+                itemId: item.id,
+                fieldId,
+                kind: type === "link" ? "link" : "image",
+                url: value,
+                source: "cms" as const,
+              },
+            ];
+          }
+          return [];
+        }),
+      ),
+    )
+    .filter((asset, index, assets) => {
+      return (
+        assets.findIndex(
+          (entry) =>
+            entry.collectionId === asset.collectionId &&
+            entry.itemId === asset.itemId &&
+            entry.fieldId === asset.fieldId &&
+            entry.url === asset.url,
+        ) === index
+      );
+    });
+
+  return {
+    exportedAt: new Date().toISOString(),
+    totals: {
+      irAssets: ir.assets.length,
+      runtimeAssets: runtimeAssets.length,
+      cmsAssets: cmsAssets.length,
+    },
+    irAssets: ir.assets,
+    runtimeAssets,
+    cmsAssets,
+  };
+}
+
+function extractFirstCssUrl(value: string | undefined) {
+  if (!value) return undefined;
+  const match = value.match(/url\((['"]?)(.*?)\\1\)/i);
+  return match?.[2]?.trim() || undefined;
 }
 
 function createDts(ir: ExportIR) {
@@ -80,6 +448,15 @@ function createDts(ir: ExportIR) {
   if (props?.heroSubtitle) lines.push(`  ${props.heroSubtitle}?: string`);
   if (props?.ctaLabel) lines.push(`  ${props.ctaLabel}?: string`);
   if (props?.ctaHref) lines.push(`  ${props.ctaHref}?: string`);
+  if ((ir.cmsCollections?.length ?? 0) > 0) {
+    lines.push(`  includeCmsSections?: boolean`);
+  }
+  if ((ir.componentModules?.length ?? 0) > 0) {
+    lines.push(`  includeFramerRegistry?: boolean`);
+  }
+  if ((ir.codeFiles?.length ?? 0) > 0) {
+    lines.push(`  includeFramerCodeFiles?: boolean`);
+  }
 
   lines.push(`}`);
   lines.push("");
@@ -90,9 +467,26 @@ function createDts(ir: ExportIR) {
   return `${lines.join("\n")}\n`;
 }
 
-function createComponent(ir: ExportIR) {
-  const sections =
-    ir.component.sections.length > 0
+function createComponent(
+  ir: ExportIR,
+  options: {
+    cssImportPath?: string;
+    cmsImportPath?: string;
+    framerDataImportPath?: string;
+  } = {},
+) {
+  const cssImportPath =
+    options.cssImportPath ?? `./${ir.componentName}.module.css`;
+  const cmsImportPath =
+    options.cmsImportPath ?? `../src/framer-data/cms-sections`;
+  const framerDataImportPath =
+    options.framerDataImportPath ?? `../src/framer-data`;
+  const hasCmsCollections = (ir.cmsCollections?.length ?? 0) > 0;
+  const hasComponentModules = (ir.componentModules?.length ?? 0) > 0;
+  const hasCodeFiles = (ir.codeFiles?.length ?? 0) > 0;
+  const content = hasUsableExportTree(ir)
+    ? renderExportTreeForReact(ir)
+    : ir.component.sections.length > 0
       ? ir.component.sections
           .map((section, index) =>
             renderSection({
@@ -112,7 +506,19 @@ function createComponent(ir: ExportIR) {
           confidence: ir.component.sections[0]?.confidence,
         });
 
-  return `import styles from './${ir.componentName}.module.css'
+  return `import type * as React from 'react'
+	import styles from '${cssImportPath}'
+  ${hasCmsCollections ? `import { FramerCmsAutoSections } from '${cmsImportPath}'` : ""}
+  ${
+    hasComponentModules || hasCodeFiles
+      ? `import { ${[
+          hasComponentModules ? "FramerComponentRegistryPreview" : null,
+          hasCodeFiles ? "FramerCodeFileList" : null,
+        ]
+          .filter(Boolean)
+          .join(", ")} } from '${framerDataImportPath}'`
+      : ""
+  }
 
 function SectionHero({ children, style }: { children: React.ReactNode; style: React.CSSProperties }) {
   return (
@@ -146,49 +552,429 @@ function SectionMediaGrid({ children, style }: { children: React.ReactNode; styl
 
 export type ${ir.componentName}Props = {
   ${formatPropTypeLines(ir)}
+  ${hasCmsCollections ? "includeCmsSections?: boolean" : ""}
+  ${hasComponentModules ? "includeFramerRegistry?: boolean" : ""}
+  ${hasCodeFiles ? "includeFramerCodeFiles?: boolean" : ""}
 }
 
 export function ${ir.componentName}(props: ${ir.componentName}Props) {
   return (
     <main className={styles.page} data-coderelay-source="${escapeAttribute(ir.sourceUrl)}">
-      ${sections}
+      ${content}
+      ${hasCmsCollections ? "{props.includeCmsSections !== false ? <FramerCmsAutoSections /> : null}" : ""}
+      ${
+        hasComponentModules
+          ? `{props.includeFramerRegistry !== false ? <FramerComponentRegistryPreview /> : null}`
+          : ""
+      }
+      ${
+        hasCodeFiles
+          ? `{props.includeFramerCodeFiles !== false ? <FramerCodeFileList /> : null}`
+          : ""
+      }
     </main>
   )
 }
 `;
 }
 
-function createPage(ir: ExportIR) {
-  return `import { ${ir.componentName} } from '../components/${ir.componentName}'
+function createViteApp(
+  entries: ExportIR[],
+  label: "components" | "selection",
+  componentModules: FramerComponentModule[] = [],
+) {
+  const base = entries[0];
+  const hasCmsCollections = (base?.cmsCollections?.length ?? 0) > 0;
+  const hasCodeFiles = (base?.codeFiles?.length ?? 0) > 0;
+  const hasComponentRegistry = componentModules.length > 0;
+  const imports = entries
+    .map(
+      (entry) =>
+        `import { ${entry.componentName} } from '../components/${entry.componentName}'`,
+    )
+    .join("\n");
+  const moduleImports = componentModules
+    .map(
+      (module) =>
+        `import { ${toSafeIdentifier(module.name)}Remote } from '../framer-modules/${toSafeIdentifier(module.name)}Remote'`,
+    )
+    .join("\n");
+  const cmsImports = hasCmsCollections
+    ? `import { FramerCmsAutoSections } from './framer-data/cms-sections'`
+    : "";
+  const runtimeDataImports =
+    [
+      hasCodeFiles ? "FramerCodeFileList" : null,
+      hasComponentRegistry ? "FramerComponentRegistryPreview" : null,
+    ]
+      .filter(Boolean)
+      .join(", ") || "";
+  const framerDataRuntimeImport = runtimeDataImports
+    ? `import { ${runtimeDataImports} } from './framer-data'`
+    : "";
+  const render = entries
+    .map(
+      (entry, index) => `<motion.section
+          className="previewItem"
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.24, delay: ${index} * 0.035 }}
+        >
+          <div className="previewHeader">
+            <div>
+	          <div className="previewEyebrow">${label === "components" ? "Component" : "Selection"}</div>
+              <h2>${escapeJs(entry.componentName)}</h2>
+            </div>
+            <code>${escapeJs(entry.componentName)}.tsx</code>
+          </div>
+          <div className="previewCanvas">
+            <${entry.componentName} />
+          </div>
+        </motion.section>`,
+    )
+    .join("\n");
+  const moduleRender = componentModules
+    .map(
+      (module, index) => `<motion.section
+          className="previewItem"
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.24, delay: ${(entries.length + index)} * 0.035 }}
+        >
+          <div className="previewHeader">
+            <div>
+              <div className="previewEyebrow">Framer module</div>
+              <h2>${escapeJs(module.name)}</h2>
+            </div>
+            <code>${escapeJs(module.source)}</code>
+          </div>
+          <div className="previewCanvas">
+            <${toSafeIdentifier(module.name)}Remote />
+          </div>
+        </motion.section>`,
+    )
+    .join("\n");
 
-export default function Page() {
-  return <${ir.componentName} />
-}
-`;
-}
+  return `import { motion } from 'framer-motion'
+${imports}
+${moduleImports}
+${cmsImports}
+${framerDataRuntimeImport}
 
-function createLayout(ir: ExportIR) {
-  return `import './globals.css'
-import type { Metadata } from 'next'
-
-export const metadata: Metadata = {
-  title: '${escapeJs(ir.componentName)}',
-  description: 'Generated by Coderelay from a Framer design.',
-}
-
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function App() {
   return (
-    <html lang="en">
-      <body>{children}</body>
-    </html>
+    <main className="previewShell">
+      <header className="previewTopbar">
+        <div>
+          <div className="previewEyebrow">Coderelay export</div>
+	          <h1>${label === "components" ? "Component library preview" : "Export preview"}</h1>
+        </div>
+        <span>${entries.length} component${entries.length === 1 ? "" : "s"}</span>
+      </header>
+      ${render}
+      ${moduleRender}
+      ${
+        hasComponentRegistry
+          ? `<motion.section
+          className="previewItem"
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.24, delay: ${(entries.length + componentModules.length + (hasCmsCollections ? 1 : 0))} * 0.035 }}
+        >
+          <div className="previewHeader">
+            <div>
+              <div className="previewEyebrow">Framer registry</div>
+              <h2>Registered component preview</h2>
+            </div>
+            <code>src/framer-data/component-runtime.tsx</code>
+          </div>
+          <div className="previewCanvas">
+            <FramerComponentRegistryPreview />
+          </div>
+        </motion.section>`
+          : ""
+      }
+      ${
+        hasCodeFiles
+          ? `<motion.section
+          className="previewItem"
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.24, delay: ${(entries.length + componentModules.length + (hasCmsCollections ? 1 : 0) + (hasComponentRegistry ? 1 : 0))} * 0.035 }}
+        >
+          <div className="previewHeader">
+            <div>
+              <div className="previewEyebrow">Framer code files</div>
+              <h2>Code file preview</h2>
+            </div>
+            <code>src/framer-data/code-files-runtime.tsx</code>
+          </div>
+          <div className="previewCanvas">
+            <FramerCodeFileList />
+          </div>
+        </motion.section>`
+          : ""
+      }
+      ${
+        hasCmsCollections
+          ? `<motion.section
+          className="previewItem"
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.24, delay: ${(entries.length + componentModules.length)} * 0.035 }}
+        >
+          <div className="previewHeader">
+            <div>
+              <div className="previewEyebrow">Framer CMS</div>
+              <h2>Collection-bound preview</h2>
+            </div>
+            <code>src/framer-data/cms-sections.tsx</code>
+          </div>
+          <div className="previewCanvas">
+            <FramerCmsAutoSections />
+          </div>
+        </motion.section>`
+          : ""
+      }
+    </main>
   )
 }
 `;
 }
 
+function createViteSiteApp(base: ExportIR, pages: ExportIR[]) {
+  const hasCmsCollections = (base.cmsCollections?.length ?? 0) > 0;
+  const hasCodeFiles = (base.codeFiles?.length ?? 0) > 0;
+  const hasComponentRegistry = (base.componentModules?.length ?? 0) > 0;
+  const imports = pages
+    .map(
+      (entry) =>
+        `import { ${entry.componentName} } from '../pages/${entry.componentName}'`,
+    )
+    .join("\n");
+  const cmsImports = hasCmsCollections
+    ? `import { FramerCmsAutoSections } from './framer-data/cms-sections'`
+    : "";
+  const runtimeDataImports =
+    [
+      hasCodeFiles ? "FramerCodeFileList" : null,
+      hasComponentRegistry ? "FramerComponentRegistryPreview" : null,
+    ]
+      .filter(Boolean)
+      .join(", ") || "";
+  const framerDataRuntimeImport = runtimeDataImports
+    ? `import { ${runtimeDataImports} } from './framer-data'`
+    : "";
+  const pageMetadata = (
+    base.sitePages ??
+    pages.map((entry) => ({
+      componentName: entry.componentName,
+      routePath: "/",
+      title: entry.componentName,
+      nodes: entry.component.nodes,
+    }))
+  ).map((page, index) => ({
+    componentName: pages[index]?.componentName ?? page.componentName,
+    routePath: page.routePath,
+    title: page.title,
+  }));
+  const pageObjects = pageMetadata
+    .map(
+      (page) => `{
+	    path: ${JSON.stringify(page.routePath)},
+	    title: ${JSON.stringify(page.title)},
+	    Component: ${page.componentName},
+	  }`,
+    )
+    .join(",\n");
+
+	  return `import { useMemo, useState } from 'react'
+		import { motion } from 'framer-motion'
+		${imports}
+    ${cmsImports}
+    ${framerDataRuntimeImport}
+
+		const pages = [
+		  ${pageObjects}
+		]
+
+		function getInitialPath() {
+		  if (typeof window === 'undefined') return pages[0]?.path ?? '/'
+		  const hashPath = window.location.hash.replace(/^#/, '')
+		  return pages.some((page) => page.path === hashPath) ? hashPath : pages[0]?.path ?? '/'
+		}
+
+		export default function App() {
+		  const [currentPath, setCurrentPath] = useState(getInitialPath)
+		  const currentPage = useMemo(
+		    () => pages.find((page) => page.path === currentPath) ?? pages[0],
+		    [currentPath],
+		  )
+		  const Page = currentPage.Component
+
+		  function navigate(path: string) {
+		    setCurrentPath(path)
+		    if (typeof window !== 'undefined') {
+		      window.history.replaceState(null, '', '#' + path)
+		    }
+		  }
+
+		  return (
+	    <main className="siteShell">
+	      <header className="siteTopbar">
+	        <div>
+	          <div className="previewEyebrow">Coderelay full-site export</div>
+	          <h1>${escapeJs(base.componentName)}</h1>
+	        </div>
+	        <nav aria-label="Generated pages">
+	          {pages.map((page) => (
+	            <button
+	              key={page.path}
+	              type="button"
+	              data-active={page.path === currentPage.path}
+	              onClick={() => navigate(page.path)}
+	            >
+	              {page.title}
+	            </button>
+	          ))}
+	        </nav>
+	      </header>
+	      <motion.div
+	        key={currentPage.path}
+	        initial={{ opacity: 0, y: 12 }}
+	        animate={{ opacity: 1, y: 0 }}
+	        transition={{ duration: 0.24 }}
+	      >
+	        <Page />
+	      </motion.div>
+        ${
+          hasCmsCollections
+            ? `<section style={{ padding: '0 22px 22px' }}>
+          <div className="previewEyebrow">Framer CMS</div>
+          <FramerCmsAutoSections />
+        </section>`
+            : ""
+        }
+        ${
+          hasComponentRegistry
+            ? `<section style={{ padding: '0 22px 22px' }}>
+          <div className="previewEyebrow">Framer registry</div>
+          <FramerComponentRegistryPreview />
+        </section>`
+            : ""
+        }
+        ${
+          hasCodeFiles
+            ? `<section style={{ padding: '0 22px 22px' }}>
+          <div className="previewEyebrow">Framer code files</div>
+          <FramerCodeFileList />
+        </section>`
+            : ""
+        }
+	    </main>
+	  )
+	}
+	`;
+}
+
+function createMultiEntryPreviewHtml(
+  base: ExportIR,
+  entries: ExportIR[],
+  strategy: ExportStrategyConfig,
+  label: "Component" | "Page",
+) {
+  const css = createCss(entries[0] ?? base, strategy);
+  const cmsPreview = renderCmsCollectionsPreviewHtml(base);
+  const componentModulePreview = renderComponentModulesPreviewHtml(base);
+  const codeFilesPreview = renderCodeFilesPreviewHtml(base);
+  const items = entries
+    .map((entry) => {
+      const body =
+        hasUsableExportTree(entry)
+          ? renderExportTreeForHtml(entry)
+          : entry.component.sections.length > 0
+          ? entry.component.sections
+              .map((section, index) =>
+                renderPreviewSection(section.nodes, index, entry),
+              )
+              .join("\n")
+          : renderPreviewSection(entry.component.nodes, 0, entry);
+
+      return `<section class="previewItem">
+  <div class="previewHeader">
+    <div>
+      <div class="previewEyebrow">${label}</div>
+      <h2>${escapeText(entry.componentName)}</h2>
+    </div>
+    <code>${escapeText(entry.componentName)}.tsx</code>
+  </div>
+  <div class="previewCanvas">
+    <main class="page" data-coderelay-source="${escapeAttribute(entry.sourceUrl)}">
+      ${body}
+    </main>
+  </div>
+</section>`;
+    })
+    .join("\n");
+
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeText(base.componentName)} Preview</title>
+    <style>
+      ${base.runtimeCapture.framerStyleCss ?? ""}
+      ${createGlobalCss()}
+      ${css}
+    </style>
+  </head>
+  <body>
+    <main class="previewShell">
+      <header class="previewTopbar">
+        <div>
+          <div class="previewEyebrow">Coderelay export</div>
+          <h1>${label === "Page" ? "Full-site preview" : "Component library preview"}</h1>
+        </div>
+        <span>${entries.length} ${label.toLowerCase()}${entries.length === 1 ? "" : "s"}</span>
+      </header>
+      ${items}
+      ${cmsPreview}
+      ${componentModulePreview}
+      ${codeFilesPreview}
+    </main>
+  </body>
+</html>
+`;
+}
+
+function createViteMain(withFramerStyles = false) {
+  const importFramerStyles = withFramerStyles
+    ? `import './framer-styles.css'\n`
+    : "";
+  return `import React from 'react'
+import { createRoot } from 'react-dom/client'
+import App from './App'
+${importFramerStyles}import './styles.css'
+
+createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+)
+`;
+}
+
 function renderNode(node: RuntimeNode) {
+  const style = reactStyleAttribute(node);
+  const imgClass = reactClassName("styles.image", node);
+  const headingClass = reactClassName("styles.heading", node);
+  const subheadingClass = reactClassName("styles.subheading", node);
+  const linkClass = reactClassName("styles.link", node);
+  const buttonClass = reactClassName("styles.button", node);
+  const bodyClass = reactClassName("styles.body", node);
   if (node.tag === "img" && node.attributes.src) {
-    return `<img className={styles.image} src="${escapeAttribute(node.attributes.src)}" alt="${escapeAttribute(node.attributes.alt ?? "")}" />`;
+    return `<img className=${imgClass} src="${escapeAttribute(node.attributes.src)}" alt="${escapeAttribute(node.attributes.alt ?? "")}"${style} />`;
   }
 
   const text = escapeText(node.text ?? "");
@@ -198,22 +984,22 @@ function renderNode(node: RuntimeNode) {
   }
 
   if (node.tag === "h1") {
-    return `<h1 className={styles.heading}>${text}</h1>`;
+    return `<h1 className=${headingClass}${style}>${text}</h1>`;
   }
 
   if (node.tag === "h2" || node.tag === "h3") {
-    return `<h2 className={styles.subheading}>${text}</h2>`;
+    return `<h2 className=${subheadingClass}${style}>${text}</h2>`;
   }
 
   if (node.tag === "a") {
-    return `<a className={styles.link} href="${escapeAttribute(node.attributes.href ?? "#")}">${text}</a>`;
+    return `<a className=${linkClass} href="${escapeAttribute(node.attributes.href ?? "#")}"${style}>${text}</a>`;
   }
 
   if (node.tag === "button") {
-    return `<button className={styles.button} type="button">${text}</button>`;
+    return `<button className=${buttonClass} type="button"${style}>${text}</button>`;
   }
 
-  return `<p className={styles.body}>${text}</p>`;
+  return `<p className=${bodyClass}${style}>${text}</p>`;
 }
 
 type RenderContext = {
@@ -237,8 +1023,15 @@ function renderNodeWithProps(
   ir: ExportIR,
   ctx: RenderContext,
 ) {
+  const style = reactStyleAttribute(node);
+  const imgClass = reactClassName("styles.image", node);
+  const headingClass = reactClassName("styles.heading", node);
+  const subheadingClass = reactClassName("styles.subheading", node);
+  const linkClass = reactClassName("styles.link", node);
+  const buttonClass = reactClassName("styles.button", node);
+  const bodyClass = reactClassName("styles.body", node);
   if (node.tag === "img" && node.attributes.src) {
-    return `<img className={styles.image} src="${escapeAttribute(node.attributes.src)}" alt="${escapeAttribute(node.attributes.alt ?? "")}" />`;
+    return `<img className=${imgClass} src="${escapeAttribute(node.attributes.src)}" alt="${escapeAttribute(node.attributes.alt ?? "")}"${style} />`;
   }
 
   const text = escapeText(node.text ?? "");
@@ -256,7 +1049,7 @@ function renderNodeWithProps(
         ? `{props.${titleKey} ?? ${JSON.stringify(text)}}`
         : text;
     if (titleKey && !ctx.titleUsed) ctx.titleUsed = true;
-    return `<h1 className={styles.heading}>${content}</h1>`;
+    return `<h1 className=${headingClass}${style}>${content}</h1>`;
   }
 
   if (node.tag === "h2" || node.tag === "h3") {
@@ -265,7 +1058,7 @@ function renderNodeWithProps(
         ? `{props.${subtitleKey} ?? ${JSON.stringify(text)}}`
         : text;
     if (subtitleKey && !ctx.subtitleUsed) ctx.subtitleUsed = true;
-    return `<h2 className={styles.subheading}>${content}</h2>`;
+    return `<h2 className=${subheadingClass}${style}>${content}</h2>`;
   }
 
   if (node.tag === "a") {
@@ -282,7 +1075,7 @@ function renderNodeWithProps(
         : `"${escapeAttribute(href)}"`;
     if (ctaHrefKey && !ctx.ctaHrefUsed) ctx.ctaHrefUsed = true;
 
-    return `<a className={styles.link} href=${hrefExpr}>${label}</a>`;
+    return `<a className=${linkClass} href=${hrefExpr}${style}>${label}</a>`;
   }
 
   if (node.tag === "button") {
@@ -291,10 +1084,10 @@ function renderNodeWithProps(
         ? `{props.${ctaLabelKey} ?? ${JSON.stringify(text)}}`
         : text;
     if (ctaLabelKey && !ctx.ctaLabelUsed) ctx.ctaLabelUsed = true;
-    return `<button className={styles.button} type="button">${label}</button>`;
+    return `<button className=${buttonClass} type="button"${style}>${label}</button>`;
   }
 
-  return `<p className={styles.body}>${text}</p>`;
+  return `<p className=${bodyClass}${style}>${text}</p>`;
 }
 
 function formatPropTypeLines(ir: ExportIR) {
@@ -319,6 +1112,7 @@ function renderSection(input: {
   const groups = groupSectionNodes(repaired);
   const ctx = createRenderContext();
   const items = [
+    ...groups.surfaces.map(renderSurfaceNode),
     ...groups.headings.map((node) => renderNodeWithProps(node, input.ir, ctx)),
     ...groups.body.map((node) => renderNodeWithProps(node, input.ir, ctx)),
     ...groups.cta.map((node) => renderNodeWithProps(node, input.ir, ctx)),
@@ -348,7 +1142,15 @@ function renderSection(input: {
   </${component}>`;
 }
 
-function createCss(ir: ExportIR, strategy: string) {
+function createCss(ir: ExportIR, strategy: ExportStrategyConfig) {
+  if (hasUsableExportTree(ir)) {
+    return createTreeCss(ir);
+  }
+
+  return createHeuristicCss(ir, strategy);
+}
+
+function createHeuristicCss(ir: ExportIR, strategy: ExportStrategyConfig) {
   const root = ir.runtimeCapture.nodes.find(
     (node) => node.rect.width > 200 && node.rect.height > 100,
   );
@@ -368,13 +1170,16 @@ function createCss(ir: ExportIR, strategy: string) {
           360,
           Math.min(900, ir.runtimeCapture.viewports.desktop.height),
         );
-  const landingStructured = strategy === "landing-page-structured";
-  const stricterSpacing = strategy !== "semantic-layout";
+  const tabletHeight =
+    ir.runtimeCapture.viewports.tablet?.height ??
+    ir.runtimeCapture.viewports.mobile.height;
+  const landingStructured = strategy.structuredLayout;
+  const stricterSpacing = strategy.compactSpacing;
 
   const mobilePaddingByLayout = {
-    hero: strategy === "landing-page-structured" ? "56px 20px" : "64px 22px",
-    content: "52px 18px",
-    "media-grid": "48px 18px",
+    hero: landingStructured ? "56px 20px" : "64px 22px",
+    content: strategy.aggressiveMobileStacking ? "44px 16px" : "52px 18px",
+    "media-grid": strategy.aggressiveMobileStacking ? "40px 16px" : "48px 18px",
   } as const;
 
   const desktopPaddingByLayout = {
@@ -461,7 +1266,7 @@ function createCss(ir: ExportIR, strategy: string) {
 
 .image {
   width: 100%;
-  aspect-ratio: ${landingStructured ? "auto" : "4 / 5"};
+  aspect-ratio: ${strategy.preserveImageAspectRatio ? "4 / 5" : "auto"};
   max-height: ${landingStructured ? "760px" : "680px"};
   object-fit: cover;
   border-radius: 18px;
@@ -470,6 +1275,11 @@ function createCss(ir: ExportIR, strategy: string) {
 
 .placeholder {
   min-height: 240px;
+}
+
+.surface {
+  width: 100%;
+  min-height: 12px;
 }
 
 @media (max-width: 768px) {
@@ -485,7 +1295,7 @@ function createCss(ir: ExportIR, strategy: string) {
 
   .inner {
     grid-template-columns: 1fr;
-    gap: 24px;
+    gap: ${strategy.aggressiveMobileStacking ? "18px" : "24px"};
   }
 
   .inner[data-layout='dense'],
@@ -530,18 +1340,158 @@ function createCss(ir: ExportIR, strategy: string) {
     font-size: clamp(2.25rem, 12vw, 4rem);
   }
 }
+
+@media (max-width: 1024px) {
+  .section,
+  .heroSection {
+    min-height: ${ir.runtimeCapture.mode === "page" ? 480 : Math.max(360, Math.min(900, tabletHeight))}px;
+    padding: ${stricterSpacing ? "64px 32px" : "72px 40px"};
+  }
+
+  .inner[data-layout='hero'] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .inner[data-layout='media-grid'] {
+    grid-template-columns: 1fr;
+  }
+}
+`;
+}
+
+function createTreeCss(ir: ExportIR) {
+  const rootNode = (ir.exportTree ?? [])[0];
+  const pageBackground =
+    usableColor(rootNode?.styles.backgroundColor) ??
+    findBackgroundColor(ir, ir.runtimeCapture.nodes[0]);
+  const pageTextColor =
+    usableColor(rootNode?.styles.color) ??
+    usableColor(
+      flattenExportTree(ir.exportTree ?? [])
+        .map((node) => node.styles.color)
+        .find(Boolean),
+    ) ??
+    "#111111";
+  const viewportWidths = {
+    laptop: ir.runtimeCapture.viewports.laptop?.width ?? 1280,
+    tablet: ir.runtimeCapture.viewports.tablet?.width ?? 768,
+    mobile: ir.runtimeCapture.viewports.mobile?.width ?? 390,
+  };
+  const treeNodes = flattenExportTree(ir.exportTree ?? []);
+  const baseRules = treeNodes
+    .map((node) => {
+      const entries = treeCssEntries(node);
+      if (entries.length === 0) return "";
+      return `${treeCssSelector(node)} {\n${entries
+        .map(([key, value]) => `  ${toKebabCase(key)}: ${value};`)
+        .join("\n")}\n}`;
+    })
+    .filter(Boolean)
+    .join("\n\n");
+  const laptopRules = createViewportOverrideRules(treeNodes, "laptop");
+  const tabletRules = createViewportOverrideRules(treeNodes, "tablet");
+  const mobileRules = createViewportOverrideRules(treeNodes, "mobile");
+  const hoverRules = createInteractionStateRules(treeNodes, "hover");
+  const focusRules = createInteractionStateRules(treeNodes, "focus");
+  const laptopHoverRules = createViewportInteractionStateRules(
+    treeNodes,
+    "laptop",
+    "hover",
+  );
+  const tabletHoverRules = createViewportInteractionStateRules(
+    treeNodes,
+    "tablet",
+    "hover",
+  );
+  const mobileHoverRules = createViewportInteractionStateRules(
+    treeNodes,
+    "mobile",
+    "hover",
+  );
+  const laptopFocusRules = createViewportInteractionStateRules(
+    treeNodes,
+    "laptop",
+    "focus",
+  );
+  const tabletFocusRules = createViewportInteractionStateRules(
+    treeNodes,
+    "tablet",
+    "focus",
+  );
+  const mobileFocusRules = createViewportInteractionStateRules(
+    treeNodes,
+    "mobile",
+    "focus",
+  );
+
+  return `.page {
+  min-height: 100vh;
+  background: ${pageBackground};
+  color: ${pageTextColor};
+}
+
+.surface {
+  min-width: 0;
+}
+
+.surface,
+.body,
+.heading,
+.subheading,
+.link,
+.button,
+.image {
+  box-sizing: border-box;
+}
+
+.surface {
+  width: 100%;
+}
+
+.heading,
+.subheading,
+.body {
+  margin: 0;
+}
+
+.link,
+.button {
+  text-decoration: none;
+}
+
+.image {
+  display: block;
+  max-width: 100%;
+}
+
+${baseRules}
+${hoverRules ? `\n\n@media (hover: hover) and (pointer: fine) {\n${indentCss(hoverRules, 2)}\n}` : ""}
+${focusRules ? `\n\n${focusRules}` : ""}
+${laptopRules ? `\n\n@media ${viewportMediaQuery("laptop", viewportWidths)} {\n${indentCss(laptopRules, 2)}\n}` : ""}
+${tabletRules ? `\n\n@media ${viewportMediaQuery("tablet", viewportWidths)} {\n${indentCss(tabletRules, 2)}\n}` : ""}
+${mobileRules ? `\n\n@media ${viewportMediaQuery("mobile", viewportWidths)} {\n${indentCss(mobileRules, 2)}\n}` : ""}
+${laptopHoverRules ? `\n\n@media (hover: hover) and (pointer: fine) and ${viewportMediaQuery("laptop", viewportWidths)} {\n${indentCss(laptopHoverRules, 2)}\n}` : ""}
+${tabletHoverRules ? `\n\n@media (hover: hover) and (pointer: fine) and ${viewportMediaQuery("tablet", viewportWidths)} {\n${indentCss(tabletHoverRules, 2)}\n}` : ""}
+${mobileHoverRules ? `\n\n@media (hover: hover) and (pointer: fine) and ${viewportMediaQuery("mobile", viewportWidths)} {\n${indentCss(mobileHoverRules, 2)}\n}` : ""}
+${laptopFocusRules ? `\n\n@media ${viewportMediaQuery("laptop", viewportWidths)} {\n${indentCss(laptopFocusRules, 2)}\n}` : ""}
+${tabletFocusRules ? `\n\n@media ${viewportMediaQuery("tablet", viewportWidths)} {\n${indentCss(tabletFocusRules, 2)}\n}` : ""}
+${mobileFocusRules ? `\n\n@media ${viewportMediaQuery("mobile", viewportWidths)} {\n${indentCss(mobileFocusRules, 2)}\n}` : ""}
 `;
 }
 
 function createPreviewHtml(ir: ExportIR, css: string) {
-  const body =
-    ir.component.sections.length > 0
+  const body = hasUsableExportTree(ir)
+    ? renderExportTreeForHtml(ir)
+    : ir.component.sections.length > 0
       ? ir.component.sections
           .map((section, index) =>
             renderPreviewSection(section.nodes, index, ir),
           )
           .join("\n")
       : renderPreviewSection(ir.component.nodes, 0, ir);
+  const cmsPreview = renderCmsCollectionsPreviewHtml(ir);
+  const componentModulePreview = renderComponentModulesPreviewHtml(ir);
+  const codeFilesPreview = renderCodeFilesPreviewHtml(ir);
 
   return `<!doctype html>
 <html>
@@ -550,6 +1500,7 @@ function createPreviewHtml(ir: ExportIR, css: string) {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeText(ir.componentName)}</title>
     <style>
+      ${ir.runtimeCapture.framerStyleCss ?? ""}
       ${createGlobalCss()}
       ${css.replaceAll(/\.(\w+)/g, ".$1")}
     </style>
@@ -557,6 +1508,9 @@ function createPreviewHtml(ir: ExportIR, css: string) {
   <body>
     <main class="page">
       ${body}
+      ${cmsPreview}
+      ${componentModulePreview}
+      ${codeFilesPreview}
     </main>
   </body>
 </html>
@@ -578,6 +1532,7 @@ function renderPreviewSection(
   return `<section class="section" style="${style.inlineCss}">
   <div class="inner" data-layout="${layout}">
     ${[
+      ...groups.surfaces.map(renderPreviewSurfaceNode),
       ...groups.headings.map(renderPreviewNode),
       ...groups.body.map(renderPreviewNode),
       ...groups.cta.map(renderPreviewNode),
@@ -589,6 +1544,312 @@ function renderPreviewSection(
 </section>`;
 }
 
+function renderCmsCollectionsPreviewHtml(ir: ExportIR) {
+  const collections = ir.cmsCollections ?? [];
+  if (collections.length === 0) return "";
+
+  const sections = collections
+    .map((collection) => {
+      const items = collection.items ?? [];
+      const fields = collection.fields;
+      const cards = items
+        .map((item) => {
+          const fieldRows = fields
+            .map((field) => {
+              const entry = item.fieldData?.[field.id];
+              const rendered = renderCmsFieldEntryHtml(entry);
+              return `<div style="display:grid;gap:4px;">
+  <dt style="margin:0;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#71717a;">${escapeText(field.name)}</dt>
+  <dd style="margin:0;">${rendered}</dd>
+</div>`;
+            })
+            .join("\n");
+
+          return `<li style="list-style:none;border:1px solid rgb(24 24 27 / 10%);border-radius:16px;background:white;padding:16px;">
+  <dl style="margin:0;display:grid;gap:10px;">
+    ${fieldRows}
+  </dl>
+</li>`;
+        })
+        .join("\n");
+
+      return `<section class="previewItem">
+  <div class="previewHeader">
+    <div>
+      <div class="previewEyebrow">Framer CMS</div>
+      <h2>${escapeText(collection.name)}</h2>
+    </div>
+    <code>${collection.items?.length ?? 0} item${(collection.items?.length ?? 0) === 1 ? "" : "s"}</code>
+  </div>
+  <div class="previewCanvas" style="padding:16px;">
+    <ul style="display:grid;gap:12px;padding:0;margin:0;">
+      ${cards || `<li style="list-style:none;opacity:0.64;">No items</li>`}
+    </ul>
+  </div>
+</section>`;
+    })
+    .join("\n");
+
+  return sections;
+}
+
+function renderComponentModulesPreviewHtml(ir: ExportIR) {
+  const modules = ir.componentModules ?? [];
+  if (modules.length === 0) return "";
+
+  const cards = modules
+    .map(
+      (module) => `<li style="list-style:none;border:1px solid rgb(24 24 27 / 10%);border-radius:16px;background:white;padding:16px;">
+  <div style="display:grid;gap:8px;">
+    <strong>${escapeText(module.name)}</strong>
+    <code style="color:#71717a;font-size:12px;">${escapeText(module.source)}</code>
+    ${
+      module.componentIdentifier
+        ? `<div style="font-size:13px;color:#3f3f46;">Identifier: ${escapeText(module.componentIdentifier)}</div>`
+        : ""
+    }
+    ${
+      module.insertURL
+        ? `<a href="${escapeAttribute(module.insertURL)}" style="font-weight:700;color:#18181b;">${escapeText(module.insertURL)}</a>`
+        : ""
+    }
+  </div>
+</li>`,
+    )
+    .join("\n");
+
+  return `<section class="previewItem">
+  <div class="previewHeader">
+    <div>
+      <div class="previewEyebrow">Framer registry</div>
+      <h2>Registered component preview</h2>
+    </div>
+    <code>${modules.length} module${modules.length === 1 ? "" : "s"}</code>
+  </div>
+  <div class="previewCanvas" style="padding:16px;">
+    <ul style="display:grid;gap:12px;padding:0;margin:0;">
+      ${cards}
+    </ul>
+  </div>
+</section>`;
+}
+
+function renderCodeFilesPreviewHtml(ir: ExportIR) {
+  const codeFiles = ir.codeFiles ?? [];
+  if (codeFiles.length === 0) return "";
+
+  const cards = codeFiles
+    .map(
+      (file) => `<li style="list-style:none;border:1px solid rgb(24 24 27 / 10%);border-radius:16px;background:white;padding:16px;">
+  <div style="display:grid;gap:8px;">
+    <strong>${escapeText(file.name)}</strong>
+    <code style="color:#71717a;font-size:12px;">${escapeText(file.path ?? file.source ?? "code-file")}</code>
+    ${
+      file.insertURL
+        ? `<a href="${escapeAttribute(file.insertURL)}" style="font-weight:700;color:#18181b;">${escapeText(file.insertURL)}</a>`
+        : ""
+    }
+    ${
+      Array.isArray(file.exports) && file.exports.length > 0
+        ? `<ul style="display:flex;flex-wrap:wrap;gap:8px;padding:0;margin:0;list-style:none;">${file.exports
+            .map(
+              (entry) =>
+                `<li style="border:1px solid rgb(24 24 27 / 8%);border-radius:999px;padding:4px 10px;font-size:12px;">${escapeText(entry)}</li>`,
+            )
+            .join("")}</ul>`
+        : ""
+    }
+  </div>
+</li>`,
+    )
+    .join("\n");
+
+  return `<section class="previewItem">
+  <div class="previewHeader">
+    <div>
+      <div class="previewEyebrow">Framer code files</div>
+      <h2>Code file preview</h2>
+    </div>
+    <code>${codeFiles.length} file${codeFiles.length === 1 ? "" : "s"}</code>
+  </div>
+  <div class="previewCanvas" style="padding:16px;">
+    <ul style="display:grid;gap:12px;padding:0;margin:0;">
+      ${cards}
+    </ul>
+  </div>
+</section>`;
+}
+
+function renderCmsFieldEntryHtml(entry: unknown) {
+  if (!entry || typeof entry !== "object") {
+    return `<span style="opacity:0.56;">No value</span>`;
+  }
+
+  const record = entry as { type?: string; value?: unknown };
+  const type = typeof record.type === "string" ? record.type : undefined;
+  const value = "value" in record ? record.value : undefined;
+
+  if (type === "image" && typeof value === "string" && value.length > 0) {
+    return `<img src="${escapeAttribute(value)}" alt="" style="display:block;width:100%;max-width:240px;min-height:120px;object-fit:cover;border-radius:12px;">`;
+  }
+
+  if (type === "link" && typeof value === "string" && value.length > 0) {
+    return `<a href="${escapeAttribute(value)}" style="color:#18181b;font-weight:700;">${escapeText(value)}</a>`;
+  }
+
+  if (type === "formattedText" && typeof value === "string" && value.length > 0) {
+    return value;
+  }
+
+  if (type === "color" && typeof value === "string" && value.length > 0) {
+    return `<span style="display:inline-flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:999px;background:${escapeAttribute(value)};border:1px solid rgb(0 0 0 / 0.1);"></span>${escapeText(value)}</span>`;
+  }
+
+  if (Array.isArray(value)) {
+    return `<span>${escapeText(value.join(", "))}</span>`;
+  }
+
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return `<span>${escapeText(String(value))}</span>`;
+  }
+
+  return `<span style="opacity:0.56;">No value</span>`;
+}
+
+function hasUsableExportTree(ir: ExportIR) {
+  return Array.isArray(ir.exportTree) && ir.exportTree.length > 0;
+}
+
+function renderExportTreeForReact(ir: ExportIR) {
+  const ctx = createRenderContext();
+  return (ir.exportTree ?? [])
+    .map((node) => renderExportTreeNodeReact(node, ir, ctx, 0))
+    .filter(Boolean)
+    .join("\n");
+}
+
+function renderExportTreeForHtml(ir: ExportIR) {
+  return (ir.exportTree ?? [])
+    .map((node) => renderExportTreeNodeHtml(node, 0))
+    .filter(Boolean)
+    .join("\n");
+}
+
+function renderExportTreeNodeReact(
+  node: ExportTreeNode,
+  ir: ExportIR,
+  ctx: RenderContext,
+  depth: number,
+): string {
+  const style = reactTreeStyleAttribute(node);
+  const className = reactTreeClassName(node);
+  const childContent = node.children
+    .map((child) => renderExportTreeNodeReact(child, ir, ctx, depth + 1))
+    .filter(Boolean)
+    .join("\n");
+  const text = escapeText(node.text ?? "");
+
+  if (node.tag === "img" && typeof node.attributes.src === "string") {
+    return `<img className=${className} src="${escapeAttribute(node.attributes.src)}" alt="${escapeAttribute(String(node.attributes.alt ?? ""))}"${style} />`;
+  }
+
+  if (node.tag === "h1") {
+    const props = ir.exportProps;
+    const titleKey = props?.heroTitle;
+    const content =
+      titleKey && !ctx.titleUsed
+        ? `{props.${titleKey} ?? ${JSON.stringify(text)}}`
+        : text;
+    if (titleKey && !ctx.titleUsed) ctx.titleUsed = true;
+    return `<h1 className=${className}${style}>${content}</h1>`;
+  }
+
+  if (node.tag === "h2" || node.tag === "h3") {
+    const props = ir.exportProps;
+    const subtitleKey = props?.heroSubtitle;
+    const content =
+      subtitleKey && !ctx.subtitleUsed
+        ? `{props.${subtitleKey} ?? ${JSON.stringify(text)}}`
+        : text;
+    if (subtitleKey && !ctx.subtitleUsed) ctx.subtitleUsed = true;
+    return `<${node.tag} className=${className}${style}>${content}</${node.tag}>`;
+  }
+
+  if (node.tag === "a") {
+    const props = ir.exportProps;
+    const labelKey = props?.ctaLabel;
+    const hrefKey = props?.ctaHref;
+    const label =
+      labelKey && !ctx.ctaLabelUsed
+        ? `{props.${labelKey} ?? ${JSON.stringify(text)}}`
+        : text;
+    if (labelKey && !ctx.ctaLabelUsed) ctx.ctaLabelUsed = true;
+    const href = typeof node.attributes.href === "string" ? node.attributes.href : "#";
+    const hrefExpr =
+      hrefKey && !ctx.ctaHrefUsed
+        ? `{props.${hrefKey} ?? ${JSON.stringify(href)}}`
+        : `"${escapeAttribute(href)}"`;
+    if (hrefKey && !ctx.ctaHrefUsed) ctx.ctaHrefUsed = true;
+    return `<a className=${className} href=${hrefExpr}${style}>${label}</a>`;
+  }
+
+  if (node.tag === "button") {
+    const props = ir.exportProps;
+    const labelKey = props?.ctaLabel;
+    const label =
+      labelKey && !ctx.ctaLabelUsed
+        ? `{props.${labelKey} ?? ${JSON.stringify(text)}}`
+        : text;
+    if (labelKey && !ctx.ctaLabelUsed) ctx.ctaLabelUsed = true;
+    return `<button className=${className} type="button"${style}>${label}</button>`;
+  }
+
+  if (isTreeTextNode(node) && text) {
+    return `<p className=${className}${style}>${text}</p>`;
+  }
+
+  const tag = reactContainerTag(node, depth);
+  return `<${tag} className=${className}${style}>
+    ${childContent || (text ? escapeText(text) : "")}
+  </${tag}>`;
+}
+
+function renderExportTreeNodeHtml(node: ExportTreeNode, depth: number): string {
+  const style = htmlTreeStyleAttribute(node);
+  const className = htmlTreeClassName(node);
+  const childContent = node.children
+    .map((child) => renderExportTreeNodeHtml(child, depth + 1))
+    .filter(Boolean)
+    .join("\n");
+  const text = escapeText(node.text ?? "");
+
+  if (node.tag === "img" && typeof node.attributes.src === "string") {
+    return `<img class="${className}" src="${escapeAttribute(node.attributes.src)}" alt="${escapeAttribute(String(node.attributes.alt ?? ""))}"${style}>`;
+  }
+
+  if (node.tag === "h1" || node.tag === "h2" || node.tag === "h3") {
+    return `<${node.tag} class="${className}"${style}>${text}</${node.tag}>`;
+  }
+
+  if (node.tag === "a") {
+    const href = typeof node.attributes.href === "string" ? node.attributes.href : "#";
+    return `<a class="${className}" href="${escapeAttribute(href)}"${style}>${text}</a>`;
+  }
+
+  if (node.tag === "button") {
+    return `<button class="${className}" type="button"${style}>${text}</button>`;
+  }
+
+  if (isTreeTextNode(node) && text) {
+    return `<p class="${className}"${style}>${text}</p>`;
+  }
+
+  const tag = htmlContainerTag(node, depth);
+  return `<${tag} class="${className}"${style}>
+    ${childContent || text}
+  </${tag}>`;
+}
+
 function sectionStyle(nodes: RuntimeNode[], index: number, ir: ExportIR) {
   const hasHeading = nodes.some(
     (node) => node.tag === "h1" || node.tag === "h2",
@@ -597,7 +1858,16 @@ function sectionStyle(nodes: RuntimeNode[], index: number, ir: ExportIR) {
   const textCount = nodes.filter(
     (node) => node.text && node.tag !== "img",
   ).length;
-  const root = nodes[0];
+  const rootId = nodes.find((node) => node.styles.__coderelayRootId)?.styles
+    .__coderelayRootId;
+  const root =
+    (rootId
+      ? ir.runtimeCapture.nodes.find(
+          (node) =>
+            node.styles.__coderelayRootId === rootId &&
+            node.styles.__coderelayDepth === "0",
+        )
+      : undefined) ?? nodes[0];
   const bg =
     usableColor(root?.styles.backgroundColor) ??
     (index % 2 === 0 ? "transparent" : "rgba(0, 0, 0, 0.02)");
@@ -607,9 +1877,13 @@ function sectionStyle(nodes: RuntimeNode[], index: number, ir: ExportIR) {
     : imageCount >= 2 && textCount <= 6
       ? "media-grid"
       : "content";
+  const contentHeight = Math.max(
+    220,
+    ...nodes.map((node) => Number(node.rect.height || 0)).filter(Boolean),
+  );
   const minHeight = Math.max(
-    420,
-    Math.min(1100, Number(root?.rect.height ?? 520)),
+    260,
+    Math.min(620, Number(root?.rect.height ?? contentHeight + 120)),
   );
 
   return {
@@ -654,21 +1928,40 @@ function groupSectionNodes(nodes: RuntimeNode[]) {
 
   const used = new Set([...headings, ...cta, ...images]);
   const bodyRaw = nodes.filter((node) => !used.has(node));
+  const surfaces = bodyRaw.filter(isSurfaceNode);
+  const bodyText = bodyRaw.filter((node) => !isSurfaceNode(node));
 
   // Cluster handling:
   // - keep heading-group + body + CTA clusters in approximate vertical order
   // - group image clusters separately so they don't break reading flow
-  const body = clusterByY(bodyRaw).flat();
+  const body = clusterByY(bodyText).flat();
+  const clusteredSurfaces = clusterByY(surfaces).flat();
   const clusteredImages = clusterByY(images).flat();
   const clusteredCta = clusterByY(cta).flat();
   const clusteredHeadings = clusterByY(headings).flat();
 
   return {
+    surfaces: clusteredSurfaces,
     headings: clusteredHeadings,
     body,
     cta: clusteredCta,
     images: clusteredImages,
   };
+}
+
+function isSurfaceNode(node: RuntimeNode) {
+  if (node.text?.trim()) return false;
+  if (node.tag === "img" || node.tag === "a" || node.tag === "button") {
+    return false;
+  }
+  const hasVisualStyle = Boolean(
+    node.styles.backgroundColor ||
+      node.styles.border ||
+      node.styles.borderRadius ||
+      node.styles.boxShadow,
+  );
+  const hasSize = node.rect.width >= 24 && node.rect.height >= 16;
+  return hasVisualStyle && hasSize;
 }
 
 function clusterByY(nodes: RuntimeNode[]) {
@@ -718,8 +2011,15 @@ function inferKindFromNodes(
 }
 
 function renderPreviewNode(node: RuntimeNode) {
+  const style = htmlStyleAttribute(node);
+  const imgClass = htmlClassName("image", node);
+  const headingClass = htmlClassName("heading", node);
+  const subheadingClass = htmlClassName("subheading", node);
+  const linkClass = htmlClassName("link", node);
+  const buttonClass = htmlClassName("button", node);
+  const bodyClass = htmlClassName("body", node);
   if (node.tag === "img" && node.attributes.src) {
-    return `<img class="image" src="${escapeAttribute(node.attributes.src)}" alt="${escapeAttribute(node.attributes.alt ?? "")}">`;
+    return `<img class="${imgClass}" src="${escapeAttribute(node.attributes.src)}" alt="${escapeAttribute(node.attributes.alt ?? "")}"${style}>`;
   }
 
   const text = escapeText(node.text ?? "");
@@ -729,22 +2029,32 @@ function renderPreviewNode(node: RuntimeNode) {
   }
 
   if (node.tag === "h1") {
-    return `<h1 class="heading">${text}</h1>`;
+    return `<h1 class="${headingClass}"${style}>${text}</h1>`;
   }
 
   if (node.tag === "h2" || node.tag === "h3") {
-    return `<h2 class="subheading">${text}</h2>`;
+    return `<h2 class="${subheadingClass}"${style}>${text}</h2>`;
   }
 
   if (node.tag === "a") {
-    return `<a class="link" href="${escapeAttribute(node.attributes.href ?? "#")}">${text}</a>`;
+    return `<a class="${linkClass}" href="${escapeAttribute(node.attributes.href ?? "#")}"${style}>${text}</a>`;
   }
 
   if (node.tag === "button") {
-    return `<button class="button" type="button">${text}</button>`;
+    return `<button class="${buttonClass}" type="button"${style}>${text}</button>`;
   }
 
-  return `<p class="body">${text}</p>`;
+  return `<p class="${bodyClass}"${style}>${text}</p>`;
+}
+
+function renderSurfaceNode(node: RuntimeNode) {
+  const style = reactStyleAttribute(node);
+  return `<div className={styles.surface}${style} />`;
+}
+
+function renderPreviewSurfaceNode(node: RuntimeNode) {
+  const style = htmlStyleAttribute(node);
+  return `<div class="surface"${style}></div>`;
 }
 
 function createGlobalCss() {
@@ -765,6 +2075,134 @@ body {
 img {
   display: block;
 }
+
+.previewShell {
+  min-height: 100vh;
+  background: #f4f4f5;
+  color: #18181b;
+  padding: 28px;
+}
+
+.previewTopbar {
+  max-width: 1180px;
+  margin: 0 auto 18px;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.previewTopbar h1,
+.previewHeader h2 {
+  margin: 0;
+}
+
+.previewTopbar h1 {
+  font-size: 28px;
+  line-height: 1.1;
+}
+
+.previewEyebrow {
+  margin-bottom: 4px;
+  color: #71717a;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.previewItem {
+  max-width: 1180px;
+  margin: 0 auto 16px;
+  overflow: hidden;
+  border: 1px solid rgb(24 24 27 / 10%);
+  border-radius: 14px;
+  background: white;
+  box-shadow: 0 18px 50px rgb(24 24 27 / 8%);
+}
+
+.previewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgb(24 24 27 / 10%);
+}
+
+.previewHeader code {
+  color: #52525b;
+  font-size: 12px;
+}
+
+.previewCanvas {
+  min-height: 160px;
+  background: white;
+}
+
+.siteShell {
+  min-height: 100vh;
+  background: white;
+  color: #18181b;
+}
+
+.siteTopbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px 22px;
+  border-bottom: 1px solid rgb(24 24 27 / 10%);
+  background: rgb(255 255 255 / 92%);
+  backdrop-filter: blur(14px);
+}
+
+.siteTopbar h1 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.siteTopbar nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.siteTopbar button {
+  min-height: 34px;
+  border: 1px solid rgb(24 24 27 / 12%);
+  border-radius: 999px;
+  background: white;
+  color: #27272a;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 200ms ease, color 200ms ease, border-color 200ms ease;
+}
+
+.siteTopbar button[data-active="true"] {
+  border-color: #18181b;
+  background: #18181b;
+  color: white;
+}
+
+@media (max-width: 760px) {
+  .siteTopbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .siteTopbar nav {
+    justify-content: flex-start;
+  }
+}
 `;
 }
 
@@ -774,17 +2212,18 @@ function createPackageJson(ir: ExportIR) {
     version: "0.1.0",
     private: true,
     scripts: {
-      dev: "next dev",
-      build: "next build",
-      start: "next start",
+      dev: "vite --host 0.0.0.0",
+      build: "tsc -b && vite build",
+      preview: "vite preview --host 0.0.0.0",
     },
     dependencies: {
-      next: "latest",
+      "@vitejs/plugin-react": "latest",
+      "framer-motion": "latest",
       react: "latest",
       "react-dom": "latest",
+      vite: "latest",
     },
     devDependencies: {
-      "@types/node": "latest",
       "@types/react": "latest",
       "@types/react-dom": "latest",
       typescript: "latest",
@@ -795,43 +2234,1278 @@ function createPackageJson(ir: ExportIR) {
 function createTsConfig() {
   return {
     compilerOptions: {
-      target: "ES2017",
-      lib: ["dom", "dom.iterable", "esnext"],
-      allowJs: true,
+      target: "ES2020",
+      useDefineForClassFields: true,
+      lib: ["ES2020", "DOM", "DOM.Iterable"],
       skipLibCheck: true,
       strict: true,
-      noEmit: true,
-      esModuleInterop: true,
-      module: "esnext",
+      module: "ESNext",
       moduleResolution: "bundler",
+      allowImportingTsExtensions: true,
       resolveJsonModule: true,
       isolatedModules: true,
+      noEmit: true,
       jsx: "react-jsx",
-      incremental: true,
-      plugins: [{ name: "next" }],
     },
-    include: [
-      "next-env.d.ts",
-      "**/*.ts",
-      "**/*.tsx",
-      ".next/types/**/*.ts",
-      ".next/dev/types/**/*.ts",
-    ],
-    exclude: ["node_modules"],
+    include: ["src", "components", "vite.config.ts"],
   };
 }
 
-function createNextConfig() {
-  return `import type { NextConfig } from 'next'
-
-const nextConfig: NextConfig = {
-  turbopack: {
-    root: process.cwd(),
-  },
+function createIndexHtml(ir: ExportIR) {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${escapeText(ir.componentName)} - Coderelay Export</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+`;
 }
 
-export default nextConfig
+function createViteConfig() {
+  return `import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+})
 `;
+}
+
+function createViteEnv() {
+  return `/// <reference types="vite/client" />
+`;
+}
+
+function createComponentModulesDataModule(modules: FramerComponentModule[]) {
+  return `export const framerComponentModules = ${JSON.stringify(modules, null, 2)} as const
+
+export type FramerComponentModuleMeta = (typeof framerComponentModules)[number]
+
+export function getFramerComponentModuleByName(name: string) {
+  return framerComponentModules.find((entry) => entry.name === name)
+}
+`;
+}
+
+function createComponentRegistryModule(modules: FramerComponentModule[]) {
+  const imports = modules
+    .map((module) => {
+      const safeName = toSafeIdentifier(module.name);
+      return `import { ${safeName}Remote, framerModuleInfo as ${safeName}Info } from '../../framer-modules/${safeName}Remote'`;
+    })
+    .join("\n");
+  const registryEntries = modules
+    .map((module) => {
+      const safeName = toSafeIdentifier(module.name);
+      return `  ${JSON.stringify(module.name)}: { Component: ${safeName}Remote, meta: ${safeName}Info },`;
+    })
+    .join("\n");
+
+  return `${imports}
+
+export const framerComponentRegistry = {
+${registryEntries}
+} as const
+
+export type FramerComponentRegistryKey = keyof typeof framerComponentRegistry
+
+export function getFramerRegisteredComponent(name: string) {
+  return framerComponentRegistry[name as FramerComponentRegistryKey]
+}
+`;
+}
+
+function createComponentRuntimeModule(modules: FramerComponentModule[]) {
+  const hasModules = modules.length > 0;
+  return `import * as React from 'react'
+import { framerComponentRegistry, getFramerRegisteredComponent } from './component-registry'
+
+export function FramerRegisteredComponentPreview(props: {
+  name: string
+  fallback?: React.ReactNode
+}) {
+  const entry = getFramerRegisteredComponent(props.name)
+  if (!entry) return <>{props.fallback ?? null}</>
+  const Component = entry.Component
+  return <Component />
+}
+
+export function FramerComponentRegistryPreview() {
+  const entries = Object.entries(framerComponentRegistry)
+
+  if (entries.length === 0) {
+    return <div style={{ opacity: 0.64 }}>No Framer component modules detected.</div>
+  }
+
+  return (
+    <section data-framer-component-registry="true" style={{ display: 'grid', gap: '1rem' }}>
+      {entries.map(([name, entry]) => {
+        const Component = entry.Component
+        return (
+          <article
+            key={name}
+            style={{
+              display: 'grid',
+              gap: '0.75rem',
+              border: '1px solid rgb(24 24 27 / 0.1)',
+              borderRadius: '1rem',
+              background: 'white',
+              padding: '1rem',
+            }}
+          >
+            <header style={{ display: 'grid', gap: '0.25rem' }}>
+              <strong>{name}</strong>
+              <code style={{ color: '#71717a', fontSize: '0.8rem' }}>{entry.meta.source}</code>
+            </header>
+            <div>
+              <Component />
+            </div>
+          </article>
+        )
+      })}
+    </section>
+  )
+}
+
+export const hasFramerRegisteredComponents = ${hasModules ? "true" : "false"} as const
+`;
+}
+
+function createCodeFilesDataModule(ir: ExportIR) {
+  return `export const framerCodeFiles = ${JSON.stringify(ir.codeFiles ?? [], null, 2)} as const
+
+export type FramerCodeFileMeta = (typeof framerCodeFiles)[number]
+
+export function getFramerCodeFileByName(name: string) {
+  return framerCodeFiles.find((entry) => entry.name === name)
+}
+`;
+}
+
+function createCodeFilesRuntimeModule(ir: ExportIR) {
+  const hasCodeFiles = (ir.codeFiles?.length ?? 0) > 0;
+  return `import * as React from 'react'
+import { framerCodeFiles, getFramerCodeFileByName } from './code-files'
+
+export function FramerCodeFilePreview(props: {
+  name: string
+  fallback?: React.ReactNode
+}) {
+  const file = getFramerCodeFileByName(props.name)
+  if (!file) return <>{props.fallback ?? null}</>
+
+  return (
+    <article
+      data-framer-code-file={file.name}
+      style={{
+        display: 'grid',
+        gap: '0.5rem',
+        border: '1px solid rgb(24 24 27 / 0.1)',
+        borderRadius: '1rem',
+        background: 'white',
+        padding: '1rem',
+      }}
+    >
+      <header style={{ display: 'grid', gap: '0.25rem' }}>
+        <strong>{file.name}</strong>
+        <code style={{ color: '#71717a', fontSize: '0.8rem' }}>{file.path ?? file.source ?? 'code-file'}</code>
+      </header>
+      {Array.isArray(file.exports) && file.exports.length > 0 ? (
+        <ul style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', padding: 0, margin: 0, listStyle: 'none' }}>
+          {file.exports.map((entry) => (
+            <li
+              key={entry}
+              style={{
+                border: '1px solid rgb(24 24 27 / 0.08)',
+                borderRadius: '999px',
+                padding: '0.2rem 0.55rem',
+                fontSize: '0.8rem',
+              }}
+            >
+              {entry}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </article>
+  )
+}
+
+export function FramerCodeFileList() {
+  if (framerCodeFiles.length === 0) {
+    return <div style={{ opacity: 0.64 }}>No Framer code files detected.</div>
+  }
+
+  return (
+    <section data-framer-code-files="true" style={{ display: 'grid', gap: '1rem' }}>
+      {framerCodeFiles.map((file) => (
+        <FramerCodeFilePreview key={file.name} name={file.name} />
+      ))}
+    </section>
+  )
+}
+
+export const hasFramerCodeFiles = ${hasCodeFiles ? "true" : "false"} as const
+`;
+}
+
+function createFontsDataModule(ir: ExportIR) {
+  return `export const framerFonts = ${JSON.stringify(ir.fonts ?? [], null, 2)} as const
+
+export type FramerFontMeta = (typeof framerFonts)[number]
+
+export function getFramerFontByFamily(family: string) {
+  return framerFonts.find((entry) => entry.family === family)
+}
+
+export function getFramerFontByName(name: string) {
+  return framerFonts.find((entry) => entry.name === name)
+}
+
+export const framerFontFamilies = framerFonts.map((entry) => entry.family)
+`;
+}
+
+function createCmsDataModule(ir: ExportIR) {
+  return `export const framerCmsCollections = ${JSON.stringify(ir.cmsCollections ?? [], null, 2)} as const
+
+export type FramerCmsCollectionMeta = (typeof framerCmsCollections)[number]
+export type FramerCmsItemMeta = FramerCmsCollectionMeta extends { items: readonly (infer Item)[] } ? Item : never
+
+export function getFramerCmsCollectionByName(name: string) {
+  return framerCmsCollections.find((entry) => entry.name === name)
+}
+
+export function getFramerCmsCollectionById(id: string) {
+  return framerCmsCollections.find((entry) => entry.id === id)
+}
+`;
+}
+
+function createCmsRuntimeModule(ir: ExportIR) {
+  const collectionNames = (ir.cmsCollections ?? [])
+    .map((collection) => JSON.stringify(collection.name))
+    .join(" | ");
+  const collectionNameType = collectionNames.length > 0 ? collectionNames : "string";
+
+  return `import * as React from 'react'
+import { framerCmsCollections, getFramerCmsCollectionById, getFramerCmsCollectionByName } from './cms'
+
+export type FramerCmsCollectionName = ${collectionNameType}
+export type FramerCmsFieldEntry =
+  | { type?: 'string'; value?: string }
+  | { type?: 'number'; value?: number }
+  | { type?: 'boolean'; value?: boolean }
+  | { type?: 'date'; value?: string }
+  | { type?: 'link'; value?: string }
+  | { type?: 'image'; value?: string | null }
+  | { type?: 'file'; value?: string | null }
+  | { type?: 'color'; value?: string | null }
+  | { type?: 'formattedText'; value?: string; contentType?: string }
+  | { type?: 'enum'; value?: string }
+  | { type?: 'collectionReference'; value?: string }
+  | { type?: 'multiCollectionReference'; value?: string[] }
+  | { type?: 'array'; value?: Array<{ id?: string; fieldData?: Record<string, unknown> }> }
+  | { type?: string; value?: unknown; contentType?: string }
+
+export function getFramerCmsItems(input: { id?: string; name?: string }) {
+  const collection = input.id
+    ? getFramerCmsCollectionById(input.id)
+    : input.name
+      ? getFramerCmsCollectionByName(input.name)
+      : undefined
+
+  return collection?.items ?? []
+}
+
+export function getFramerCmsItemFieldValue(
+  item: { fieldData?: Record<string, unknown> } | undefined,
+  fieldKey: string,
+) {
+  if (!item?.fieldData) return undefined
+  return item.fieldData[fieldKey]
+}
+
+export function resolveFramerCmsFieldEntry(entry: unknown) {
+  if (!entry || typeof entry !== 'object') return entry
+  const record = entry as FramerCmsFieldEntry
+  if (!('value' in record)) return entry
+  return record.value
+}
+
+export function getFramerCmsFieldType(entry: unknown) {
+  if (!entry || typeof entry !== 'object') return undefined
+  const record = entry as { type?: string }
+  return typeof record.type === 'string' ? record.type : undefined
+}
+
+export function getFramerCmsPlainText(
+  item: { fieldData?: Record<string, unknown> } | undefined,
+  fieldKey: string,
+) {
+  const entry = getFramerCmsItemFieldValue(item, fieldKey)
+  const value = resolveFramerCmsFieldEntry(entry)
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return undefined
+}
+
+export function getFramerCmsImageUrl(
+  item: { fieldData?: Record<string, unknown> } | undefined,
+  fieldKey: string,
+) {
+  const value = resolveFramerCmsFieldEntry(getFramerCmsItemFieldValue(item, fieldKey))
+  return typeof value === 'string' ? value : undefined
+}
+
+export function getFramerCmsLinkHref(
+  item: { fieldData?: Record<string, unknown> } | undefined,
+  fieldKey: string,
+) {
+  const value = resolveFramerCmsFieldEntry(getFramerCmsItemFieldValue(item, fieldKey))
+  return typeof value === 'string' ? value : undefined
+}
+
+export function getFramerCmsFormattedHtml(
+  item: { fieldData?: Record<string, unknown> } | undefined,
+  fieldKey: string,
+) {
+  const entry = getFramerCmsItemFieldValue(item, fieldKey)
+  const value = resolveFramerCmsFieldEntry(entry)
+  return typeof value === 'string' ? value : undefined
+}
+
+export function getFramerCmsDisplayValue(
+  item: { fieldData?: Record<string, unknown> } | undefined,
+  fieldKey: string,
+) {
+  const entry = getFramerCmsItemFieldValue(item, fieldKey)
+  const type = getFramerCmsFieldType(entry)
+  const value = resolveFramerCmsFieldEntry(entry)
+
+  if (value == null) return undefined
+  if (type === 'formattedText' && typeof value === 'string') return value
+  if (type === 'date' && typeof value === 'string') {
+    const parsed = new Date(value)
+    return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString()
+  }
+  if (type === 'multiCollectionReference' && Array.isArray(value)) {
+    return value.join(', ')
+  }
+  if (type === 'array' && Array.isArray(value)) {
+    return value
+  }
+  if (type === 'boolean' && typeof value === 'boolean') {
+    return value ? 'true' : 'false'
+  }
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
+  }
+  return value
+}
+
+export function mapFramerCmsItems<T>(
+  input: { id?: string; name?: string },
+  mapper: (item: (typeof framerCmsCollections)[number]['items'] extends readonly (infer Item)[] ? Item : never, index: number) => T,
+) {
+  return getFramerCmsItems(input).map((item, index) => mapper(item as never, index))
+}
+
+export function useFramerCmsCollection(input: { id?: string; name?: string }) {
+  return React.useMemo(() => {
+    const collection = input.id
+      ? getFramerCmsCollectionById(input.id)
+      : input.name
+        ? getFramerCmsCollectionByName(input.name)
+        : undefined
+
+    return {
+      collection,
+      items: collection?.items ?? [],
+      fields: collection?.fields ?? [],
+    }
+  }, [input.id, input.name])
+}
+
+export function FramerCmsCollectionList(props: {
+  id?: string
+  name?: string
+  children: (item: (typeof framerCmsCollections)[number]['items'] extends readonly (infer Item)[] ? Item : never, index: number) => React.ReactNode
+  empty?: React.ReactNode
+}) {
+  const { items } = useFramerCmsCollection({ id: props.id, name: props.name })
+
+  if (items.length === 0) {
+    return <>{props.empty ?? null}</>
+  }
+
+  return <>{items.map((item, index) => props.children(item as never, index))}</>
+}
+
+export function FramerCmsText(props: {
+  item?: { fieldData?: Record<string, unknown> }
+  field: string
+  fallback?: React.ReactNode
+  as?: keyof React.JSX.IntrinsicElements
+}) {
+  const text = getFramerCmsPlainText(props.item, props.field)
+  if (!text) return <>{props.fallback ?? null}</>
+  const Tag = (props.as ?? 'span') as keyof React.JSX.IntrinsicElements
+  return <Tag>{text}</Tag>
+}
+
+export function FramerCmsRichText(props: {
+  item?: { fieldData?: Record<string, unknown> }
+  field: string
+  fallback?: React.ReactNode
+  as?: keyof React.JSX.IntrinsicElements
+}) {
+  const html = getFramerCmsFormattedHtml(props.item, props.field)
+  if (!html) return <>{props.fallback ?? null}</>
+  const Tag = (props.as ?? 'div') as keyof React.JSX.IntrinsicElements
+  return <Tag dangerouslySetInnerHTML={{ __html: html }} />
+}
+
+export function FramerCmsImage(props: {
+  item?: { fieldData?: Record<string, unknown> }
+  field: string
+  altField?: string
+  fallback?: React.ReactNode
+} & Omit<React.ImgHTMLAttributes<HTMLImageElement>, 'src' | 'alt'>) {
+  const src = getFramerCmsImageUrl(props.item, props.field)
+  if (!src) return <>{props.fallback ?? null}</>
+  const alt = props.altField ? getFramerCmsPlainText(props.item, props.altField) ?? '' : props.alt ?? ''
+  return <img {...props} src={src} alt={alt} />
+}
+
+export function FramerCmsLink(props: {
+  item?: { fieldData?: Record<string, unknown> }
+  field: string
+  labelField?: string
+  fallback?: React.ReactNode
+  children?: React.ReactNode
+} & Omit<React.AnchorHTMLAttributes<HTMLAnchorElement>, 'href' | 'children'>) {
+  const href = getFramerCmsLinkHref(props.item, props.field)
+  if (!href) return <>{props.fallback ?? null}</>
+  const label = props.children ?? (props.labelField ? getFramerCmsPlainText(props.item, props.labelField) : href)
+  return <a {...props} href={href}>{label}</a>
+}
+
+export function FramerCmsField(props: {
+  item?: { fieldData?: Record<string, unknown> }
+  field: string
+  altField?: string
+  labelField?: string
+  fallback?: React.ReactNode
+  textAs?: keyof React.JSX.IntrinsicElements
+  richTextAs?: keyof React.JSX.IntrinsicElements
+}) {
+  const entry = getFramerCmsItemFieldValue(props.item, props.field)
+  const type = getFramerCmsFieldType(entry)
+
+  if (type === 'image') {
+    return <FramerCmsImage item={props.item} field={props.field} altField={props.altField} fallback={props.fallback} />
+  }
+
+  if (type === 'link') {
+    return <FramerCmsLink item={props.item} field={props.field} labelField={props.labelField} fallback={props.fallback} />
+  }
+
+  if (type === 'formattedText') {
+    return <FramerCmsRichText item={props.item} field={props.field} fallback={props.fallback} as={props.richTextAs} />
+  }
+
+  if (type === 'color') {
+    const value = getFramerCmsDisplayValue(props.item, props.field)
+    if (!value || typeof value !== 'string') return <>{props.fallback ?? null}</>
+    return <span style={{ display: 'inline-flex', width: '0.875rem', height: '0.875rem', borderRadius: '999px', backgroundColor: value, border: '1px solid rgb(0 0 0 / 0.1)' }} aria-label={value} title={value} />
+  }
+
+  return <FramerCmsText item={props.item} field={props.field} fallback={props.fallback} as={props.textAs} />
+}
+
+export function FramerCmsCollectionPreview(props: {
+  id?: string
+  name?: string
+  empty?: React.ReactNode
+}) {
+  const { collection, items, fields } = useFramerCmsCollection({ id: props.id, name: props.name })
+
+  if (!collection || items.length === 0) {
+    return <>{props.empty ?? null}</>
+  }
+
+  return (
+    <section data-framer-cms-preview={collection.name}>
+      <header>
+        <strong>{collection.name}</strong>
+      </header>
+      <ul style={{ listStyle: 'none', padding: 0, margin: '1rem 0 0', display: 'grid', gap: '0.75rem' }}>
+        {items.map((item, index) => (
+          <li key={item.id ?? index} style={{ border: '1px solid rgb(0 0 0 / 0.08)', borderRadius: '0.75rem', padding: '0.75rem' }}>
+            <dl style={{ margin: 0, display: 'grid', gap: '0.5rem' }}>
+              {fields.map((field) => (
+                <div key={field.id} style={{ display: 'grid', gap: '0.25rem' }}>
+                  <dt style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    {field.name}
+                  </dt>
+                  <dd style={{ margin: 0 }}>
+                    <FramerCmsField
+                      item={item}
+                      field={field.id}
+                      labelField={field.type === 'link' ? 'title' : undefined}
+                      fallback={<span style={{ opacity: 0.56 }}>No value</span>}
+                    />
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+`;
+}
+
+function createCmsSectionsModule(ir: ExportIR) {
+  const collections = ir.cmsCollections ?? [];
+  const imports = `import * as React from 'react'
+import { getFramerCmsCollectionById, getFramerCmsCollectionByName } from './cms'
+import {
+  FramerCmsCollectionList,
+  FramerCmsField,
+  FramerCmsImage,
+  FramerCmsLink,
+  FramerCmsRichText,
+  FramerCmsText,
+  getFramerCmsItems,
+  getFramerCmsPlainText,
+} from './cms-runtime'
+`;
+
+  const components = collections
+    .map((collection) => {
+      const componentName = `${toSafeIdentifier(collection.name)}CollectionSection`;
+      const titleField =
+        pickCollectionField(collection, ["formattedText", "string"], [
+          "title",
+          "name",
+          "headline",
+          "heading",
+        ]) ?? pickCollectionField(collection, ["formattedText", "string"]);
+      const bodyField =
+        pickCollectionField(collection, ["formattedText", "string"], [
+          "summary",
+          "description",
+          "excerpt",
+          "body",
+          "content",
+        ]) ??
+        pickCollectionField(collection, ["formattedText", "string"], [], [
+          titleField,
+        ]);
+      const imageField = pickCollectionField(collection, ["image"], [
+        "cover",
+        "image",
+        "thumbnail",
+        "hero",
+      ]);
+      const linkField = pickCollectionField(collection, ["link"], [
+        "link",
+        "url",
+        "href",
+        "cta",
+      ]);
+      const colorField = pickCollectionField(collection, ["color"], [
+        "color",
+        "accent",
+        "theme",
+      ]);
+      const metaField = pickCollectionField(collection, ["date", "enum", "string"], [
+        "date",
+        "published",
+        "category",
+        "author",
+      ], [titleField, bodyField]);
+
+      return `export function ${componentName}(props: {
+  title?: React.ReactNode
+  empty?: React.ReactNode
+}) {
+  const collection = getFramerCmsCollectionById(${JSON.stringify(collection.id)}) ?? getFramerCmsCollectionByName(${JSON.stringify(collection.name)})
+
+  return (
+    <section data-framer-cms-section=${JSON.stringify(collection.name)} style={{ display: 'grid', gap: '1.25rem' }}>
+      <header style={{ display: 'grid', gap: '0.35rem' }}>
+        <div style={{ fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#71717a' }}>
+          Framer CMS Collection
+        </div>
+        <h2 style={{ margin: 0, fontSize: '1.5rem', lineHeight: 1.1 }}>
+          {props.title ?? ${JSON.stringify(collection.name)}}
+        </h2>
+      </header>
+      <FramerCmsCollectionList
+        id=${JSON.stringify(collection.id)}
+        empty={props.empty ?? <div style={{ opacity: 0.64 }}>No items in ${escapeJs(collection.name)}</div>}
+      >
+        {(item, index) => (
+          <article
+            key={item.id ?? index}
+            style={{
+              display: 'grid',
+              gap: '0.9rem',
+              gridTemplateColumns: ${imageField ? "'minmax(0, 220px) minmax(0, 1fr)'" : "'minmax(0, 1fr)'"},
+              padding: '1rem',
+              border: '1px solid rgb(24 24 27 / 0.1)',
+              borderRadius: '1rem',
+              background: 'white',
+            }}
+          >
+            ${
+              imageField
+                ? `<FramerCmsImage
+              item={item}
+              field=${JSON.stringify(imageField)}
+              altField=${titleField ? JSON.stringify(titleField) : "undefined"}
+              fallback={<div style={{ minHeight: '180px', borderRadius: '0.85rem', background: 'rgb(24 24 27 / 0.06)' }} />}
+              style={{ width: '100%', minHeight: '180px', objectFit: 'cover', borderRadius: '0.85rem' }}
+            />`
+                : ""
+            }
+            <div style={{ display: 'grid', gap: '0.7rem', minWidth: 0 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+                ${
+                  colorField
+                    ? `<FramerCmsField item={item} field=${JSON.stringify(colorField)} fallback={null} />`
+                    : ""
+                }
+                ${
+                  metaField
+                    ? `<span style={{ fontSize: '0.8rem', color: '#71717a' }}>
+                  {getFramerCmsPlainText(item, ${JSON.stringify(metaField)})}
+                </span>`
+                    : ""
+                }
+              </div>
+              ${
+                titleField
+                  ? `<FramerCmsText item={item} field=${JSON.stringify(titleField)} as="h3" fallback={<h3 style={{ margin: 0 }}>Untitled item</h3>} />`
+                  : `<h3 style={{ margin: 0 }}>Untitled item</h3>`
+              }
+              ${
+                bodyField
+                  ? `<FramerCmsField item={item} field=${JSON.stringify(bodyField)} richTextAs="div" textAs="p" fallback={null} />`
+                  : ""
+              }
+              ${
+                linkField
+                  ? `<div>
+                <FramerCmsLink
+                  item={item}
+                  field=${JSON.stringify(linkField)}
+                  labelField=${titleField ? JSON.stringify(titleField) : "undefined"}
+                  style={{ color: '#18181b', fontWeight: 700 }}
+                >
+                  View item
+                </FramerCmsLink>
+              </div>`
+                  : ""
+              }
+            </div>
+          </article>
+        )}
+      </FramerCmsCollectionList>
+    </section>
+  )
+}`;
+    })
+    .join("\n\n");
+
+  const registryEntries = collections
+    .map((collection) => {
+      const componentName = `${toSafeIdentifier(collection.name)}CollectionSection`;
+      return `  ${JSON.stringify(collection.name)}: ${componentName},`;
+    })
+    .join("\n");
+
+  return `${imports}
+
+${components || "export {}"}
+
+export const framerCmsSectionRegistry = {
+${registryEntries}
+} as const
+
+export function getFramerCmsSectionComponent(name: string) {
+  return framerCmsSectionRegistry[name as keyof typeof framerCmsSectionRegistry]
+}
+
+export function FramerCmsAutoSections() {
+  const collections = [${collections
+    .map((collection) => JSON.stringify(collection.name))
+    .join(", ")}]
+    .map((name) => ({
+      name,
+      Component: getFramerCmsSectionComponent(name),
+      itemCount: getFramerCmsItems({ name }).length,
+    }))
+    .filter((entry) => entry.Component && entry.itemCount > 0)
+
+  return (
+    <div style={{ display: 'grid', gap: '1.5rem' }}>
+      {collections.map((entry) => {
+        const Component = entry.Component!
+        return <Component key={entry.name} />
+      })}
+    </div>
+  )
+}
+`;
+}
+
+function createFramerDataIndexModule(ir: ExportIR) {
+  const hasCms = (ir.cmsCollections?.length ?? 0) > 0;
+  const hasCodeFiles = (ir.codeFiles?.length ?? 0) > 0;
+  const hasModules = (ir.componentModules?.length ?? 0) > 0;
+
+  return `export { framerComponentModules, getFramerComponentModuleByName } from './component-modules'
+export { framerComponentRegistry, getFramerRegisteredComponent } from './component-registry'
+export {
+  FramerComponentRegistryPreview,
+  FramerRegisteredComponentPreview,
+  hasFramerRegisteredComponents,
+} from './component-runtime'
+export { framerCodeFiles, getFramerCodeFileByName } from './code-files'
+export {
+  FramerCodeFileList,
+  FramerCodeFilePreview,
+  hasFramerCodeFiles,
+} from './code-files-runtime'
+export {
+  framerFontFamilies,
+  framerFonts,
+  getFramerFontByFamily,
+  getFramerFontByName,
+} from './fonts'
+export { framerCmsCollections, getFramerCmsCollectionById, getFramerCmsCollectionByName } from './cms'
+export {
+  FramerCmsAutoSections,
+  framerCmsSectionRegistry,
+  getFramerCmsSectionComponent,
+} from './cms-sections'
+export {
+  FramerCmsCollectionPreview,
+  FramerCmsImage,
+  FramerCmsCollectionList,
+  FramerCmsField,
+  FramerCmsLink,
+  FramerCmsRichText,
+  FramerCmsText,
+  getFramerCmsDisplayValue,
+  getFramerCmsFieldType,
+  getFramerCmsFormattedHtml,
+  getFramerCmsImageUrl,
+  getFramerCmsItemFieldValue,
+  getFramerCmsItems,
+  getFramerCmsLinkHref,
+  getFramerCmsPlainText,
+  mapFramerCmsItems,
+  resolveFramerCmsFieldEntry,
+  useFramerCmsCollection,
+} from './cms-runtime'
+
+export const framerDataSummary = {
+  componentModuleCount: ${ir.componentModules?.length ?? 0},
+  codeFileCount: ${ir.codeFiles?.length ?? 0},
+  cmsCollectionCount: ${ir.cmsCollections?.length ?? 0},
+  hasComponentModules: ${hasModules ? "true" : "false"},
+  hasCodeFiles: ${hasCodeFiles ? "true" : "false"},
+  hasCmsCollections: ${hasCms ? "true" : "false"},
+} as const
+`;
+}
+
+function createMotionManifest(ir: ExportIR) {
+  const nodes = hasUsableExportTree(ir)
+    ? flattenExportTree(ir.exportTree ?? [])
+    : [];
+  const motionNodes = nodes
+    .filter(
+      (node) =>
+        hasMotionStyles(node.motion) || hasInteractionStateStyles(node.interactionStyles),
+    )
+    .map((node) => ({
+      id: node.id,
+      tag: node.tag,
+      name: node.name,
+      text: node.text?.slice(0, 120),
+      source: node.source,
+      motion: node.motion,
+      motionByViewport: node.motionByViewport,
+      interactionStyles: node.interactionStyles,
+      interactionStylesByViewport: node.interactionStylesByViewport,
+    }));
+
+  return {
+    componentName: ir.componentName,
+    sourceUrl: ir.sourceUrl,
+    nodeCount: motionNodes.length,
+    nodes: motionNodes,
+  };
+}
+
+function reactStyleAttribute(node: RuntimeNode) {
+  const entries = styleEntries(node);
+  if (entries.length === 0) return "";
+  return ` style={{ ${entries.map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join(", ")} }}`;
+}
+
+function htmlStyleAttribute(node: RuntimeNode) {
+  const css = styleEntries(node)
+    .map(([key, value]) => `${toKebabCase(key)}:${escapeAttribute(value)}`)
+    .join(";");
+  return css ? ` style="${css}"` : "";
+}
+
+function styleEntries(node: RuntimeNode) {
+  const allowed = new Set([
+    "color",
+    "backgroundColor",
+    "boxShadow",
+    "fontFamily",
+    "fontWeight",
+    "fontStyle",
+    "fontSize",
+    "lineHeight",
+    "letterSpacing",
+    "textAlign",
+    "textTransform",
+    "textDecoration",
+    "opacity",
+    "borderRadius",
+    "border",
+    "width",
+    "height",
+    "minWidth",
+    "minHeight",
+    "maxWidth",
+    "maxHeight",
+    "padding",
+    "paddingTop",
+    "paddingRight",
+    "paddingBottom",
+    "paddingLeft",
+    "gap",
+    "rowGap",
+    "columnGap",
+    "justifyContent",
+    "alignItems",
+    "display",
+    "flexDirection",
+    "flexWrap",
+    "top",
+    "right",
+    "bottom",
+    "left",
+    "backgroundImage",
+    "backgroundPosition",
+    "backgroundSize",
+    "backgroundRepeat",
+    "gridTemplateColumns",
+    "gridTemplateRows",
+    "transitionProperty",
+    "transitionDuration",
+    "transitionTimingFunction",
+    "transitionDelay",
+    "animationName",
+    "animationDuration",
+    "animationTimingFunction",
+    "animationDelay",
+    "animationIterationCount",
+    "animationDirection",
+    "animationFillMode",
+    "transformOrigin",
+  ]);
+
+  return Object.entries({
+    ...node.styles,
+    ...(node.motion ?? {}),
+  })
+    .filter(([key, value]) => allowed.has(key) && Boolean(value))
+    .filter(
+      ([, value]) => value !== "transparent" && value !== "rgba(0, 0, 0, 0)",
+    );
+}
+
+function reactTreeStyleAttribute(node: ExportTreeNode) {
+  const entries = treeInlineStyleEntries(node);
+  if (entries.length === 0) return "";
+  return ` style={{ ${entries.map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join(", ")} }}`;
+}
+
+function htmlTreeStyleAttribute(node: ExportTreeNode) {
+  const css = treeInlineStyleEntries(node)
+    .map(([key, value]) => `${toKebabCase(key)}:${escapeAttribute(value)}`)
+    .join(";");
+  return css ? ` style="${css}"` : "";
+}
+
+function treeCssAllowedProperties() {
+  return new Set([
+    "color",
+    "backgroundColor",
+    "backgroundImage",
+    "backgroundBlendMode",
+    "backgroundPosition",
+    "backgroundSize",
+    "backgroundRepeat",
+    "background",
+    "boxShadow",
+    "fontFamily",
+    "fontWeight",
+    "fontStyle",
+    "fontSize",
+    "lineHeight",
+    "letterSpacing",
+    "textAlign",
+    "textTransform",
+    "textDecoration",
+    "opacity",
+    "borderRadius",
+    "border",
+    "width",
+    "height",
+    "minWidth",
+    "minHeight",
+    "maxWidth",
+    "maxHeight",
+    "padding",
+    "paddingTop",
+    "paddingRight",
+    "paddingBottom",
+    "paddingLeft",
+    "margin",
+    "marginTop",
+    "marginRight",
+    "marginBottom",
+    "marginLeft",
+    "gap",
+    "rowGap",
+    "columnGap",
+    "justifyContent",
+    "alignItems",
+    "display",
+    "flexDirection",
+    "flexWrap",
+    "top",
+    "right",
+    "bottom",
+    "left",
+    "gridTemplateColumns",
+    "gridTemplateRows",
+    "gridAutoFlow",
+    "gridColumn",
+    "gridRow",
+    "alignSelf",
+    "justifySelf",
+    "transform",
+    "overflow",
+    "overflowX",
+    "overflowY",
+    "position",
+    "objectFit",
+    "objectPosition",
+    "aspectRatio",
+    "placeItems",
+    "placeContent",
+    "placeSelf",
+    "whiteSpace",
+    "wordBreak",
+    "pointerEvents",
+    "zIndex",
+    "transitionProperty",
+    "transitionDuration",
+    "transitionTimingFunction",
+    "transitionDelay",
+    "animationName",
+    "animationDuration",
+    "animationTimingFunction",
+    "animationDelay",
+    "animationIterationCount",
+    "animationDirection",
+    "animationFillMode",
+    "transformOrigin",
+    "left",
+    "right",
+    "top",
+    "bottom",
+  ]);
+}
+
+function treeCssEntries(node: ExportTreeNode, viewport?: ViewportName) {
+  const sourceStyles = {
+    ...((viewport ? node.stylesByViewport?.[viewport] : undefined) ?? node.styles),
+    ...((viewport ? node.motionByViewport?.[viewport] : undefined) ?? node.motion),
+  };
+  const allowed = treeCssAllowedProperties();
+  return Object.entries(sourceStyles ?? {})
+    .filter(([key, value]) => allowed.has(key) && Boolean(value))
+    .filter(
+      ([, value]) => value !== "transparent" && value !== "rgba(0, 0, 0, 0)",
+    );
+}
+
+function interactionStateEntries(
+  node: ExportTreeNode,
+  state: "hover" | "focus",
+  viewport?: ViewportName,
+) {
+  const styles = viewport
+    ? node.interactionStylesByViewport?.[viewport]?.[state] ??
+      node.interactionStyles?.[state]
+    : node.interactionStyles?.[state];
+  const allowed = treeCssAllowedProperties();
+  return Object.entries(styles ?? {})
+    .filter(([key, value]) => allowed.has(key) && Boolean(value))
+    .filter(
+      ([, value]) => value !== "transparent" && value !== "rgba(0, 0, 0, 0)",
+    );
+}
+
+function interactionStateSelector(
+  node: ExportTreeNode,
+  state: "hover" | "focus",
+) {
+  return `${treeCssSelector(node)}${state === "hover" ? ":hover" : ":focus-visible"}`;
+}
+
+function createInteractionStateRules(
+  nodes: ExportTreeNode[],
+  state: "hover" | "focus",
+) {
+  return nodes
+    .map((node) => {
+      const entries = interactionStateEntries(node, state);
+      if (entries.length === 0) return "";
+      return `${interactionStateSelector(node, state)} {\n${entries
+        .map(([key, value]) => `  ${toKebabCase(key)}: ${value};`)
+        .join("\n")}\n}`;
+    })
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function createViewportInteractionStateRules(
+  nodes: ExportTreeNode[],
+  viewport: ViewportName,
+  state: "hover" | "focus",
+) {
+  return nodes
+    .map((node) => {
+      const viewportEntries = interactionStateEntries(node, state, viewport).filter(
+        ([key, value]) => (node.interactionStyles?.[state]?.[key] ?? undefined) !== value,
+      );
+      if (viewportEntries.length === 0) return "";
+      return `${interactionStateSelector(node, state)} {\n${viewportEntries
+        .map(([key, value]) => `  ${toKebabCase(key)}: ${value};`)
+        .join("\n")}\n}`;
+    })
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function treeInlineStyleEntries(node: ExportTreeNode) {
+  const forceInline =
+    node.attributes.dataCoderelayForceInlineStyles === true;
+  const cssProperties = treeCssAllowedProperties();
+  const inlineEntries = Object.entries(node.styles)
+    .filter(
+      ([key, value]) =>
+        Boolean(value) &&
+        (forceInline || !cssProperties.has(key)) &&
+        !key.startsWith("__coderelay"),
+    )
+    .filter(
+      ([, value]) => value !== "transparent" && value !== "rgba(0, 0, 0, 0)",
+    );
+  const inlineMotion = forceInline
+    ? Object.entries(node.motion ?? {})
+        .filter(([, value]) => Boolean(value))
+        .filter(
+          ([, value]) =>
+            value !== "transparent" && value !== "rgba(0, 0, 0, 0)",
+        )
+    : [];
+  return [...inlineEntries, ...inlineMotion];
+}
+
+function reactClassName(base: string, node: RuntimeNode) {
+  const extra = normalizeClassName(node.attributes.className);
+  if (!extra) return `{${base}}`;
+  return `{[${base}, ${JSON.stringify(extra)}].join(' ')}`;
+}
+
+function htmlClassName(base: string, node: RuntimeNode) {
+  const extra = normalizeClassName(node.attributes.className);
+  return extra ? `${base} ${extra}` : base;
+}
+
+function normalizeClassName(value?: string) {
+  if (!value) return "";
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function reactTreeClassName(node: ExportTreeNode) {
+  const base = treeBaseClass(node);
+  const unique = treeNodeClass(node);
+  const extra = normalizeClassName(
+    typeof node.attributes.className === "string"
+      ? node.attributes.className
+      : undefined,
+  );
+  if (!extra) return `{[${base}, styles.${unique}].join(' ')}`;
+  return `{[${base}, styles.${unique}, ${JSON.stringify(extra)}].join(' ')}`;
+}
+
+function htmlTreeClassName(node: ExportTreeNode) {
+  const base = treeBaseClass(node).replace(/^styles\./, "");
+  const unique = treeNodeClass(node);
+  const extra = normalizeClassName(
+    typeof node.attributes.className === "string"
+      ? node.attributes.className
+      : undefined,
+  );
+  return extra ? `${base} ${unique} ${extra}` : `${base} ${unique}`;
+}
+
+function treeBaseClass(node: ExportTreeNode) {
+  if (node.tag === "img") return "styles.image";
+  if (node.tag === "h1") return "styles.heading";
+  if (node.tag === "h2" || node.tag === "h3") return "styles.subheading";
+  if (node.tag === "a") return "styles.link";
+  if (node.tag === "button") return "styles.button";
+  if (isTreeTextNode(node)) return "styles.body";
+  return "styles.surface";
+}
+
+function treeNodeClass(node: ExportTreeNode) {
+  return `node${toSafeIdentifier(node.id)}`;
+}
+
+function isTreeTextNode(node: ExportTreeNode) {
+  return (
+    node.kind === "text" ||
+    node.tag === "p" ||
+    node.tag === "span" ||
+    node.tag === "li"
+  );
+}
+
+function reactContainerTag(node: ExportTreeNode, depth: number) {
+  if (depth === 0 && node.kind === "component") return "section";
+  if (node.tag === "section" || node.tag === "main" || node.tag === "article") {
+    return node.tag;
+  }
+  return "div";
+}
+
+function htmlContainerTag(node: ExportTreeNode, depth: number) {
+  if (depth === 0 && node.kind === "component") return "section";
+  if (node.tag === "section" || node.tag === "main" || node.tag === "article") {
+    return node.tag;
+  }
+  return "div";
+}
+
+function flattenExportTree(nodes: ExportTreeNode[]): ExportTreeNode[] {
+  return nodes.flatMap((node) => [node, ...flattenExportTree(node.children)]);
+}
+
+function hasMotionStyles(
+  motion: ExportTreeNode["motion"] | RuntimeNode["motion"] | undefined,
+) {
+  if (!motion) return false;
+  return Object.values(motion).some(
+    (value) =>
+      typeof value === "string" &&
+      value.trim().length > 0 &&
+      value !== "all 0s ease 0s" &&
+      value !== "0s" &&
+      value !== "none" &&
+      value !== "normal" &&
+      value !== "1" &&
+      value !== "running",
+  );
+}
+
+function hasInteractionStateStyles(
+  interactionStyles: ExportTreeNode["interactionStyles"] | RuntimeNode["interactionStyles"] | undefined,
+) {
+  if (!interactionStyles) return false;
+  return ["hover", "focus"].some((state) => {
+    const styles = interactionStyles[state as "hover" | "focus"];
+    return Boolean(styles && Object.values(styles).some((value) => Boolean(value)));
+  });
+}
+
+function treeCssSelector(node: ExportTreeNode) {
+  return `.${treeNodeClass(node)}`;
+}
+
+function createViewportOverrideRules(
+  nodes: ExportTreeNode[],
+  viewport: ViewportName,
+) {
+  return nodes
+    .map((node) => {
+      const viewportEntries = treeCssEntries(node, viewport).filter(
+        ([key, value]) => node.styles[key] !== value,
+      );
+      if (viewportEntries.length === 0) return "";
+      return `${treeCssSelector(node)} {\n${viewportEntries
+        .map(([key, value]) => `  ${toKebabCase(key)}: ${value};`)
+        .join("\n")}\n}`;
+    })
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function indentCss(css: string, spaces: number) {
+  const pad = " ".repeat(spaces);
+  return css
+    .split("\n")
+    .map((line) => (line.length > 0 ? `${pad}${line}` : line))
+    .join("\n");
+}
+
+function toKebabCase(value: string) {
+  return value.replaceAll(/[A-Z]/g, (char) => `-${char.toLowerCase()}`);
+}
+
+function viewportMediaQuery(
+  viewport: "laptop" | "tablet" | "mobile",
+  widths: { laptop: number; tablet: number; mobile: number },
+) {
+  switch (viewport) {
+    case "laptop": {
+      const minWidth = Math.min(widths.laptop, widths.tablet) + 1;
+      return `(min-width: ${minWidth}px) and (max-width: ${widths.laptop}px)`;
+    }
+    case "tablet": {
+      const minWidth = Math.min(widths.tablet, widths.mobile) + 1;
+      return `(min-width: ${minWidth}px) and (max-width: ${widths.tablet}px)`;
+    }
+    case "mobile":
+      return `(max-width: ${widths.mobile}px)`;
+  }
 }
 
 async function formatTsx(source: string, parser: "typescript") {
@@ -864,6 +3538,24 @@ function findBackgroundColor(ir: ExportIR, root?: RuntimeNode) {
   );
 }
 
+function pickCollectionField(
+  collection: FramerCmsCollection,
+  types: string[],
+  preferredNames: string[] = [],
+  excludedIds: Array<string | undefined> = [],
+) {
+  const excluded = new Set(excludedIds.filter(Boolean));
+  const fields = collection.fields.filter(
+    (field) => types.includes(field.type) && !excluded.has(field.id),
+  );
+  if (fields.length === 0) return undefined;
+
+  const preferred = fields.find((field) =>
+    preferredNames.some((name) => field.id.toLowerCase() === name || field.name.toLowerCase() === name),
+  );
+  return preferred?.id ?? fields[0]?.id;
+}
+
 function escapeText(value: string) {
   return value
     .replaceAll("&", "&amp;")
@@ -877,4 +3569,15 @@ function escapeAttribute(value: string) {
 
 function escapeJs(value: string) {
   return value.replaceAll("\\", "\\\\").replaceAll("'", "\\'");
+}
+
+function toSafeIdentifier(value: string) {
+  const cleaned = value
+    .replace(/[^a-zA-Z0-9_$]+/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join("");
+  const identifier = cleaned || "FramerModule";
+  return /^[A-Za-z_$]/.test(identifier) ? identifier : `Framer${identifier}`;
 }

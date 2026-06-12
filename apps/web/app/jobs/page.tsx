@@ -39,7 +39,8 @@ export default async function JobsPage() {
               Create a job above, or start one from the Framer plugin.
             </div>
             <div className="mt-4 rounded-lg border border-black/10 bg-zinc-50 p-3 text-xs text-zinc-700">
-              Worker command: <span className="font-mono">npm run dev:worker</span>
+              Worker command:{" "}
+              <span className="font-mono">npm run dev:worker</span>
             </div>
           </div>
         ) : (
