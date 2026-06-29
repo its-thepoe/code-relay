@@ -1,13 +1,24 @@
 import Link from "next/link";
 import { readAllJobs } from "../../lib/jobs-store";
+import { AutoRefresh } from "./auto-refresh";
 
 export const dynamic = "force-dynamic";
 
 export default async function JobsPage() {
   const jobs = await readAllJobs();
+  const hasPendingJobs = jobs.some(
+    (job) => job.status === "queued" || job.status === "running",
+  );
+  const refreshSignature = jobs
+    .map((job) => `${job.id}:${job.status}:${job.updatedAt}`)
+    .join("|");
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-8">
+      <AutoRefresh
+        enabled={hasPendingJobs}
+        initialSignature={refreshSignature}
+      />
       <div className="flex items-baseline justify-between gap-4">
         <div>
           <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">

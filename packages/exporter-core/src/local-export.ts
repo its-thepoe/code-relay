@@ -1,6 +1,9 @@
 import { copy, mkdirp } from "fs-extra";
-import { writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import fs, { writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import path from "node:path";
+import { chromium } from "playwright";
 import { generateNextProject } from "../../codegen/src/next-project.js";
 import { compareGeneratedPreview } from "../../fidelity/src/compare.js";
 import { matchPluginNodesToDom } from "../../matcher/src/match.js";
@@ -28,8 +31,6 @@ import {
   buildAttemptPlan,
   detectAttemptPlateau,
 } from "./attempt-planner.js";
-import fs from "node:fs/promises";
-
 type LocalExportInput = {
   url?: string;
   pluginCapture?: PluginCanvasCapture;
@@ -47,6 +48,20 @@ type LocalExportResult = {
   reportPath: string;
   previewPath: string;
   bestAttempt: ExportAttemptResult;
+  validation: GeneratedProjectValidation;
+};
+
+export type GeneratedProjectValidation = {
+  status: "passed";
+  generatedFileCount: number;
+  tsxBytes: number;
+  cssBytes: number;
+  previewHtmlBytes: number;
+  buildDurationMs: number;
+  renderedElementCount: number;
+  renderedTextLength: number;
+  consoleErrors: string[];
+  pageErrors: string[];
 };
 
 type DebugArtifactsManifest = {
@@ -83,8 +98,38 @@ type ComparableFidelityKey =
 export async function runLocalExport(
   input: LocalExportInput,
 ): Promise<LocalExportResult> {
+  if (!input.exportMode) {
+    throw new Error(
+      "Missing exportMode: CLI/plugin did not pass exportMode into runLocalExport.",
+    );
+  }
+  if (!input.url && !input.pluginCapture) {
+    throw new Error(
+      "Missing URL and plugin capture: export cannot determine a source.",
+    );
+  }
+  if (
+    input.exportMode === "full-site" &&
+    (!input.url || !/^https?:\/\//.test(input.url))
+  ) {
+    throw new Error(
+      "Missing published URL: full-site export requires an http(s) Framer site.",
+    );
+  }
+  console.log(
+    "[coderelay:core:input]",
+    JSON.stringify({
+      url: input.url,
+      selector: input.selector,
+      exportMode: input.exportMode,
+      maxAttempts: input.maxAttempts,
+      targetFidelity: input.targetFidelity,
+      pluginNodeCount: input.pluginCapture?.selectedNodes.length ?? 0,
+    }),
+  );
+
   const timestamp = new Date().toISOString().replaceAll(/[:.]/g, "-");
-  const runDir = path.join(input.outDir, timestamp);
+  const runDir = path.resolve(input.outDir, timestamp);
   const workDir = path.join(runDir, "work");
   const attemptsDir = path.join(runDir, "attempts");
   const exportDir = path.join(runDir, "export");
@@ -104,6 +149,17 @@ export async function runLocalExport(
         selector: input.selector,
       })
     : createRuntimeCaptureFromPluginContext(input.pluginCapture);
+  console.log(
+    "[coderelay:core:capture]",
+    JSON.stringify({
+      captureMode: canCaptureFromUrl ? "runtime-first" : "plugin-only",
+      runtimeNodeCount: runtimeCapture.nodes.length,
+      viewportNodeCounts: runtimeCapture.captureDiagnostics?.nodeCount,
+      framerStyleCssBytes: Buffer.byteLength(
+        runtimeCapture.framerStyleCss ?? "",
+      ),
+    }),
+  );
   const pluginCapture =
     input.pluginCapture ?? createSimulatedPluginCapture(runtimeCapture.nodes);
   const sourceUrl = input.url ?? runtimeCapture.url;
@@ -120,6 +176,19 @@ export async function runLocalExport(
     pluginCapture,
     nodeMatches,
   });
+  console.log(
+    "[coderelay:core:strategy]",
+    JSON.stringify({
+      exportMode: ir.exportMode,
+      exportEngine: ir.exportEngine,
+      componentName: ir.componentName,
+      sitePageCount: ir.sitePages?.length ?? 0,
+      componentModuleCount: ir.componentModules?.length ?? 0,
+      codeFileCount: ir.codeFiles?.length ?? 0,
+      cmsCollectionCount: ir.cmsCollections?.length ?? 0,
+      exportTreeRootCount: ir.exportTree?.length ?? 0,
+    }),
+  );
   const attempts = await runAttempts({
     ir,
     attemptsDir,
@@ -127,6 +196,7 @@ export async function runLocalExport(
     targetFidelity: input.targetFidelity,
   });
   const bestAttempt = selectBestAttempt(attempts);
+  const validation = await validateGeneratedProject(bestAttempt.projectDir);
 
   await copy(bestAttempt.projectDir, exportDir);
   const debugArtifacts = await bundleDebugArtifacts({
@@ -136,7 +206,17 @@ export async function runLocalExport(
     attempts,
     bestAttempt,
   });
-  const report = createReport(ir, attempts, bestAttempt, debugArtifacts);
+  const report = createReport(
+    ir,
+    attempts,
+    bestAttempt,
+    debugArtifacts,
+    validation,
+  );
+  await writeFile(
+    path.join(exportDir, "generated-validation.json"),
+    `${JSON.stringify(validation, null, 2)}\n`,
+  );
   await writeFile(
     path.join(exportDir, "raw-plugin-payload.json"),
     `${JSON.stringify(pluginCapture, null, 2)}\n`,
@@ -184,7 +264,291 @@ export async function runLocalExport(
     reportPath,
     previewPath,
     bestAttempt,
+    validation,
   };
+}
+
+export async function validateGeneratedProject(
+  projectDir: string,
+): Promise<GeneratedProjectValidation> {
+  const generated = await summarizeGeneratedProject(projectDir);
+  console.log(
+    "[coderelay:core:generated-files]",
+    JSON.stringify(generated),
+  );
+
+  if (generated.generatedFileCount === 0) {
+    throw new Error("Generated export is empty: no files were written.");
+  }
+  if (generated.tsxBytes === 0) {
+    throw new Error("Generated export is invalid: TSX output is empty.");
+  }
+  if (generated.cssBytes === 0) {
+    throw new Error("Generated export is invalid: CSS output is empty.");
+  }
+  if (generated.previewHtmlBytes === 0) {
+    throw new Error("Generated export is invalid: preview.html is empty.");
+  }
+
+  const startedAt = Date.now();
+  try {
+    const install = await runCommand(
+      "npm",
+      ["install", "--ignore-scripts", "--no-audit", "--no-fund"],
+      projectDir,
+      180_000,
+    );
+    console.log(
+      "[coderelay:core:install]",
+      JSON.stringify({
+        exitCode: install.exitCode,
+        durationMs: install.durationMs,
+        stdout: tail(install.stdout, 2_000),
+        stderr: tail(install.stderr, 2_000),
+      }),
+    );
+    if (install.exitCode !== 0) {
+      throw new Error(
+        `Generated export dependency install failed.\n${tail(
+          install.stderr || install.stdout,
+          4_000,
+        )}`,
+      );
+    }
+
+    const build = await runCommand(
+      "npm",
+      ["run", "build"],
+      projectDir,
+      180_000,
+    );
+    console.log(
+      "[coderelay:core:build]",
+      JSON.stringify({
+        exitCode: build.exitCode,
+        durationMs: build.durationMs,
+        stdout: tail(build.stdout, 4_000),
+        stderr: tail(build.stderr, 4_000),
+      }),
+    );
+    if (build.exitCode !== 0) {
+      throw new Error(
+        `Generated export build failed.\n${tail(
+          build.stderr || build.stdout,
+          8_000,
+        )}`,
+      );
+    }
+
+    const runtime = await inspectBuiltProject(path.join(projectDir, "dist"));
+    console.log(
+      "[coderelay:core:runtime]",
+      JSON.stringify(runtime),
+    );
+    if (runtime.rootChildCount === 0 || runtime.renderedElementCount === 0) {
+      throw new Error(
+        `Generated export rendered a blank root (children=${runtime.rootChildCount}, visibleElements=${runtime.renderedElementCount}).`,
+      );
+    }
+    if (runtime.pageErrors.length > 0) {
+      throw new Error(
+        `Generated export crashed at runtime.\n${runtime.pageErrors.join("\n")}`,
+      );
+    }
+
+    return {
+      status: "passed",
+      ...generated,
+      buildDurationMs: Date.now() - startedAt,
+      renderedElementCount: runtime.renderedElementCount,
+      renderedTextLength: runtime.renderedTextLength,
+      consoleErrors: runtime.consoleErrors,
+      pageErrors: runtime.pageErrors,
+    };
+  } finally {
+    // Keep package-lock.json and dist, but never ship installed dependencies.
+    await fs.rm(path.join(projectDir, "node_modules"), {
+      recursive: true,
+      force: true,
+    });
+  }
+}
+
+async function summarizeGeneratedProject(projectDir: string) {
+  const files = await listFiles(projectDir);
+  let tsxBytes = 0;
+  let cssBytes = 0;
+  let previewHtmlBytes = 0;
+
+  for (const file of files) {
+    const size = (await fs.stat(file)).size;
+    if (file.endsWith(".tsx")) tsxBytes += size;
+    if (file.endsWith(".css")) cssBytes += size;
+    if (path.basename(file) === "preview.html") previewHtmlBytes += size;
+  }
+
+  return {
+    generatedFileCount: files.length,
+    tsxBytes,
+    cssBytes,
+    previewHtmlBytes,
+  };
+}
+
+async function listFiles(dir: string): Promise<string[]> {
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  const nested = await Promise.all(
+    entries.map(async (entry) => {
+      const fullPath = path.join(dir, entry.name);
+      return entry.isDirectory() ? listFiles(fullPath) : [fullPath];
+    }),
+  );
+  return nested.flat();
+}
+
+async function runCommand(
+  command: string,
+  args: string[],
+  cwd: string,
+  timeoutMs: number,
+) {
+  const startedAt = Date.now();
+  return await new Promise<{
+    exitCode: number;
+    stdout: string;
+    stderr: string;
+    durationMs: number;
+  }>((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd,
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(
+        new Error(
+          `${command} ${args.join(" ")} timed out after ${timeoutMs}ms.`,
+        ),
+      );
+    }, timeoutMs);
+
+    child.stdout.on("data", (chunk) => {
+      stdout = tail(stdout + String(chunk), 20_000);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr = tail(stderr + String(chunk), 20_000);
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({
+        exitCode: code ?? -1,
+        stdout,
+        stderr,
+        durationMs: Date.now() - startedAt,
+      });
+    });
+  });
+}
+
+async function inspectBuiltProject(distDir: string) {
+  const server = createServer(async (request, response) => {
+    try {
+      const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+      const requested = requestUrl.pathname === "/" ? "/index.html" : requestUrl.pathname;
+      const normalized = path.normalize(requested).replace(/^(\.\.(\/|\\|$))+/, "");
+      let filePath = path.join(distDir, normalized);
+      const stat = await fs.stat(filePath).catch(() => null);
+      if (!stat?.isFile()) filePath = path.join(distDir, "index.html");
+      const content = await fs.readFile(filePath);
+      response.statusCode = 200;
+      response.setHeader("content-type", contentType(filePath));
+      response.end(content);
+    } catch (error) {
+      response.statusCode = 500;
+      response.end(error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    server.close();
+    throw new Error("Generated export validation server did not start.");
+  }
+
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => {
+    pageErrors.push(error.message);
+  });
+
+  try {
+    await page.goto(`http://127.0.0.1:${address.port}/`, {
+      waitUntil: "networkidle",
+      timeout: 30_000,
+    });
+    await page.waitForTimeout(500);
+    return await page.evaluate(
+      ({ consoleErrors, pageErrors }) => {
+        const root = document.getElementById("root");
+        const renderedElements = root
+          ? Array.from(root.querySelectorAll("*")).filter((element) => {
+              const style = getComputedStyle(element);
+              const rect = element.getBoundingClientRect();
+              return (
+                style.display !== "none" &&
+                style.visibility !== "hidden" &&
+                Number(style.opacity) > 0 &&
+                rect.width > 0 &&
+                rect.height > 0
+              );
+            })
+          : [];
+        return {
+          rootChildCount: root?.children.length ?? 0,
+          renderedElementCount: renderedElements.length,
+          renderedTextLength: root?.textContent?.trim().length ?? 0,
+          consoleErrors,
+          pageErrors,
+        };
+      },
+      { consoleErrors, pageErrors },
+    );
+  } finally {
+    await browser.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+function contentType(filePath: string) {
+  if (filePath.endsWith(".html")) return "text/html; charset=utf-8";
+  if (filePath.endsWith(".js")) return "text/javascript; charset=utf-8";
+  if (filePath.endsWith(".css")) return "text/css; charset=utf-8";
+  if (filePath.endsWith(".svg")) return "image/svg+xml";
+  if (filePath.endsWith(".png")) return "image/png";
+  if (filePath.endsWith(".jpg") || filePath.endsWith(".jpeg")) {
+    return "image/jpeg";
+  }
+  return "application/octet-stream";
+}
+
+function tail(value: string, maxLength: number) {
+  return value.length <= maxLength ? value : value.slice(-maxLength);
 }
 
 async function bundleDebugArtifacts(input: {
@@ -1007,6 +1371,7 @@ function createReport(
   attempts: ExportAttemptResult[],
   bestAttempt: ExportAttemptResult,
   debugArtifacts: DebugArtifactsManifest,
+  validation: GeneratedProjectValidation,
 ) {
   const styleStats = summarizeStyleExtraction(ir);
   return {
@@ -1070,6 +1435,7 @@ function createReport(
       })),
     })),
     createdAt: new Date().toISOString(),
+    generatedValidation: validation,
     bestAttempt: bestAttempt.attemptNumber,
     visualFidelity: bestAttempt.fidelity,
     attempts: attempts.map((attempt) => ({

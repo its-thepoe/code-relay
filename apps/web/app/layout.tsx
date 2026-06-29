@@ -1,6 +1,7 @@
-import "./globals.css";
 import type { Metadata } from "next";
 import Link from "next/link";
+import fs from "node:fs";
+import path from "node:path";
 
 export const metadata: Metadata = {
   title: "Coderelay",
@@ -12,8 +13,13 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const globalCss = readGlobalCss();
+
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        <style dangerouslySetInnerHTML={{ __html: globalCss }} />
+      </head>
       <body>
         <div className="min-h-dvh bg-zinc-50">
           <div className="mx-auto flex w-full max-w-[1280px] gap-10 px-6 py-6">
@@ -64,6 +70,23 @@ export default function RootLayout({
       </body>
     </html>
   );
+}
+
+function readGlobalCss() {
+  const candidates = [
+    path.join(process.cwd(), "app", "globals.css"),
+    path.join(process.cwd(), "apps", "web", "app", "globals.css"),
+  ];
+
+  for (const filePath of candidates) {
+    try {
+      return fs.readFileSync(filePath, "utf8");
+    } catch {
+      // Try the next likely cwd shape.
+    }
+  }
+
+  return "";
 }
 
 function NavItem({ href, label }: { href: string; label: string }) {

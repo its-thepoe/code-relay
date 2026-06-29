@@ -1,0 +1,5 @@
+{
+  "name": "@coderelay/web",
+  "private": true,
+  "type": "module"
+}

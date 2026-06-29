@@ -80,6 +80,23 @@ test("runtime capture property allowlist includes fidelity-critical fields", () 
   assert.equal(CAPTURED_STYLE_PROPERTIES.includes("placeItems"), true);
 });
 
+test("runLocalExport rejects a missing exportMode before generating files", async () => {
+  const outDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-missing-export-mode-"),
+  );
+
+  await assert.rejects(
+    runLocalExport({
+      outDir,
+      pluginCapture: createPluginCapture(),
+      maxAttempts: 1,
+      targetFidelity: 0.92,
+    }),
+    /Missing exportMode/,
+  );
+  assert.deepEqual(await fs.readdir(outDir), []);
+});
+
 test("runLocalExport writes raw runtime capture artifact for plugin-only exports", async () => {
   const outDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "coderelay-local-export-"),
@@ -89,6 +106,7 @@ test("runLocalExport writes raw runtime capture artifact for plugin-only exports
     outDir,
     pluginCapture: createPluginCapture(),
     name: "IntegrationSmoke",
+    exportMode: "selection",
     maxAttempts: 1,
     targetFidelity: 0.92,
   });
@@ -116,6 +134,9 @@ test("runLocalExport writes raw runtime capture artifact for plugin-only exports
   assert.equal(runtimeCapture.nodes[0]?.styles?.overflow, "hidden");
   assert.equal(runtimeCapture.nodes[0]?.styles?.aspectRatio, "16 / 9");
   assert.equal(report.captureMode, "plugin-only");
+  assert.equal(result.validation.status, "passed");
+  assert.equal(result.validation.renderedElementCount > 0, true);
+  assert.equal(report.generatedValidation?.status, "passed");
   assert.equal(
     ["validated", "blocked"].includes(report.previewValidation?.status ?? ""),
     true,
@@ -165,6 +186,7 @@ test("runLocalExport reconstructs plugin-only runtime nodes from framerTree when
 
   const result = await runLocalExport({
     outDir,
+    exportMode: "selection",
     pluginCapture: {
       mode: "framer-plugin",
       capturedAt: "2026-06-12T00:00:00.000Z",

@@ -384,6 +384,30 @@ function createRuntimeCapture(): RuntimeCapture {
   };
 }
 
+function createSimulatedPluginCaptureForTest(
+  runtimeCapture: RuntimeCapture,
+): PluginCanvasCapture {
+  return {
+    mode: "simulated",
+    capturedAt: "2026-06-12T00:00:00.000Z",
+    selectedNodes: runtimeCapture.nodes
+      .filter((node) => node.rect.width > 0 && node.rect.height > 0)
+      .map((node) => ({
+        id: node.id,
+        name: node.text ? node.text.slice(0, 48) : node.tag,
+        type: node.tag,
+        text: node.text,
+        bounds: node.rect,
+        metadata: {
+          domPath: node.domPath,
+          sectionName: node.sectionName,
+          className: node.attributes.className,
+          rootKind: "component",
+        },
+      })),
+  };
+}
+
 function createNodeMatches(): NodeMatch[] {
   return [
     {
@@ -405,6 +429,32 @@ function createNodeMatches(): NodeMatch[] {
       matchReasons: ["text", "type"],
     },
   ];
+}
+
+function createRuntimeCaptureWithRuntimeContainerText(): RuntimeCapture {
+  const base = createRuntimeCapture();
+  const runtimeContainer = {
+    id: "runtime-main",
+    tag: "main",
+    domPath: "body:nth-child(2) > main:nth-child(1)",
+    text: "html body { background: rgb(255, 255, 255); }",
+    rect: { x: 0, y: 0, width: 1440, height: 900 },
+    sectionIndex: 0,
+    sectionName: "Page",
+    attributes: {},
+    styles: {
+      backgroundColor: "#ffffff",
+    },
+  };
+
+  return {
+    ...base,
+    nodes: [...base.nodes, runtimeContainer],
+    nodesByViewport: {
+      ...base.nodesByViewport,
+      desktop: [...(base.nodesByViewport?.desktop ?? []), runtimeContainer],
+    },
+  };
 }
 
 test("buildIntermediateRepresentation keeps styled surface nodes", () => {
@@ -440,6 +490,23 @@ test("buildIntermediateRepresentation keeps styled surface nodes", () => {
   assert.equal(ir.cmsCollections?.[0]?.pluginData?.sourceId, "airtable-blog");
 });
 
+test("buildIntermediateRepresentation drops inherited stylesheet text from runtime container roots", () => {
+  const ir = buildIntermediateRepresentation({
+    url: "https://talktoaugust.com/",
+    name: "August",
+    exportMode: "full-site",
+    captureMode: "runtime-first",
+    runtimeCapture: createRuntimeCaptureWithRuntimeContainerText(),
+    pluginCapture: createPluginCapture(),
+    nodeMatches: createNodeMatches(),
+  });
+
+  const runtimeRoot = ir.exportTree?.find((node) => node.id === "runtime-root-1");
+  assert.equal(runtimeRoot?.tag, "main");
+  assert.equal(runtimeRoot?.text, undefined);
+  assert.equal(runtimeRoot?.kind, "frame");
+});
+
 test("buildIntermediateRepresentation marks published captures as runtime-first", () => {
   const ir = buildIntermediateRepresentation({
     url: "https://styled-smoke.framer.website/",
@@ -456,6 +523,301 @@ test("buildIntermediateRepresentation marks published captures as runtime-first"
 
   assert.equal(ir.captureMode, "runtime-first");
   assert.equal(ir.exportEngine, "published-runtime");
+});
+
+test("full-site published URL export creates a page instead of fake component library entries", async () => {
+  const runtimeCapture = createRuntimeCapture();
+  runtimeCapture.nodes = runtimeCapture.nodes.map((node) => {
+    if (node.id === "root") {
+      return { ...node, domPath: "body:nth-child(2) > div:nth-child(1)" };
+    }
+    return {
+      ...node,
+      domPath: `body:nth-child(2) > div:nth-child(1) > ${node.tag}:nth-child(${
+        node.id === "heading" ? 1 : 2
+      })`,
+    };
+  });
+  const ir = buildIntermediateRepresentation({
+    url: "https://talktoaugust.com/",
+    name: "August",
+    exportMode: "full-site",
+    captureMode: "runtime-first",
+    runtimeCapture,
+    pluginCapture: {
+      ...createSimulatedPluginCaptureForTest(runtimeCapture),
+      context: {
+        exportMode: "full-site",
+        captureMode: "runtime-first",
+      },
+    },
+    nodeMatches: createNodeMatches(),
+  });
+
+  assert.equal(ir.exportMode, "full-site");
+  assert.equal(ir.libraryComponents, undefined);
+  assert.equal(ir.sitePages?.length, 1);
+  assert.equal(ir.sitePages?.[0]?.routePath, "/");
+  assert.ok((ir.sitePages?.[0]?.nodes.length ?? 0) > 0);
+  assert.ok((ir.exportTree ?? []).some((node) => node.children.length > 0));
+
+  const projectDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-full-site-url-test-"),
+  );
+
+  await generateNextProject({
+    ir,
+    projectDir,
+    strategy: {
+      id: "semantic-layout",
+      structuredLayout: false,
+      compactSpacing: false,
+      aggressiveMobileStacking: false,
+      preserveImageAspectRatio: true,
+    },
+  });
+
+  const app = await fs.readFile(path.join(projectDir, "src", "App.tsx"), "utf8");
+  const preview = await fs.readFile(path.join(projectDir, "preview.html"), "utf8");
+  const componentFiles = await fs.readdir(path.join(projectDir, "components"));
+  const pageFiles = await fs.readdir(path.join(projectDir, "pages"));
+
+  assert.match(app, /const pages =/);
+  assert.match(app, /from '\.\.\/pages\/August'/);
+  assert.match(preview, /Full-site preview/);
+  assert.doesNotMatch(preview, /Component library preview/);
+  assert.equal(componentFiles.length, 0);
+  assert.ok(pageFiles.some((file) => file === "August.tsx"));
+});
+
+test("full-site export ignores anonymous page roots and component catalog noise", () => {
+  const runtimeCapture = {
+    ...createRuntimeCapture(),
+    url: "https://talktoaugust.com/",
+    title: "August",
+  };
+  const ir = buildIntermediateRepresentation({
+    url: "https://talktoaugust.com/",
+    name: "August",
+    exportMode: "full-site",
+    captureMode: "runtime-first",
+    runtimeCapture,
+    pluginCapture: {
+      ...createPluginCapture(),
+      context: {
+        exportMode: "full-site",
+        captureMode: "runtime-first",
+        sitePages: [{ id: "OnvKRLt5G" }, { id: "VWJTSEXvT" }],
+        selectedComponents: [
+          {
+            id: "button",
+            name: "Button",
+            type: "ComponentNode",
+            insertURL: "https://framer.com/m/Button.js",
+          },
+        ],
+      },
+    },
+    nodeMatches: createNodeMatches(),
+  });
+
+  assert.equal(ir.libraryComponents, undefined);
+  assert.equal(ir.sitePages?.length, 1);
+  assert.equal(ir.sitePages?.[0]?.componentName, "August");
+  assert.equal(ir.sitePages?.[0]?.routePath, "/");
+  assert.equal(ir.sitePages?.[0]?.title, "August");
+  assert.ok((ir.sitePages?.[0]?.nodes.length ?? 0) > 1);
+});
+
+test("full-site export preserves explicit Framer page names and routes", () => {
+  const ir = buildIntermediateRepresentation({
+    url: "framer://project/site",
+    name: "MarketingSite",
+    exportMode: "full-site",
+    captureMode: "plugin-only",
+    runtimeCapture: createRuntimeCapture(),
+    pluginCapture: {
+      ...createPluginCapture(),
+      context: {
+        exportMode: "full-site",
+        captureMode: "plugin-only",
+        sitePages: [
+          { id: "home", name: "Home", path: "/" },
+          { id: "pricing", title: "Pricing", slug: "pricing" },
+        ],
+      },
+    },
+    nodeMatches: createNodeMatches(),
+  });
+
+  assert.deepEqual(
+    ir.sitePages?.map((page) => ({
+      componentName: page.componentName,
+      routePath: page.routePath,
+      title: page.title,
+    })),
+    [
+      { componentName: "Home", routePath: "/", title: "Home" },
+      { componentName: "Pricing", routePath: "/pricing", title: "Pricing" },
+    ],
+  );
+});
+
+test("component modules with colliding generated names are deduplicated", () => {
+  const pluginCapture = createPluginCapture();
+  pluginCapture.context!.componentModules = [
+    {
+      name: "FAQ",
+      source: "component-node",
+      insertURL: "https://framer.com/m/faq-one.js",
+    },
+    {
+      name: "FAQ",
+      source: "component-instance",
+      insertURL: "https://framer.com/m/faq-two.js",
+    },
+    {
+      name: "FAQ!",
+      source: "code-file-export",
+      insertURL: "https://framer.com/m/faq-three.js",
+    },
+  ];
+
+  const ir = buildIntermediateRepresentation({
+    url: "framer://project/collisions",
+    name: "CollisionTest",
+    exportMode: "components",
+    runtimeCapture: createRuntimeCapture(),
+    pluginCapture,
+    nodeMatches: createNodeMatches(),
+  });
+
+  assert.equal(ir.componentModules?.length, 1);
+  assert.equal(ir.componentModules?.[0]?.name, "FAQ");
+});
+
+test("codegen ignores non-string runtime className values", async () => {
+  const runtimeCapture = createRuntimeCapture();
+  runtimeCapture.nodes[0]!.attributes.className = [
+    "invalid",
+  ] as unknown as string;
+  const ir = buildIntermediateRepresentation({
+    url: "https://example.com",
+    name: "ClassNameGuard",
+    exportMode: "selection",
+    runtimeCapture,
+    pluginCapture: createPluginCapture(),
+    nodeMatches: createNodeMatches(),
+  });
+  const projectDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-class-name-guard-"),
+  );
+
+  await assert.doesNotReject(
+    generateNextProject({
+      ir,
+      projectDir,
+      strategy: {
+        id: "semantic-layout",
+        structuredLayout: false,
+        compactSpacing: false,
+        aggressiveMobileStacking: false,
+        preserveImageAspectRatio: true,
+      },
+    }),
+  );
+});
+
+test("full-site page generation does not reuse the entire export tree for every page", async () => {
+  const base = buildIntermediateRepresentation({
+    url: "https://example.com",
+    name: "ScopedSite",
+    exportMode: "full-site",
+    captureMode: "runtime-first",
+    runtimeCapture: createRuntimeCapture(),
+    pluginCapture: createPluginCapture(),
+    nodeMatches: createNodeMatches(),
+  });
+  const projectDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-scoped-pages-"),
+  );
+  const pageIr = {
+    ...base,
+    sitePages: [
+      {
+        componentName: "Home",
+        routePath: "/",
+        title: "Home",
+        nodes: [
+          {
+            ...base.component.nodes[0]!,
+            id: "home",
+            text: "Home only",
+          },
+        ],
+      },
+      {
+        componentName: "Pricing",
+        routePath: "/pricing",
+        title: "Pricing",
+        nodes: [
+          {
+            ...base.component.nodes[0]!,
+            id: "pricing",
+            text: "Pricing only",
+          },
+        ],
+      },
+    ],
+    exportTree: [
+      {
+        id: "home",
+        childIds: [],
+        name: "Home",
+        text: "Home only",
+        kind: "text" as const,
+        tag: "h1",
+        styles: { color: "rgb(0, 0, 0)" },
+        attributes: {},
+        source: {},
+        children: [],
+      },
+      {
+        id: "pricing",
+        childIds: [],
+        name: "Pricing",
+        text: "Pricing only",
+        kind: "text" as const,
+        tag: "h1",
+        styles: { color: "rgb(0, 0, 0)" },
+        attributes: {},
+        source: {},
+        children: [],
+      },
+    ],
+  };
+
+  await generateNextProject({
+    ir: pageIr,
+    projectDir,
+    strategy: {
+      id: "semantic-layout",
+      structuredLayout: false,
+      compactSpacing: false,
+      aggressiveMobileStacking: false,
+      preserveImageAspectRatio: true,
+    },
+  });
+
+  const home = await fs.readFile(path.join(projectDir, "pages", "Home.tsx"), "utf8");
+  const pricing = await fs.readFile(
+    path.join(projectDir, "pages", "Pricing.tsx"),
+    "utf8",
+  );
+  assert.match(home, /Home only/);
+  assert.doesNotMatch(home, /Pricing only/);
+  assert.match(pricing, /Pricing only/);
+  assert.doesNotMatch(pricing, /Home only/);
 });
 
 test("generateNextProject writes non-empty css and imports it from the component", async () => {
@@ -528,16 +890,15 @@ test("generateNextProject writes non-empty css and imports it from the component
   const framerDataComponentRuntime = await fs.readFile(framerDataComponentRuntimePath, "utf8");
 
   assert.match(component, /import styles from '\.\/StyledCard\.module\.css'/);
-  assert.match(component, /import \{ FramerCmsAutoSections \} from '\.\.\/src\/framer-data\/cms-sections'/);
-  assert.match(component, /FramerComponentRegistryPreview/);
-  assert.match(component, /FramerCodeFileList/);
-  assert.match(component, /from '\.\.\/src\/framer-data'/);
+  assert.doesNotMatch(component, /FramerCmsAutoSections/);
+  assert.doesNotMatch(component, /FramerComponentRegistryPreview/);
+  assert.doesNotMatch(component, /FramerCodeFileList/);
   assert.match(component, /className=\{\[styles\.surface, styles\.nodeRoot\]\.join\(' '\)\}/);
   assert.match(component, /className=\{\[styles\.heading, styles\.nodeHeading\]\.join\(' '\)\}/);
   assert.match(component, /className=\{\[styles\.body, styles\.nodeBody\]\.join\(' '\)\}/);
-  assert.match(component, /includeCmsSections !== false/);
-  assert.match(component, /includeFramerRegistry !== false/);
-  assert.match(component, /includeFramerCodeFiles !== false/);
+  assert.doesNotMatch(component, /includeCmsSections/);
+  assert.doesNotMatch(component, /includeFramerRegistry/);
+  assert.doesNotMatch(component, /includeFramerCodeFiles/);
   assert.doesNotMatch(component, /__coderelay/);
   assert.ok(
     component.indexOf("styles.nodeRoot") <
@@ -566,9 +927,9 @@ test("generateNextProject writes non-empty css and imports it from the component
   assert.match(css, /@media \(max-width:\s*390px\)/);
   assert.match(css, /font-size:\s*30px;/);
   assert.match(css, /transition-duration:\s*0\.2s;/);
-  assert.match(dts, /includeCmsSections\?: boolean/);
-  assert.match(dts, /includeFramerRegistry\?: boolean/);
-  assert.match(dts, /includeFramerCodeFiles\?: boolean/);
+  assert.doesNotMatch(dts, /includeCmsSections/);
+  assert.doesNotMatch(dts, /includeFramerRegistry/);
+  assert.doesNotMatch(dts, /includeFramerCodeFiles/);
   assert.match(exportTree, /"pluginNodeId": "root"/);
   assert.match(exportTree, /"runtimeNodeId": "heading"/);
   assert.match(motionManifest, /"nodeCount": 1/);
@@ -582,12 +943,9 @@ test("generateNextProject writes non-empty css and imports it from the component
   assert.match(cmsCollections, /"name": "Blog Posts"/);
   assert.match(cmsCollections, /"pluginDataKeys": \[/);
   assert.match(cmsCollections, /"pluginData": \{/);
-  assert.match(app, /FramerCmsAutoSections/);
-  assert.match(app, /Collection-bound preview/);
-  assert.match(app, /FramerComponentRegistryPreview/);
-  assert.match(app, /Registered component preview/);
-  assert.match(app, /FramerCodeFileList/);
-  assert.match(app, /Code file preview/);
+  assert.doesNotMatch(app, /FramerCmsAutoSections/);
+  assert.doesNotMatch(app, /FramerComponentRegistryPreview/);
+  assert.doesNotMatch(app, /FramerCodeFileList/);
   assert.match(previewHtml, /Framer CMS/);
   assert.match(previewHtml, /Blog Posts/);
   assert.match(previewHtml, /Hello world/);
@@ -641,6 +999,55 @@ test("generateNextProject writes non-empty css and imports it from the component
   await fs.access(compareDiagnosticsPath).catch(() => {
     // compare diagnostics are only generated in full compare runs, not direct codegen-only regression checks
   });
+});
+
+test("generateNextProject drops inherited stylesheet text instead of emitting invalid JSX text", async () => {
+  const runtimeCapture = createRuntimeCapture();
+  runtimeCapture.nodes = runtimeCapture.nodes.map((node) =>
+    node.id === "body"
+      ? {
+          ...node,
+          text: "html body { background: rgb(255, 255, 255); }",
+        }
+      : node,
+  );
+
+  const ir = buildIntermediateRepresentation({
+    url: "https://talktoaugust.com/",
+    name: "August",
+    exportMode: "selection",
+    captureMode: "runtime-first",
+    runtimeCapture,
+    pluginCapture: createPluginCapture(),
+    nodeMatches: createNodeMatches(),
+  });
+  const projectDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-brace-text-test-"),
+  );
+
+  await generateNextProject({
+    ir,
+    projectDir,
+    strategy: {
+      id: "semantic-layout",
+      structuredLayout: false,
+      compactSpacing: false,
+      aggressiveMobileStacking: false,
+      preserveImageAspectRatio: true,
+    },
+  });
+
+  const componentPath = path.join(projectDir, "components", "August.tsx");
+  const component = await fs.readFile(componentPath, "utf8");
+
+  assert.doesNotMatch(
+    component,
+    /html body \{ background: rgb\(255, 255, 255\); \}/,
+  );
+  assert.match(
+    component,
+    /\{'This should carry color and typography into TSX\.'\}/,
+  );
 });
 
 test("generateNextProject emits inline style fallback for forced export-tree nodes", async () => {

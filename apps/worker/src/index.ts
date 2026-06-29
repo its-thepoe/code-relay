@@ -43,6 +43,8 @@ const repoRoot = resolveRepoRoot();
 const jobsDir = path.join(repoRoot, ".coderelay", "jobs");
 const artifactsDir = path.join(repoRoot, ".coderelay", "artifacts");
 const legacyJobsDir = path.join(process.cwd(), ".coderelay", "jobs");
+const staleRunningJobMs = 2 * 60 * 1000;
+const runningHeartbeatMs = 5_000;
 
 async function sleep(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -82,9 +84,15 @@ async function claimNextJob(): Promise<LocalExportJob | null> {
       const full = path.join(dir, file);
       const job = await readJobFile(full);
       if (!job) continue;
-      if (job.status !== "queued") continue;
+      const isStaleRunning =
+        job.status === "running" &&
+        Date.now() - new Date(job.updatedAt).getTime() > staleRunningJobMs;
+      if (job.status !== "queued" && !isStaleRunning) continue;
 
       job.status = "running";
+      if (isStaleRunning) {
+        job.errorMessage = undefined;
+      }
       await writeJob(job);
 
       // If this job lived in a legacy directory, delete the stale copy after
@@ -103,8 +111,34 @@ async function claimNextJob(): Promise<LocalExportJob | null> {
 async function processJob(job: LocalExportJob) {
   const outDir = path.join(artifactsDir, job.id);
   await fs.mkdir(outDir, { recursive: true });
+  const heartbeat = setInterval(() => {
+    if (job.status === "running") {
+      void writeJob(job).catch(() => undefined);
+    }
+  }, runningHeartbeatMs);
 
   try {
+    if (!job.exportMode) {
+      throw new Error(
+        "Missing exportMode: queued job cannot be passed to runLocalExport.",
+      );
+    }
+    console.log(
+      "[coderelay:worker:runLocalExport]",
+      JSON.stringify({
+        jobId: job.id,
+        url: job.sourceUrl,
+        selector: job.selector,
+        exportMode: job.exportMode,
+        pluginNodeCount: Array.isArray(
+          (job.pluginCapture as any)?.selectedNodes,
+        )
+          ? (job.pluginCapture as any).selectedNodes.length
+          : 0,
+        maxAttempts: 3,
+        targetFidelity: 0.95,
+      }),
+    );
     const result = await runLocalExport({
       url: job.sourceUrl,
       pluginCapture: job.pluginCapture as any,
@@ -115,6 +149,16 @@ async function processJob(job: LocalExportJob) {
       targetFidelity: 0.95,
     });
 
+    console.log(
+      "[coderelay:worker:export-result]",
+      JSON.stringify({
+        jobId: job.id,
+        exportMode: job.exportMode,
+        exportDir: result.exportDir,
+        zipPath: result.zipPath,
+        validation: result.validation,
+      }),
+    );
     job.status = "completed";
     job.artifacts = {
       exportDir: result.exportDir,
@@ -128,6 +172,8 @@ async function processJob(job: LocalExportJob) {
     job.status = "failed";
     job.errorMessage = error instanceof Error ? error.message : String(error);
     await writeJob(job);
+  } finally {
+    clearInterval(heartbeat);
   }
 }
 

@@ -1,0 +1,7 @@
+{
+  "/api/jobs/[id]/route": "app/api/jobs/[id]/route.js",
+  "/_not-found/page": "app/_not-found/page.js",
+  "/api/jobs/[id]/artifact/route": "app/api/jobs/[id]/artifact/route.js",
+  "/jobs/page": "app/jobs/page.js",
+  "/jobs/[id]/page": "app/jobs/[id]/page.js"
+}

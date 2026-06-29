@@ -153,14 +153,17 @@ function buildLibraryComponents(input: BuildIrInput, fallbackName: string) {
           return metadata.rootKind !== "page";
         });
 
+  if (exportMode === "full-site") {
+    return undefined;
+  }
+
   if (exportMode === "selection" && selectedComponents.length === 0) {
     return undefined;
   }
 
   if (
     selectedComponentSources.length < 2 &&
-    exportMode !== "components" &&
-    exportMode !== "full-site"
+    exportMode !== "components"
   ) {
     return undefined;
   }
@@ -230,15 +233,19 @@ function buildSitePages(input: BuildIrInput, fallbackName: string) {
   const sitePages = Array.isArray(context?.sitePages)
     ? context!.sitePages!
     : [];
+  const namedSitePages = sitePages.filter(hasUsablePageIdentity);
   const pageSources =
-    sitePages.length > 0
-      ? sitePages
-      : input.runtimeCapture.nodes
-          .filter((node) => node.styles.__coderelayRootKind === "page")
-          .map((node) => ({
-            id: node.styles.__coderelayRootId,
-            name: node.sectionName,
-          }));
+    namedSitePages.length > 0
+      ? namedSitePages
+      : sitePages.length > 0 && /^https?:\/\//.test(input.url)
+        ? []
+        : input.runtimeCapture.nodes
+            .filter((node) => node.styles.__coderelayRootKind === "page")
+            .map((node) => ({
+              id: node.styles.__coderelayRootId,
+              name: node.sectionName,
+            }))
+            .filter(hasUsablePageIdentity);
 
   const uniqueSources = unique(pageSources, (source) => {
     const record = source as Record<string, unknown>;
@@ -248,18 +255,13 @@ function buildSitePages(input: BuildIrInput, fallbackName: string) {
   });
 
   if (uniqueSources.length === 0) {
-    return undefined;
+    return [buildRuntimeFallbackPage(input, fallbackName)];
   }
 
   const usedNames = new Map<string, number>();
   return uniqueSources.map((source, index) => {
     const sourceRecord = source as Record<string, unknown>;
-    const title =
-      typeof sourceRecord.name === "string" && sourceRecord.name.trim()
-        ? sourceRecord.name.trim()
-        : index === 0
-          ? fallbackName
-          : `Page ${index + 1}`;
+    const title = readPageTitle(sourceRecord) ?? fallbackName;
     const baseName = toComponentName(title);
     const count = usedNames.get(baseName) ?? 0;
     usedNames.set(baseName, count + 1);
@@ -275,7 +277,9 @@ function buildSitePages(input: BuildIrInput, fallbackName: string) {
 
     return {
       componentName,
-      routePath: index === 0 ? "/" : `/${toRouteSegment(title)}`,
+      routePath:
+        readPageRoutePath(sourceRecord) ??
+        (index === 0 ? "/" : `/${toRouteSegment(title)}`),
       title,
       nodes:
         nodes.length > 0
@@ -283,6 +287,120 @@ function buildSitePages(input: BuildIrInput, fallbackName: string) {
           : [createComponentPlaceholderNode(sourceRecord, title, index)],
     };
   });
+}
+
+function buildRuntimeFallbackPage(input: BuildIrInput, fallbackName: string) {
+  const title = input.runtimeCapture.title?.trim() || fallbackName;
+  const nodes = promoteFallbackHeading(pickContentNodes(input.runtimeCapture.nodes));
+  return {
+    componentName: fallbackName,
+    routePath: "/",
+    title,
+    nodes:
+      nodes.length > 0
+        ? nodes
+        : [
+            createComponentPlaceholderNode(
+              { id: "runtime-page", type: "Page" },
+              title || fallbackName,
+              0,
+            ),
+          ],
+  };
+}
+
+function hasUsablePageIdentity(source: unknown) {
+  if (!source || typeof source !== "object") return false;
+  const record = source as Record<string, unknown>;
+  return Boolean(readPageTitle(record) || readPageRoutePath(record));
+}
+
+function readPageTitle(source: Record<string, unknown>): string | undefined {
+  for (const key of [
+    "name",
+    "title",
+    "pageTitle",
+    "displayName",
+    "slug",
+    "path",
+    "route",
+    "routePath",
+    "pathname",
+    "pagePath",
+  ]) {
+    const value = source[key];
+    if (typeof value !== "string") continue;
+    const normalized = normalizePageTitle(value);
+    if (normalized) return normalized;
+  }
+
+  const metadata = asRecord(source.metadata);
+  if (metadata) {
+    const metadataTitle: string | undefined = readPageTitle(metadata);
+    if (metadataTitle) return metadataTitle;
+  }
+
+  return undefined;
+}
+
+function normalizePageTitle(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed || /^root\s+\d+$/i.test(trimmed) || /^page\s+\d+$/i.test(trimmed)) {
+    return "";
+  }
+  if (/^https?:\/\//.test(trimmed)) {
+    try {
+      const url = new URL(trimmed);
+      return normalizePageTitle(url.pathname);
+    } catch {
+      return "";
+    }
+  }
+  const withoutQuery = trimmed.split(/[?#]/)[0] ?? "";
+  const cleaned = withoutQuery
+    .replace(/^\/+|\/+$/g, "")
+    .split("/")
+    .filter(Boolean)
+    .at(-1);
+  if (!cleaned) return trimmed === "/" ? "Home" : trimmed;
+  return cleaned
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function readPageRoutePath(source: Record<string, unknown>): string | undefined {
+  for (const key of ["routePath", "path", "pathname", "pagePath", "route", "slug", "url"]) {
+    const value = source[key];
+    if (typeof value !== "string" || !value.trim()) continue;
+    const normalized = normalizeRoutePath(value);
+    if (normalized) return normalized;
+  }
+
+  const metadata = asRecord(source.metadata);
+  if (metadata) {
+    const route: string | undefined = readPageRoutePath(metadata);
+    if (route) return route;
+  }
+
+  return undefined;
+}
+
+function normalizeRoutePath(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed || /^root\s+\d+$/i.test(trimmed) || /^page\s+\d+$/i.test(trimmed)) {
+    return "";
+  }
+  if (/^https?:\/\//.test(trimmed)) {
+    try {
+      return normalizeRoutePath(new URL(trimmed).pathname);
+    } catch {
+      return "";
+    }
+  }
+  const withoutQuery = trimmed.split(/[?#]/)[0] ?? "";
+  if (withoutQuery === "/" || withoutQuery.toLowerCase() === "home") return "/";
+  const route = withoutQuery.startsWith("/") ? withoutQuery : `/${withoutQuery}`;
+  return route.replace(/\/{2,}/g, "/").replace(/\/$/g, "") || "/";
 }
 
 function findNodesForSource(
@@ -493,8 +611,23 @@ function readComponentModules(
     })
     .filter(Boolean) as FramerComponentModule[];
 
-  return unique([...contextModules, ...nodeModules], (module) =>
-    [module.source, module.insertURL, module.name].join(":"),
+  // Framer can surface the same component through context, instances, and
+  // code exports. Codegen uses this normalized name for files and imports, so
+  // duplicates would otherwise produce invalid TypeScript.
+  return unique(
+    [...contextModules, ...nodeModules],
+    (module) => componentModuleCodegenIdentity(module.name),
+  );
+}
+
+function componentModuleCodegenIdentity(value: string) {
+  return (
+    value
+      .replace(/[^a-zA-Z0-9_$]+/g, " ")
+      .split(" ")
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join("") || "FramerModule"
   );
 }
 
@@ -841,6 +974,15 @@ function buildExportTree(
   );
   const pluginById = new Map(framerTree.map((node) => [node.id, node] as const));
   const childIdsByParent = new Map<string, string[]>();
+  const hasPluginHierarchy = framerTree.some(
+    (node) =>
+      Boolean(node.parentId) ||
+      (Array.isArray(node.childIds) && node.childIds.length > 0),
+  );
+
+  if (!hasPluginHierarchy && runtimeCapture.nodes.length > 0) {
+    return buildRuntimeExportTree(runtimeCapture);
+  }
 
   for (const node of framerTree) {
     if (!node.parentId) continue;
@@ -870,15 +1012,16 @@ function buildExportTree(
       .map((childId) => pluginById.get(childId))
       .filter(Boolean)
       .map((child) => buildNode(child!));
+    const tag = runtimeNode?.tag ?? inferTagFromPluginNode(pluginNode);
 
     return {
       id: pluginNode.id,
       parentId: pluginNode.parentId,
       childIds: children.map((child) => child.id),
       name: pluginNode.name ?? runtimeNode?.sectionName,
-      text: pluginNode.text ?? runtimeNode?.text,
+      text: sanitizeRuntimeTextForTag(tag, pluginNode.text ?? runtimeNode?.text),
       kind: inferExportTreeKind(pluginNode, runtimeNode),
-      tag: runtimeNode?.tag ?? inferTagFromPluginNode(pluginNode),
+      tag,
       rect: runtimeNode?.rect ?? pluginNode.rect,
       rectByViewport: viewportSnapshots.rectByViewport,
       styles: {
@@ -918,7 +1061,7 @@ function buildExportTree(
       id: `runtime-root-${index + 1}`,
       childIds: [],
       name: runtimeNode.sectionName,
-      text: runtimeNode.text,
+      text: sanitizeRuntimeTextForTag(runtimeNode.tag, runtimeNode.text),
       kind: inferRuntimeKind(runtimeNode),
       tag: runtimeNode.tag,
       rect: runtimeNode.rect,
@@ -961,6 +1104,89 @@ function buildExportTree(
     }));
 
   return [...pluginRoots, ...unmatchedRuntimeRoots];
+}
+
+function buildRuntimeExportTree(runtimeCapture: RuntimeCapture): ExportTreeNode[] {
+  const runtimeByDomPath = new Map(
+    runtimeCapture.nodes.map((node) => [node.domPath, node] as const),
+  );
+  const childrenByDomPath = new Map<string, RuntimeNode[]>();
+  const roots: RuntimeNode[] = [];
+
+  for (const node of runtimeCapture.nodes) {
+    const parentPath = nearestCapturedParentDomPath(
+      node.domPath,
+      runtimeByDomPath,
+    );
+    const parent = parentPath ? runtimeByDomPath.get(parentPath) : undefined;
+    if (!parent || !parentPath) {
+      roots.push(node);
+      continue;
+    }
+    childrenByDomPath.set(parentPath, [
+      ...(childrenByDomPath.get(parentPath) ?? []),
+      node,
+    ]);
+  }
+
+  const buildNode = (runtimeNode: RuntimeNode): ExportTreeNode => {
+    const children = (childrenByDomPath.get(runtimeNode.domPath) ?? []).map(
+      buildNode,
+    );
+    const snapshots = collectViewportSnapshots(runtimeCapture, runtimeNode.domPath);
+
+    return {
+      id: runtimeNode.id,
+      parentId: parentDomPath(runtimeNode.domPath),
+      childIds: children.map((child) => child.id),
+      name: runtimeNode.sectionName,
+      text: sanitizeRuntimeTextForTag(runtimeNode.tag, runtimeNode.text),
+      kind: inferRuntimeKind(runtimeNode),
+      tag: runtimeNode.tag,
+      rect: runtimeNode.rect,
+      rectByViewport: snapshots.rectByViewport,
+      styles: { ...runtimeNode.styles },
+      stylesByViewport: snapshots.stylesByViewport,
+      motion: runtimeNode.motion,
+      motionByViewport: snapshots.motionByViewport,
+      interactionStyles: runtimeNode.interactionStyles,
+      interactionStylesByViewport: snapshots.interactionStylesByViewport,
+      attributes: {
+        src: runtimeNode.attributes.src,
+        href: runtimeNode.attributes.href,
+        alt: runtimeNode.attributes.alt,
+        role: runtimeNode.attributes.role,
+        className: runtimeNode.attributes.className,
+        dataFramerName: runtimeNode.attributes.dataFramerName,
+      },
+      source: {
+        runtimeNodeId: runtimeNode.id,
+        domPath: runtimeNode.domPath,
+        runtimeNodeIdsByViewport: snapshots.runtimeNodeIdsByViewport,
+      },
+      children,
+    };
+  };
+
+  return roots.map(buildNode);
+}
+
+function nearestCapturedParentDomPath(
+  domPath: string,
+  runtimeByDomPath: Map<string, RuntimeNode>,
+) {
+  let current = parentDomPath(domPath);
+  while (current) {
+    if (runtimeByDomPath.has(current)) return current;
+    current = parentDomPath(current);
+  }
+  return undefined;
+}
+
+function parentDomPath(domPath: string) {
+  const index = domPath.lastIndexOf(" > ");
+  if (index < 0) return undefined;
+  return domPath.slice(0, index);
 }
 
 function collectViewportSnapshots(
@@ -1045,8 +1271,42 @@ function inferRuntimeKind(runtimeNode: RuntimeNode): ExportTreeNode["kind"] {
   if (runtimeNode.tag === "img") return "image";
   if (runtimeNode.tag === "a") return "link";
   if (runtimeNode.tag === "button") return "button";
-  if (runtimeNode.text) return "text";
+  if (sanitizeRuntimeTextForTag(runtimeNode.tag, runtimeNode.text)) {
+    return "text";
+  }
   return "frame";
+}
+
+function normalizeRuntimeText(text: string | undefined) {
+  if (!text) return undefined;
+  const normalized = text.trim().replace(/\s+/g, " ").slice(0, 500);
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function sanitizeRuntimeTextForTag(tag: string, text: string | undefined) {
+  if (!isTextBearingRuntimeTag(tag)) return undefined;
+  return normalizeRuntimeText(text);
+}
+
+function isTextBearingRuntimeTag(tag: string) {
+  return new Set([
+    "p",
+    "span",
+    "li",
+    "a",
+    "button",
+    "label",
+    "strong",
+    "em",
+    "small",
+    "blockquote",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+  ]).has(tag);
 }
 
 function inferTagFromPluginNode(pluginNode: FramerTreeNode) {
