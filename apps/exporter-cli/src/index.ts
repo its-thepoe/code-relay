@@ -9,7 +9,7 @@ function printUsage() {
   console.error("");
   console.error("Export:");
   console.error(
-    "  npm run export:test -- --url https://example.com --out-dir .coderelay/exports",
+    "  npm run export:test -- --url https://example.com --export-mode selection --out-dir .coderelay/exports",
   );
   console.error("");
   console.error("Install into an existing React project:");
@@ -50,6 +50,7 @@ async function unzip(zipPath: string, targetDir: string) {
 
 async function main() {
   const argv = process.argv.slice(2);
+  console.log("[coderelay:cli:argv]", JSON.stringify(argv));
 
   if (argv[0] === "install") {
     const install = parseInstallArgs(argv.slice(1));
@@ -69,20 +70,37 @@ async function main() {
   }
 
   const args = parseCliArgs(argv);
+  console.log("[coderelay:cli:parsed]", JSON.stringify(args));
 
-  if (!args.url) {
+  if (!args.url || !args.exportMode) {
     printUsage();
-    process.exit(1);
+    throw new Error(
+      !args.url
+        ? "Missing URL: export cannot run."
+        : "Missing exportMode: pass --export-mode selection, components, or full-site.",
+    );
   }
 
   const outputRoot = path.resolve(args.outDir ?? ".coderelay/exports");
   await mkdirp(outputRoot);
 
+  console.log(
+    "[coderelay:cli:runLocalExport]",
+    JSON.stringify({
+      url: args.url,
+      selector: args.selector,
+      exportMode: args.exportMode,
+      maxAttempts: args.maxAttempts ?? 2,
+      targetFidelity: args.targetFidelity ?? 0.9,
+      outDir: outputRoot,
+    }),
+  );
   const result = await runLocalExport({
     url: args.url,
     outDir: outputRoot,
     name: args.name,
     selector: args.selector,
+    exportMode: args.exportMode,
     maxAttempts: args.maxAttempts ?? 2,
     targetFidelity: args.targetFidelity ?? 0.9,
   });

@@ -222,7 +222,11 @@ async function captureViewport(
   const viewport = viewports[viewportName];
   const page = await browser.newPage({ viewport });
 
-  await page.goto(input.url, { waitUntil: "networkidle", timeout: 60_000 });
+  await page.goto(input.url, { waitUntil: "domcontentloaded", timeout: 60_000 });
+  await page.waitForLoadState("load", { timeout: 15_000 }).catch(() => {
+    // Modern Framer sites can keep loading analytics/fonts; capture renderable DOM.
+  });
+  await waitForRenderableContent(page, input.selector);
   const fontsReady = await waitForFonts(page);
 
   const screenshotPath = path.join(captureDir, `${viewportName}.png`);
@@ -270,12 +274,40 @@ async function captureViewport(
 }
 
 async function waitForFonts(page: Page) {
-  return page
-    .evaluate(`(() => {
+  const fontsReady = page.evaluate(`(() => {
       if (!('fonts' in document) || !document.fonts?.ready) return true
       return document.fonts.ready.then(() => true).catch(() => false)
-    })()`)
-    .catch(() => false);
+    })()`);
+  const timeout = page.waitForTimeout(5_000).then(() => false);
+
+  return Promise.race([fontsReady, timeout]).catch(() => false);
+}
+
+async function waitForRenderableContent(page: Page, selector?: string) {
+  await page
+    .waitForFunction(
+      (rootSelector) => {
+        const root = rootSelector
+          ? document.querySelector(rootSelector)
+          : document.body;
+        if (!root) return false;
+
+        const rect = root.getBoundingClientRect();
+        const hasSize = rect.width > 0 && rect.height > 0;
+        const hasFramerNodes = Boolean(
+          document.querySelector(
+            '[data-framer-name], [class*="framer-"], main, section',
+          ),
+        );
+        const hasText = (document.body.innerText ?? "").trim().length > 0;
+
+        return document.readyState !== "loading" && hasSize && (hasFramerNodes || hasText);
+      },
+      selector ?? null,
+      { timeout: 20_000 },
+    )
+    .catch(() => undefined);
+  await page.waitForTimeout(750);
 }
 
 async function extractStylesheets(page: Page): Promise<string[]> {
@@ -527,6 +559,25 @@ async function extractNodes(
     const styleProperties = ${styleProperties}
     const root = rootSelector ? document.querySelector(rootSelector) : document.body
     const base = root ?? document.body
+    const ignoredTags = new Set(['script', 'style', 'noscript', 'template', 'meta', 'link'])
+    const textLikeTags = new Set([
+      'p',
+      'span',
+      'li',
+      'a',
+      'button',
+      'label',
+      'strong',
+      'em',
+      'small',
+      'blockquote',
+      'h1',
+      'h2',
+      'h3',
+      'h4',
+      'h5',
+      'h6',
+    ])
 
     const pathFor = (element) => {
       const parts = []
@@ -540,6 +591,16 @@ async function extractNodes(
       }
 
       return parts.join(' > ')
+    }
+
+    const readText = (element) => {
+      const tag = element.tagName.toLowerCase()
+      if (!textLikeTags.has(tag)) return undefined
+
+      const clone = element.cloneNode(true)
+      clone.querySelectorAll('script, style, noscript, template').forEach((node) => node.remove())
+      const text = clone.innerText?.trim().replace(/\\s+/g, ' ').slice(0, 500)
+      return text || undefined
     }
 
     const sectionElements = Array.from(base.querySelectorAll('section, header, main, footer, [data-framer-name]'))
@@ -565,6 +626,7 @@ async function extractNodes(
     }
 
     return Array.from(base.querySelectorAll('*'))
+      .filter((element) => !ignoredTags.has(element.tagName.toLowerCase()))
       .map((element, index) => {
         const rect = element.getBoundingClientRect()
         const styles = window.getComputedStyle(element)
@@ -579,7 +641,7 @@ async function extractNodes(
           id: element.id || 'node-' + (index + 1),
           tag: element.tagName.toLowerCase(),
           domPath: pathFor(element),
-          text: element.textContent?.trim().replace(/\\s+/g, ' ').slice(0, 500) || undefined,
+          text: readText(element),
           sectionIndex: section.index,
           sectionName: section.name,
           rect: {

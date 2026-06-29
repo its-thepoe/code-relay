@@ -136,11 +136,14 @@ export async function generateNextProject(
     );
     const entryDtsPath = path.join(componentDir, `${entry.componentName}.d.ts`);
 
-    const component = await formatTsx(createComponent(entry), "typescript");
+    const component = await formatTsx(
+      createComponent(entry, { includeDataPreviews: false }),
+      "typescript",
+    );
     const css = createCss(entry, input.strategy);
     await writeFile(entryComponentPath, component);
     await writeFile(entryCssPath, css);
-    await writeFile(entryDtsPath, createDts(entry));
+    await writeFile(entryDtsPath, createDts(entry, false));
   }
 
   for (const entry of sitePages) {
@@ -153,12 +156,13 @@ export async function generateNextProject(
     const pageComponent = await formatTsx(
       createComponent(entry, {
         cssImportPath: `./${entry.componentName}.module.css`,
+        includeDataPreviews: false,
       }),
       "typescript",
     );
     await writeFile(entryComponentPath, pageComponent);
     await writeFile(entryCssPath, createCss(entry, input.strategy));
-    await writeFile(entryDtsPath, createDts(entry));
+    await writeFile(entryDtsPath, createDts(entry, false));
   }
 
   const app = await formatTsx(
@@ -271,9 +275,12 @@ function deriveIrForComponent(
   componentName: string,
   nodes: RuntimeNode[],
 ): ExportIR {
+  const exportTree = scopeExportTreeToNodes(base.exportTree, nodes);
+
   return {
     ...base,
     componentName,
+    exportTree,
     component: {
       semanticType: base.component.semanticType,
       nodes,
@@ -290,6 +297,16 @@ function deriveIrForComponent(
   };
 }
 
+function scopeExportTreeToNodes(
+  tree: ExportTreeNode[] | undefined,
+  nodes: RuntimeNode[],
+) {
+  if (!tree?.length || nodes.length === 0) return undefined;
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const scoped = tree.filter((node) => nodeIds.has(node.id));
+  return scoped.length > 0 ? scoped : undefined;
+}
+
 function createRemoteModuleWrapper(module: FramerComponentModule) {
   const exportName = module.isDefaultExport
     ? "default"
@@ -304,13 +321,15 @@ type RemoteComponentModule = Record<string, unknown> & {
 }
 
 function resolveComponent(mod: RemoteComponentModule) {
-  const named = ${JSON.stringify(exportName)} !== 'default' ? mod[${JSON.stringify(exportName)}] : undefined
+  const exportName: string = ${JSON.stringify(exportName)}
+  const named = exportName !== 'default' ? mod[exportName] : undefined
   const candidate = named ?? mod.default ?? Object.values(mod).find((value) => typeof value === 'function')
   return candidate as React.ComponentType<RemoteProps>
 }
 
 const RemoteComponent = React.lazy(async () => {
-  const mod = await import(/* @vite-ignore */ ${JSON.stringify(module.insertURL)}) as RemoteComponentModule
+  const moduleUrl: string = ${JSON.stringify(module.insertURL)}
+  const mod = await import(/* @vite-ignore */ moduleUrl) as RemoteComponentModule
   return { default: resolveComponent(mod) }
 })
 
@@ -437,7 +456,7 @@ function extractFirstCssUrl(value: string | undefined) {
   return match?.[2]?.trim() || undefined;
 }
 
-function createDts(ir: ExportIR) {
+function createDts(ir: ExportIR, includeDataPreviews = true) {
   const lines: string[] = [];
   lines.push(`import type * as React from "react"`);
   lines.push("");
@@ -448,13 +467,13 @@ function createDts(ir: ExportIR) {
   if (props?.heroSubtitle) lines.push(`  ${props.heroSubtitle}?: string`);
   if (props?.ctaLabel) lines.push(`  ${props.ctaLabel}?: string`);
   if (props?.ctaHref) lines.push(`  ${props.ctaHref}?: string`);
-  if ((ir.cmsCollections?.length ?? 0) > 0) {
+  if (includeDataPreviews && (ir.cmsCollections?.length ?? 0) > 0) {
     lines.push(`  includeCmsSections?: boolean`);
   }
-  if ((ir.componentModules?.length ?? 0) > 0) {
+  if (includeDataPreviews && (ir.componentModules?.length ?? 0) > 0) {
     lines.push(`  includeFramerRegistry?: boolean`);
   }
-  if ((ir.codeFiles?.length ?? 0) > 0) {
+  if (includeDataPreviews && (ir.codeFiles?.length ?? 0) > 0) {
     lines.push(`  includeFramerCodeFiles?: boolean`);
   }
 
@@ -473,6 +492,7 @@ function createComponent(
     cssImportPath?: string;
     cmsImportPath?: string;
     framerDataImportPath?: string;
+    includeDataPreviews?: boolean;
   } = {},
 ) {
   const cssImportPath =
@@ -481,9 +501,12 @@ function createComponent(
     options.cmsImportPath ?? `../src/framer-data/cms-sections`;
   const framerDataImportPath =
     options.framerDataImportPath ?? `../src/framer-data`;
-  const hasCmsCollections = (ir.cmsCollections?.length ?? 0) > 0;
-  const hasComponentModules = (ir.componentModules?.length ?? 0) > 0;
-  const hasCodeFiles = (ir.codeFiles?.length ?? 0) > 0;
+  const includeDataPreviews = options.includeDataPreviews !== false;
+  const hasCmsCollections =
+    includeDataPreviews && (ir.cmsCollections?.length ?? 0) > 0;
+  const hasComponentModules =
+    includeDataPreviews && (ir.componentModules?.length ?? 0) > 0;
+  const hasCodeFiles = includeDataPreviews && (ir.codeFiles?.length ?? 0) > 0;
   const content = hasUsableExportTree(ir)
     ? renderExportTreeForReact(ir)
     : ir.component.sections.length > 0
@@ -581,37 +604,14 @@ export function ${ir.componentName}(props: ${ir.componentName}Props) {
 function createViteApp(
   entries: ExportIR[],
   label: "components" | "selection",
-  componentModules: FramerComponentModule[] = [],
+  _componentModules: FramerComponentModule[] = [],
 ) {
-  const base = entries[0];
-  const hasCmsCollections = (base?.cmsCollections?.length ?? 0) > 0;
-  const hasCodeFiles = (base?.codeFiles?.length ?? 0) > 0;
-  const hasComponentRegistry = componentModules.length > 0;
   const imports = entries
     .map(
       (entry) =>
         `import { ${entry.componentName} } from '../components/${entry.componentName}'`,
     )
     .join("\n");
-  const moduleImports = componentModules
-    .map(
-      (module) =>
-        `import { ${toSafeIdentifier(module.name)}Remote } from '../framer-modules/${toSafeIdentifier(module.name)}Remote'`,
-    )
-    .join("\n");
-  const cmsImports = hasCmsCollections
-    ? `import { FramerCmsAutoSections } from './framer-data/cms-sections'`
-    : "";
-  const runtimeDataImports =
-    [
-      hasCodeFiles ? "FramerCodeFileList" : null,
-      hasComponentRegistry ? "FramerComponentRegistryPreview" : null,
-    ]
-      .filter(Boolean)
-      .join(", ") || "";
-  const framerDataRuntimeImport = runtimeDataImports
-    ? `import { ${runtimeDataImports} } from './framer-data'`
-    : "";
   const render = entries
     .map(
       (entry, index) => `<motion.section
@@ -633,33 +633,8 @@ function createViteApp(
         </motion.section>`,
     )
     .join("\n");
-  const moduleRender = componentModules
-    .map(
-      (module, index) => `<motion.section
-          className="previewItem"
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.24, delay: ${(entries.length + index)} * 0.035 }}
-        >
-          <div className="previewHeader">
-            <div>
-              <div className="previewEyebrow">Framer module</div>
-              <h2>${escapeJs(module.name)}</h2>
-            </div>
-            <code>${escapeJs(module.source)}</code>
-          </div>
-          <div className="previewCanvas">
-            <${toSafeIdentifier(module.name)}Remote />
-          </div>
-        </motion.section>`,
-    )
-    .join("\n");
-
   return `import { motion } from 'framer-motion'
 ${imports}
-${moduleImports}
-${cmsImports}
-${framerDataRuntimeImport}
 
 export default function App() {
   return (
@@ -672,70 +647,6 @@ export default function App() {
         <span>${entries.length} component${entries.length === 1 ? "" : "s"}</span>
       </header>
       ${render}
-      ${moduleRender}
-      ${
-        hasComponentRegistry
-          ? `<motion.section
-          className="previewItem"
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.24, delay: ${(entries.length + componentModules.length + (hasCmsCollections ? 1 : 0))} * 0.035 }}
-        >
-          <div className="previewHeader">
-            <div>
-              <div className="previewEyebrow">Framer registry</div>
-              <h2>Registered component preview</h2>
-            </div>
-            <code>src/framer-data/component-runtime.tsx</code>
-          </div>
-          <div className="previewCanvas">
-            <FramerComponentRegistryPreview />
-          </div>
-        </motion.section>`
-          : ""
-      }
-      ${
-        hasCodeFiles
-          ? `<motion.section
-          className="previewItem"
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.24, delay: ${(entries.length + componentModules.length + (hasCmsCollections ? 1 : 0) + (hasComponentRegistry ? 1 : 0))} * 0.035 }}
-        >
-          <div className="previewHeader">
-            <div>
-              <div className="previewEyebrow">Framer code files</div>
-              <h2>Code file preview</h2>
-            </div>
-            <code>src/framer-data/code-files-runtime.tsx</code>
-          </div>
-          <div className="previewCanvas">
-            <FramerCodeFileList />
-          </div>
-        </motion.section>`
-          : ""
-      }
-      ${
-        hasCmsCollections
-          ? `<motion.section
-          className="previewItem"
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.24, delay: ${(entries.length + componentModules.length)} * 0.035 }}
-        >
-          <div className="previewHeader">
-            <div>
-              <div className="previewEyebrow">Framer CMS</div>
-              <h2>Collection-bound preview</h2>
-            </div>
-            <code>src/framer-data/cms-sections.tsx</code>
-          </div>
-          <div className="previewCanvas">
-            <FramerCmsAutoSections />
-          </div>
-        </motion.section>`
-          : ""
-      }
     </main>
   )
 }
@@ -743,28 +654,12 @@ export default function App() {
 }
 
 function createViteSiteApp(base: ExportIR, pages: ExportIR[]) {
-  const hasCmsCollections = (base.cmsCollections?.length ?? 0) > 0;
-  const hasCodeFiles = (base.codeFiles?.length ?? 0) > 0;
-  const hasComponentRegistry = (base.componentModules?.length ?? 0) > 0;
   const imports = pages
     .map(
       (entry) =>
         `import { ${entry.componentName} } from '../pages/${entry.componentName}'`,
     )
     .join("\n");
-  const cmsImports = hasCmsCollections
-    ? `import { FramerCmsAutoSections } from './framer-data/cms-sections'`
-    : "";
-  const runtimeDataImports =
-    [
-      hasCodeFiles ? "FramerCodeFileList" : null,
-      hasComponentRegistry ? "FramerComponentRegistryPreview" : null,
-    ]
-      .filter(Boolean)
-      .join(", ") || "";
-  const framerDataRuntimeImport = runtimeDataImports
-    ? `import { ${runtimeDataImports} } from './framer-data'`
-    : "";
   const pageMetadata = (
     base.sitePages ??
     pages.map((entry) => ({
@@ -788,11 +683,8 @@ function createViteSiteApp(base: ExportIR, pages: ExportIR[]) {
     )
     .join(",\n");
 
-	  return `import { useMemo, useState } from 'react'
-		import { motion } from 'framer-motion'
+	  return `import { useMemo } from 'react'
 		${imports}
-    ${cmsImports}
-    ${framerDataRuntimeImport}
 
 		const pages = [
 		  ${pageObjects}
@@ -801,78 +693,20 @@ function createViteSiteApp(base: ExportIR, pages: ExportIR[]) {
 		function getInitialPath() {
 		  if (typeof window === 'undefined') return pages[0]?.path ?? '/'
 		  const hashPath = window.location.hash.replace(/^#/, '')
+      const browserPath = window.location.pathname
+      if (pages.some((page) => page.path === browserPath)) return browserPath
 		  return pages.some((page) => page.path === hashPath) ? hashPath : pages[0]?.path ?? '/'
 		}
 
 		export default function App() {
-		  const [currentPath, setCurrentPath] = useState(getInitialPath)
+		  const currentPath = getInitialPath()
 		  const currentPage = useMemo(
 		    () => pages.find((page) => page.path === currentPath) ?? pages[0],
 		    [currentPath],
 		  )
 		  const Page = currentPage.Component
 
-		  function navigate(path: string) {
-		    setCurrentPath(path)
-		    if (typeof window !== 'undefined') {
-		      window.history.replaceState(null, '', '#' + path)
-		    }
-		  }
-
-		  return (
-	    <main className="siteShell">
-	      <header className="siteTopbar">
-	        <div>
-	          <div className="previewEyebrow">Coderelay full-site export</div>
-	          <h1>${escapeJs(base.componentName)}</h1>
-	        </div>
-	        <nav aria-label="Generated pages">
-	          {pages.map((page) => (
-	            <button
-	              key={page.path}
-	              type="button"
-	              data-active={page.path === currentPage.path}
-	              onClick={() => navigate(page.path)}
-	            >
-	              {page.title}
-	            </button>
-	          ))}
-	        </nav>
-	      </header>
-	      <motion.div
-	        key={currentPage.path}
-	        initial={{ opacity: 0, y: 12 }}
-	        animate={{ opacity: 1, y: 0 }}
-	        transition={{ duration: 0.24 }}
-	      >
-	        <Page />
-	      </motion.div>
-        ${
-          hasCmsCollections
-            ? `<section style={{ padding: '0 22px 22px' }}>
-          <div className="previewEyebrow">Framer CMS</div>
-          <FramerCmsAutoSections />
-        </section>`
-            : ""
-        }
-        ${
-          hasComponentRegistry
-            ? `<section style={{ padding: '0 22px 22px' }}>
-          <div className="previewEyebrow">Framer registry</div>
-          <FramerComponentRegistryPreview />
-        </section>`
-            : ""
-        }
-        ${
-          hasCodeFiles
-            ? `<section style={{ padding: '0 22px 22px' }}>
-          <div className="previewEyebrow">Framer code files</div>
-          <FramerCodeFileList />
-        </section>`
-            : ""
-        }
-	    </main>
-	  )
+		  return <Page />
 	}
 	`;
 }
@@ -1034,8 +868,9 @@ function renderNodeWithProps(
     return `<img className=${imgClass} src="${escapeAttribute(node.attributes.src)}" alt="${escapeAttribute(node.attributes.alt ?? "")}"${style} />`;
   }
 
-  const text = escapeText(node.text ?? "");
-  if (!text) return "";
+  const rawText = node.text ?? "";
+  if (!rawText.trim()) return "";
+  const text = reactTextLiteral(rawText);
 
   const props = ir.exportProps;
   const titleKey = props?.heroTitle;
@@ -1046,7 +881,7 @@ function renderNodeWithProps(
   if (node.tag === "h1") {
     const content =
       titleKey && !ctx.titleUsed
-        ? `{props.${titleKey} ?? ${JSON.stringify(text)}}`
+        ? `{props.${titleKey} ?? ${JSON.stringify(rawText)}}`
         : text;
     if (titleKey && !ctx.titleUsed) ctx.titleUsed = true;
     return `<h1 className=${headingClass}${style}>${content}</h1>`;
@@ -1055,7 +890,7 @@ function renderNodeWithProps(
   if (node.tag === "h2" || node.tag === "h3") {
     const content =
       subtitleKey && !ctx.subtitleUsed
-        ? `{props.${subtitleKey} ?? ${JSON.stringify(text)}}`
+        ? `{props.${subtitleKey} ?? ${JSON.stringify(rawText)}}`
         : text;
     if (subtitleKey && !ctx.subtitleUsed) ctx.subtitleUsed = true;
     return `<h2 className=${subheadingClass}${style}>${content}</h2>`;
@@ -1064,7 +899,7 @@ function renderNodeWithProps(
   if (node.tag === "a") {
     const label =
       ctaLabelKey && !ctx.ctaLabelUsed
-        ? `{props.${ctaLabelKey} ?? ${JSON.stringify(text)}}`
+        ? `{props.${ctaLabelKey} ?? ${JSON.stringify(rawText)}}`
         : text;
     if (ctaLabelKey && !ctx.ctaLabelUsed) ctx.ctaLabelUsed = true;
 
@@ -1081,7 +916,7 @@ function renderNodeWithProps(
   if (node.tag === "button") {
     const label =
       ctaLabelKey && !ctx.ctaLabelUsed
-        ? `{props.${ctaLabelKey} ?? ${JSON.stringify(text)}}`
+        ? `{props.${ctaLabelKey} ?? ${JSON.stringify(rawText)}}`
         : text;
     if (ctaLabelKey && !ctx.ctaLabelUsed) ctx.ctaLabelUsed = true;
     return `<button className=${buttonClass} type="button"${style}>${label}</button>`;
@@ -1747,7 +1582,8 @@ function renderExportTreeNodeReact(
     .map((child) => renderExportTreeNodeReact(child, ir, ctx, depth + 1))
     .filter(Boolean)
     .join("\n");
-  const text = escapeText(node.text ?? "");
+  const rawText = node.text ?? "";
+  const text = rawText.trim() ? reactTextLiteral(rawText) : "";
 
   if (node.tag === "img" && typeof node.attributes.src === "string") {
     return `<img className=${className} src="${escapeAttribute(node.attributes.src)}" alt="${escapeAttribute(String(node.attributes.alt ?? ""))}"${style} />`;
@@ -1758,7 +1594,7 @@ function renderExportTreeNodeReact(
     const titleKey = props?.heroTitle;
     const content =
       titleKey && !ctx.titleUsed
-        ? `{props.${titleKey} ?? ${JSON.stringify(text)}}`
+        ? `{props.${titleKey} ?? ${JSON.stringify(rawText)}}`
         : text;
     if (titleKey && !ctx.titleUsed) ctx.titleUsed = true;
     return `<h1 className=${className}${style}>${content}</h1>`;
@@ -1769,7 +1605,7 @@ function renderExportTreeNodeReact(
     const subtitleKey = props?.heroSubtitle;
     const content =
       subtitleKey && !ctx.subtitleUsed
-        ? `{props.${subtitleKey} ?? ${JSON.stringify(text)}}`
+        ? `{props.${subtitleKey} ?? ${JSON.stringify(rawText)}}`
         : text;
     if (subtitleKey && !ctx.subtitleUsed) ctx.subtitleUsed = true;
     return `<${node.tag} className=${className}${style}>${content}</${node.tag}>`;
@@ -1781,7 +1617,7 @@ function renderExportTreeNodeReact(
     const hrefKey = props?.ctaHref;
     const label =
       labelKey && !ctx.ctaLabelUsed
-        ? `{props.${labelKey} ?? ${JSON.stringify(text)}}`
+        ? `{props.${labelKey} ?? ${JSON.stringify(rawText)}}`
         : text;
     if (labelKey && !ctx.ctaLabelUsed) ctx.ctaLabelUsed = true;
     const href = typeof node.attributes.href === "string" ? node.attributes.href : "#";
@@ -1798,7 +1634,7 @@ function renderExportTreeNodeReact(
     const labelKey = props?.ctaLabel;
     const label =
       labelKey && !ctx.ctaLabelUsed
-        ? `{props.${labelKey} ?? ${JSON.stringify(text)}}`
+        ? `{props.${labelKey} ?? ${JSON.stringify(rawText)}}`
         : text;
     if (labelKey && !ctx.ctaLabelUsed) ctx.ctaLabelUsed = true;
     return `<button className=${className} type="button"${style}>${label}</button>`;
@@ -1810,7 +1646,7 @@ function renderExportTreeNodeReact(
 
   const tag = reactContainerTag(node, depth);
   return `<${tag} className=${className}${style}>
-    ${childContent || (text ? escapeText(text) : "")}
+    ${childContent || text}
   </${tag}>`;
 }
 
@@ -2217,16 +2053,16 @@ function createPackageJson(ir: ExportIR) {
       preview: "vite preview --host 0.0.0.0",
     },
     dependencies: {
-      "@vitejs/plugin-react": "latest",
-      "framer-motion": "latest",
-      react: "latest",
-      "react-dom": "latest",
-      vite: "latest",
+      "framer-motion": "12.42.0",
+      react: "19.2.7",
+      "react-dom": "19.2.7",
     },
     devDependencies: {
-      "@types/react": "latest",
-      "@types/react-dom": "latest",
-      typescript: "latest",
+      "@types/react": "19.2.17",
+      "@types/react-dom": "19.2.3",
+      "@vitejs/plugin-react": "6.0.3",
+      typescript: "6.0.3",
+      vite: "8.1.0",
     },
   };
 }
@@ -2247,7 +2083,14 @@ function createTsConfig() {
       noEmit: true,
       jsx: "react-jsx",
     },
-    include: ["src", "components", "vite.config.ts"],
+    include: [
+      "src/main.tsx",
+      "src/App.tsx",
+      "src/vite-env.d.ts",
+      "components/**/*.tsx",
+      "pages/**/*.tsx",
+      "vite.config.ts",
+    ],
   };
 }
 
@@ -3358,8 +3201,8 @@ function htmlClassName(base: string, node: RuntimeNode) {
   return extra ? `${base} ${extra}` : base;
 }
 
-function normalizeClassName(value?: string) {
-  if (!value) return "";
+function normalizeClassName(value?: unknown) {
+  if (typeof value !== "string" || !value) return "";
   return value.replace(/\s+/g, " ").trim();
 }
 
@@ -3561,6 +3404,10 @@ function escapeText(value: string) {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
+}
+
+function reactTextLiteral(value: string) {
+  return `{${JSON.stringify(value)}}`;
 }
 
 function escapeAttribute(value: string) {

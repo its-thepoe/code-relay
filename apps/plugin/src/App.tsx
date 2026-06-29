@@ -48,6 +48,19 @@ type PluginCapture = {
 
 type CapturableNode = CanvasNode | ComponentNode | unknown;
 type ExportMode = "selection" | "components" | "full-site";
+type JobSnapshot = {
+  id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  sourceUrl?: string;
+  exportMode?: ExportMode;
+  errorMessage?: string;
+  updatedAt?: string;
+  artifacts?: {
+    zipPath?: string;
+    reportPath?: string;
+    previewPath?: string;
+  };
+};
 type ExportEngine =
   | "component-module"
   | "page-node-tree"
@@ -113,6 +126,7 @@ export function App() {
   const [selectedComponentIds, setSelectedComponentIds] = useState<string[]>(
     [],
   );
+  const [activeJob, setActiveJob] = useState<JobSnapshot | null>(null);
 
   const simplified = useMemo(() => simplifySelection(selection), [selection]);
   const selectionLabel =
@@ -178,6 +192,37 @@ export function App() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!activeJob) return;
+    if (activeJob.status === "completed" || activeJob.status === "failed") {
+      return;
+    }
+
+    let active = true;
+    const baseUrl = normalizeApiBaseUrl(apiBaseUrl);
+    const poll = async () => {
+      try {
+        const response = await fetch(`${baseUrl}/api/jobs/${activeJob.id}`);
+        if (!response.ok) return;
+        const next = (await response.json()) as JobSnapshot;
+        if (!active) return;
+        setActiveJob(next);
+      } catch (error) {
+        log("warn", "Could not refresh job status", error);
+      }
+    };
+
+    void poll();
+    const interval = window.setInterval(() => {
+      void poll();
+    }, 1800);
+
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [activeJob?.id, activeJob?.status, apiBaseUrl]);
 
   async function onCreateJob() {
     const captureSource =
@@ -304,6 +349,19 @@ export function App() {
         project: project ?? undefined,
         context: { ...(context ?? {}), debug },
       };
+      log("info", "Prepared plugin export payload", {
+        exportMode,
+        sourceUrl: sourceUrl.trim() || resolvedSourceUrl,
+        selectedNodeCount: pluginCapture.selectedNodes.length,
+        pageCount: fullSiteRoots?.pages.length ?? 0,
+        componentCount: components.length,
+        codeFileCount: Array.isArray((context as any)?.codeFiles)
+          ? (context as any).codeFiles.length
+          : 0,
+        cmsCollectionCount: Array.isArray((context as any)?.cmsCollections)
+          ? (context as any).cmsCollections.length
+          : 0,
+      });
 
       const effectiveSourceUrl =
         sourceUrl.trim() ||
@@ -311,18 +369,16 @@ export function App() {
         (project
           ? `framer://project/${project.id}`
           : "framer://project/unknown");
-      const response = await fetch(
-        `${apiBaseUrl.replace(/\/$/, "")}/api/jobs`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            sourceUrl: effectiveSourceUrl,
-            exportMode,
-            pluginCapture,
-          }),
-        },
-      );
+      const baseUrl = normalizeApiBaseUrl(apiBaseUrl);
+      const response = await fetch(`${baseUrl}/api/jobs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sourceUrl: effectiveSourceUrl,
+          exportMode,
+          pluginCapture,
+        }),
+      });
 
       if (!response.ok) {
         const text = await response.text().catch(() => "");
@@ -335,16 +391,12 @@ export function App() {
         );
       }
 
-      const job = (await response.json()) as { id: string };
+      const job = (await response.json()) as JobSnapshot;
+      setActiveJob(job);
       log("info", "Job created", job);
-      const jobUrl = `${apiBaseUrl.replace(/\/$/, "")}/jobs/${job.id}`;
-
-      try {
-        // @ts-expect-error - not all SDK typings include openURL yet.
-        await framer.openURL(jobUrl);
-      } catch {
-        framer.notify(`Created job: ${job.id}`, { variant: "success" });
-      }
+      framer.notify("Export queued. Completion is confirmed after build and render checks.", {
+        variant: "info",
+      });
     } catch (error) {
       if (error instanceof FramerPluginClosedError) return;
       log("error", "Unhandled error in create job", error);
@@ -396,6 +448,7 @@ export function App() {
 
   return (
     <main
+      className="plugin-shell"
       style={{
         padding: 12,
         display: "grid",
@@ -406,7 +459,7 @@ export function App() {
         boxSizing: "border-box",
         overflow: "hidden",
         position: "relative",
-        gridTemplateRows: "auto auto auto auto auto 1fr auto",
+        gridTemplateRows: "auto auto auto auto auto auto 1fr auto",
       }}
     >
       <div
@@ -417,7 +470,12 @@ export function App() {
           gap: 10,
         }}
       >
-        <div style={{ fontWeight: 700, fontSize: 14 }}>Coderelay Export</div>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 15 }}>Coderelay Export</div>
+          <div style={{ fontSize: 11, opacity: 0.65, marginTop: 2 }}>
+            Framer to code with runtime fidelity checks
+          </div>
+        </div>
         <div
           role="button"
           tabIndex={0}
@@ -441,26 +499,29 @@ export function App() {
         </div>
       </div>
 
+      <JobStatusCard
+        job={activeJob}
+        apiBaseUrl={apiBaseUrl}
+        onOpenUrl={(url) => {
+          void openFramerUrl(url);
+        }}
+      />
+
       <label style={{ display: "grid", gap: 6 }}>
         <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.8 }}>
-          Published page URL (optional override)
+          Published site URL
         </div>
         <input
           value={sourceUrl}
           onChange={(event) => setSourceUrl(event.target.value)}
-          placeholder="https://your-site.framer.website/"
+          placeholder="https://talktoaugust.com/"
+          className="plugin-input"
           style={{
-            height: 36,
-            minWidth: 0,
             width: "100%",
-            padding: "0 10px",
-            borderRadius: 8,
-            border: "1px solid rgba(0,0,0,0.15)",
-            outline: "none",
           }}
         />
         <div style={{ fontSize: 11, opacity: 0.7 }}>
-          Using:{" "}
+          Runtime source:{" "}
           <code style={{ overflowWrap: "anywhere" }}>
             {sourceUrl.trim() ||
               resolvedSourceUrl ||
@@ -471,7 +532,7 @@ export function App() {
 
       <div style={{ display: "grid", gap: 8 }}>
         <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.8 }}>
-          Export mode
+          What do you want to export?
         </div>
         <div
           role="radiogroup"
@@ -503,52 +564,49 @@ export function App() {
                     setExportMode(value);
                   }
                 }}
+                title={getModeDescription(value, selectionLabel, components.length)}
+                className={[
+                  "plugin-toggle",
+                  active ? "plugin-toggle-active" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
                 style={{
-                  height: 34,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  borderRadius: 8,
-                  border: active
-                    ? "1px solid rgba(0,0,0,0.82)"
-                    : "1px solid rgba(0,0,0,0.15)",
-                  background: active ? "#111" : "rgba(255,255,255,0.92)",
-                  color: active ? "#fff" : "#111",
-                  fontSize: 12,
-                  fontWeight: 800,
-                  cursor: "pointer",
-                  userSelect: "none",
+                  opacity: active ? 1 : 0.92,
                 }}
               >
-                {label}
+                <span>{label}</span>
               </div>
             );
           })}
+        </div>
+        <div style={{ fontSize: 11, opacity: 0.68, lineHeight: 1.35 }}>
+          {getModeDescription(exportMode, selectionLabel, components.length)}
         </div>
       </div>
 
       <label style={{ display: "grid", gap: 6 }}>
         <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.8 }}>
-          API base URL
+          Local dashboard URL
         </div>
         <input
           value={apiBaseUrl}
           onChange={(event) => setApiBaseUrl(event.target.value)}
           placeholder="http://localhost:3000"
+          className="plugin-input"
           style={{
-            height: 36,
-            minWidth: 0,
             width: "100%",
-            padding: "0 10px",
-            borderRadius: 8,
-            border: "1px solid rgba(0,0,0,0.15)",
-            outline: "none",
           }}
         />
       </label>
 
-      <div style={{ fontSize: 12, opacity: 0.8 }}>
-        Selection: <strong>{selectionLabel}</strong>
+      <div className="plugin-summary-row">
+        <span>
+          Selection: <strong>{selectionLabel}</strong>
+        </span>
+        <span>
+          Components: <strong>{components.length}</strong>
+        </span>
       </div>
 
       <details>
@@ -604,28 +662,18 @@ export function App() {
                   }
                 }}
                 style={{
-                  height: 28,
-                  padding: "0 10px",
-                  borderRadius: 999,
-                  border: "1px solid rgba(0,0,0,0.18)",
-                  background: "rgba(255,255,255,0.9)",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  fontWeight: 800,
                   cursor: "pointer",
-                  userSelect: "none",
                 }}
+                className="plugin-chip"
               >
                 {allComponentsSelected ? "Unselect all" : "Select all"}
               </span>
             ) : null}
           </div>
           <div
+            className="plugin-list"
             style={{
-              border: "1px solid rgba(0,0,0,0.12)",
-              borderRadius: 8,
               maxHeight: 300,
-              overflow: "auto",
             }}
           >
             {components.length === 0 ? (
@@ -638,16 +686,8 @@ export function App() {
                 return (
                   <label
                     key={node.id}
+                    className="plugin-list-row"
                     style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      maxWidth: "100%",
-                      padding: "8px 10px",
-                      borderBottom: "1px solid rgba(0,0,0,0.06)",
-                      fontSize: 12,
-                      cursor: "pointer",
-                      userSelect: "none",
                     }}
                   >
                     <input
@@ -691,17 +731,9 @@ export function App() {
                         }
                       }}
                       style={{
-                        width: 22,
-                        height: 22,
-                        borderRadius: 999,
-                        border: "1px solid rgba(0,0,0,0.18)",
-                        display: "grid",
-                        placeItems: "center",
-                        fontWeight: 900,
-                        fontSize: 12,
-                        opacity: 0.8,
                         cursor: "pointer",
                       }}
+                      className="plugin-icon-button"
                     >
                       i
                     </span>
@@ -720,11 +752,8 @@ export function App() {
       {/* Guideline #7: prefer div role=button over <button> to avoid Framer CSS overrides */}
       <div
         style={{
-          position: "sticky",
-          bottom: 0,
-          paddingTop: 10,
-          background: "var(--framer-color-bg, #fff)",
         }}
+        className="plugin-sticky-footer"
       >
         <div
           role="button"
@@ -765,8 +794,8 @@ export function App() {
         <div
           style={{ fontSize: 11, opacity: 0.7, lineHeight: 1.4, marginTop: 8 }}
         >
-          No auth locally. Sends Framer project metadata to the dashboard
-          worker.
+          Creates a local job. Keep the dashboard and worker running until the
+          status says completed.
         </div>
       </div>
 
@@ -775,14 +804,12 @@ export function App() {
           style={{
             position: "absolute",
             inset: 12,
-            borderRadius: 10,
-            border: "1px solid rgba(0,0,0,0.18)",
-            background: "rgba(255,255,255,0.96)",
             padding: 10,
             display: "grid",
             gridTemplateRows: "auto 1fr",
             gap: 8,
           }}
+          className="plugin-overlay"
         >
           <div
             style={{
@@ -813,12 +840,9 @@ export function App() {
             </div>
           </div>
           <div
+            className="plugin-code"
             style={{
               overflow: "auto",
-              borderRadius: 8,
-              border: "1px solid rgba(0,0,0,0.1)",
-              background: "#fff",
-              padding: 8,
               fontFamily:
                 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
               fontSize: 10,
@@ -848,6 +872,118 @@ export function App() {
       ) : null}
     </main>
   );
+}
+
+function JobStatusCard({
+  job,
+  apiBaseUrl,
+  onOpenUrl,
+}: {
+  job: JobSnapshot | null;
+  apiBaseUrl: string;
+  onOpenUrl: (url: string) => void;
+}) {
+  const baseUrl = normalizeApiBaseUrl(apiBaseUrl);
+
+  if (!job) {
+    return (
+      <div className="job-card job-card-empty">
+        <div>
+          <div className="job-card-title">Ready</div>
+          <div className="job-card-copy">
+            Choose a mode, confirm the source URL, then start an export.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const dashboardUrl = `${baseUrl}/jobs/${job.id}`;
+  const zipUrl = `${baseUrl}/api/jobs/${job.id}/artifact?type=zip`;
+  const statusCopy =
+    job.status === "completed"
+      ? "Export complete. Download the ZIP or inspect the dashboard."
+      : job.status === "failed"
+        ? job.errorMessage ?? "The worker failed before artifacts were ready."
+        : job.status === "running"
+          ? "Worker is generating the code and comparing fidelity."
+          : "Job created. Waiting for the local worker to pick it up.";
+
+  return (
+    <div className={["job-card", `job-card-${job.status}`].join(" ")}>
+      <div className="job-card-top">
+        <div>
+          <div className="job-card-title">Latest export</div>
+          <div className="job-card-id">{job.id}</div>
+        </div>
+        <span className="job-pill">{job.status}</span>
+      </div>
+      <div className="job-card-copy">{statusCopy}</div>
+      <div className="job-card-actions">
+        <div
+          role="button"
+          tabIndex={0}
+          className="job-action"
+          onClick={() => onOpenUrl(dashboardUrl)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              onOpenUrl(dashboardUrl);
+            }
+          }}
+        >
+          Open dashboard
+        </div>
+        {job.status === "completed" && job.artifacts?.zipPath ? (
+          <div
+            role="button"
+            tabIndex={0}
+            className="job-action job-action-primary"
+            onClick={() => onOpenUrl(zipUrl)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onOpenUrl(zipUrl);
+              }
+            }}
+          >
+            Download ZIP
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function getModeDescription(
+  mode: ExportMode,
+  selectionLabel: string,
+  componentCount: number,
+) {
+  if (mode === "full-site") {
+    return `Best for complete websites. Exports pages, CMS metadata, components, styles, and runtime capture from the published URL.`;
+  }
+
+  if (mode === "components") {
+    return `Best for a component library. ${componentCount} component${
+      componentCount === 1 ? "" : "s"
+    } detected in this project.`;
+  }
+
+  return `Best for one section or screen. Current canvas selection: ${selectionLabel}.`;
+}
+
+function normalizeApiBaseUrl(value: string) {
+  return (value.trim() || "http://localhost:3000").replace(/\/$/, "");
+}
+
+async function openFramerUrl(url: string) {
+  try {
+    // @ts-expect-error - not all SDK typings include openURL yet.
+    await framer.openURL(url);
+  } catch {
+    framer.notify(url, { variant: "info" });
+  }
 }
 
 async function collectPluginContext(input: {
@@ -1154,6 +1290,17 @@ function sanitizeNode(node: unknown) {
   return sanitizeObject({
     id: raw.id,
     name: raw.name,
+    title: raw.title,
+    pageTitle: raw.pageTitle,
+    displayName: raw.displayName,
+    slug: raw.slug,
+    path: raw.path,
+    pathname: raw.pathname,
+    pagePath: raw.pagePath,
+    route: raw.route,
+    routePath: raw.routePath,
+    url: raw.url,
+    canonicalPath: raw.canonicalPath,
     type: raw.type,
     visible: raw.visible,
     locked: raw.locked,
@@ -1562,10 +1709,7 @@ async function captureSelectionMetadata(
     const rootId = String((root as any)?.id ?? "");
     if (!rootId) continue;
 
-    const rootName =
-      typeof (root as any)?.name === "string"
-        ? String((root as any).name)
-        : `Root ${rootIndex + 1}`;
+    const rootName = readNodeLabel(root) ?? `Root ${rootIndex + 1}`;
     const rootKind = options.rootKinds?.[rootId] ?? "component";
     const queue: Array<{
       node: CapturableNode;
@@ -1710,6 +1854,51 @@ async function captureSelectionMetadata(
   }
 
   return [...richNodes, ...structuralNodes].slice(0, totalMaxNodes);
+}
+
+function readNodeLabel(node: unknown) {
+  if (!node || typeof node !== "object") return undefined;
+  const raw = node as Record<string, unknown>;
+  for (const key of [
+    "name",
+    "title",
+    "pageTitle",
+    "displayName",
+    "slug",
+    "path",
+    "pathname",
+    "pagePath",
+    "route",
+    "routePath",
+    "url",
+    "canonicalPath",
+  ]) {
+    const value = raw[key];
+    if (typeof value !== "string") continue;
+    const normalized = normalizeNodeLabel(value);
+    if (normalized) return normalized;
+  }
+  return undefined;
+}
+
+function normalizeNodeLabel(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (/^https?:\/\//.test(trimmed)) {
+    try {
+      return normalizeNodeLabel(new URL(trimmed).pathname);
+    } catch {
+      return "";
+    }
+  }
+  const path = trimmed.split(/[?#]/)[0] ?? "";
+  if (path === "/" || path.toLowerCase() === "home") return "Home";
+  const segment = path
+    .replace(/^\/+|\/+$/g, "")
+    .split("/")
+    .filter(Boolean)
+    .at(-1);
+  return (segment || path).replace(/[-_]+/g, " ");
 }
 
 async function getScopedRichDescendants(node: CapturableNode) {

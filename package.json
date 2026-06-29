@@ -5,11 +5,14 @@
   "type": "module",
   "scripts": {
     "export:test": "tsx apps/exporter-cli/src/index.ts",
-    "dev:web": "cd apps/web && next dev -p 3000",
-    "dev:worker": "tsx apps/worker/src/index.ts",
+    "export:compiled": "npm run build && node dist/apps/exporter-cli/src/index.js",
+    "dev:web": "next dev apps/web -p 3000",
+    "dev:worker": "tsx watch apps/worker/src/index.ts",
     "dev": "npm run dev:web",
     "test:exporter": "node --import tsx --test packages/**/*.test.ts",
+    "check:compiled-runtime": "npm run build && node scripts/check-compiled-runtime.mjs",
     "typecheck": "tsc --noEmit",
+    "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "tsc -p tsconfig.json",
     "format": "prettier --write ."
   },

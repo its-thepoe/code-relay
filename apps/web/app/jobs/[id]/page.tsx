@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { readJob } from "../../../lib/jobs-store";
+import { AutoRefresh } from "../auto-refresh";
 
 export const dynamic = "force-dynamic";
 
@@ -19,9 +20,16 @@ export default async function JobPage({
   const hasZip = Boolean(job.artifacts?.zipPath);
   const hasReport = Boolean(job.artifacts?.reportPath);
   const hasPreview = Boolean(job.artifacts?.previewPath);
+  const isPending = job.status === "queued" || job.status === "running";
+  const refreshSignature = `${job.id}:${job.status}:${job.updatedAt}`;
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-8">
+      <AutoRefresh
+        enabled={isPending}
+        initialSignature={refreshSignature}
+        statusUrl={`/api/jobs/${job.id}`}
+      />
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
@@ -88,35 +96,49 @@ export default async function JobPage({
                 Preview unavailable
               </div>
             )}
-            <Link
-              className="inline-flex h-10 items-center justify-center rounded-lg bg-zinc-950 px-3 text-sm font-extrabold text-white hover:bg-zinc-900"
-              href={`/api/jobs/${job.id}/artifact?type=zip`}
-              download
-              target="_blank"
-              rel="noreferrer"
-              aria-disabled={!hasZip}
-            >
-              Download ZIP
-            </Link>
-            <Link
-              className="inline-flex h-10 items-center justify-center rounded-lg border border-black/10 bg-white px-3 text-sm font-bold text-zinc-950 hover:bg-zinc-50"
-              href={`/api/jobs/${job.id}/artifact?type=report`}
-              target="_blank"
-              rel="noreferrer"
-              aria-disabled={!hasReport}
-            >
-              Open Report JSON
-            </Link>
+            {hasZip ? (
+              <Link
+                className="inline-flex h-10 items-center justify-center rounded-lg bg-zinc-950 px-3 text-sm font-extrabold text-white hover:bg-zinc-900"
+                href={`/api/jobs/${job.id}/artifact?type=zip`}
+                download
+                target="_blank"
+                rel="noreferrer"
+              >
+                Download ZIP
+              </Link>
+            ) : (
+              <div className="inline-flex h-10 items-center justify-center rounded-lg bg-zinc-200 px-3 text-sm font-extrabold text-zinc-500">
+                ZIP unavailable
+              </div>
+            )}
+            {hasReport ? (
+              <Link
+                className="inline-flex h-10 items-center justify-center rounded-lg border border-black/10 bg-white px-3 text-sm font-bold text-zinc-950 hover:bg-zinc-50"
+                href={`/api/jobs/${job.id}/artifact?type=report`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open Report JSON
+              </Link>
+            ) : (
+              <div className="inline-flex h-10 items-center justify-center rounded-lg border border-dashed border-black/10 bg-zinc-50 px-3 text-sm font-semibold text-zinc-500">
+                Report unavailable
+              </div>
+            )}
           </div>
 
           <div className="mt-4 rounded-lg border border-black/10 bg-zinc-50 p-3 text-xs text-zinc-700">
             {hasZip || hasReport || hasPreview ? (
               <span>
-                Artifacts are ready when the worker completes the job.
+                Export completed. Artifacts are ready.
+              </span>
+            ) : job.status === "failed" ? (
+              <span>
+                Export failed. The error above is from the worker process.
               </span>
             ) : (
               <span>
-                Artifacts are still pending. Make sure the worker is running.
+                Export is still running. Status updates automatically.
               </span>
             )}
           </div>

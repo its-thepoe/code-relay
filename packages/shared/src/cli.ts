@@ -3,6 +3,7 @@ export type CliArgs = {
   outDir?: string;
   name?: string;
   selector?: string;
+  exportMode?: "selection" | "components" | "full-site";
   maxAttempts?: number;
   targetFidelity?: number;
 };
@@ -25,6 +26,18 @@ export function parseCliArgs(args: string[]): CliArgs {
       index += 1;
     } else if (arg === "--selector") {
       parsed.selector = next;
+      index += 1;
+    } else if (arg === "--export-mode") {
+      if (
+        next !== "selection" &&
+        next !== "components" &&
+        next !== "full-site"
+      ) {
+        throw new Error(
+          `Invalid --export-mode "${next ?? ""}". Expected selection, components, or full-site.`,
+        );
+      }
+      parsed.exportMode = next;
       index += 1;
     } else if (arg === "--max-attempts") {
       parsed.maxAttempts = Number(next);

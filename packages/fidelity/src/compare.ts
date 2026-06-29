@@ -75,6 +75,7 @@ const viewports: Record<ViewportName, { width: number; height: number }> = {
   tablet: { width: 768, height: 1024 },
   mobile: { width: 390, height: 844 },
 };
+const PREVIEW_INSPECTION_NODE_LIMIT = 120;
 
 export async function compareGeneratedPreview(
   input: CompareInput,
@@ -85,15 +86,23 @@ export async function compareGeneratedPreview(
   const comparisonViewports = activeOrAllViewports(input.ir);
   const activeViewports = (Object.keys(input.ir.runtimeCapture.viewports) as ViewportName[])
     .filter((name) => input.ir.runtimeCapture.viewports[name]?.screenshotPath?.length);
-  const previewValidation = await validateGeneratedPreview({
-    previewHtmlPath: input.previewHtmlPath,
-    ir: input.ir,
-    viewports: comparisonViewports,
-  });
-  const diagnostics = await tryCollectAggregateComparisonDiagnostics(
-    input.previewHtmlPath,
-    input.ir,
-    comparisonViewports,
+  const previewValidation = await withTimeout(
+    validateGeneratedPreview({
+      previewHtmlPath: input.previewHtmlPath,
+      ir: input.ir,
+      viewports: comparisonViewports,
+    }),
+    45_000,
+    createBlockedPreviewValidation("Preview validation timed out."),
+  );
+  const diagnostics = await withTimeout(
+    tryCollectAggregateComparisonDiagnostics(
+      input.previewHtmlPath,
+      input.ir,
+      comparisonViewports,
+    ),
+    45_000,
+    undefined,
   );
   if (diagnostics) {
     await fs.writeFile(
@@ -103,66 +112,31 @@ export async function compareGeneratedPreview(
   }
   const hasOriginalScreens = activeViewports.length > 0;
   if (!hasOriginalScreens) {
-    const nodeMatch = average(
-      input.ir.nodeMatches.map((match) => match.confidence * 100),
-    );
-    const typography = typographyScore(input.ir);
-    const assets = assetScore(input.ir);
-    const motion = motionScore(input.ir);
-    const breakpointScores = Object.fromEntries(
-      allViewports.map((viewport) => [
-        viewport,
-        weightedAverageDefined([
-          [nodeMatch, 0.35],
-          [typography, 0.2],
-          [assets, 0.15],
-          [scorePreviewValidationByViewport(previewValidation, viewport), 0.3],
-        ]),
-      ]),
-    ) as Partial<Record<ViewportName, number>>;
-    const desktop = breakpointScores.desktop ?? 0;
-    const laptop = breakpointScores.laptop ?? desktop;
-    const tablet = breakpointScores.tablet ?? laptop;
-    const mobile = breakpointScores.mobile ?? tablet;
-    const overall = weightedAverage([
-      [desktop, 0.38],
-      [laptop, 0.12],
-      [tablet, 0.16],
-      [mobile, 0.28],
-      [nodeMatch, 0.06],
-    ]);
     return {
-      fidelity: {
-        desktop,
-        laptop,
-        tablet,
-        mobile,
-        overall,
-        layout: Math.min(
-          100,
-          weightedAverage([
-            [desktop, 0.6],
-            [tablet, 0.15],
-            [mobile, 0.25],
-          ]) + 4,
-        ),
-        typography,
-        color: Math.min(100, desktop + 8),
-        assets,
-        motion,
-        nodeMatch,
-        breakpointScores,
-      },
+      fidelity: scoreWithoutGeneratedScreens(input.ir, allViewports, previewValidation),
       previewValidation,
       diagnostics,
     };
   }
 
-  const generated = await captureGeneratedPreview(
-    input.previewHtmlPath,
-    input.attemptDir,
-    input.ir,
+  const generated = await withTimeout(
+    captureGeneratedPreview(input.previewHtmlPath, input.attemptDir, input.ir).catch(
+      () => null,
+    ),
+    60_000,
+    null,
   );
+  if (!generated) {
+    return {
+      fidelity: scoreWithoutGeneratedScreens(
+        input.ir,
+        allViewports,
+        previewValidation,
+      ),
+      diagnostics,
+      previewValidation,
+    };
+  }
   const breakpointScores = Object.fromEntries(
     await Promise.all(
       activeViewports.map(async (name) => [
@@ -227,6 +201,113 @@ function activeOrAllViewports(ir: ExportIR) {
   return active.length > 0
     ? active
     : (Object.keys(ir.runtimeCapture.viewports) as ViewportName[]);
+}
+
+function scoreWithoutGeneratedScreens(
+  ir: ExportIR,
+  allViewports: ViewportName[],
+  previewValidation: PreviewValidationResult | undefined,
+): FidelityScores {
+  const nodeMatch = average(ir.nodeMatches.map((match) => match.confidence * 100));
+  const typography = typographyScore(ir);
+  const assets = assetScore(ir);
+  const motion = motionScore(ir);
+  const breakpointScores = Object.fromEntries(
+    allViewports.map((viewport) => [
+      viewport,
+      weightedAverageDefined([
+        [nodeMatch, 0.35],
+        [typography, 0.2],
+        [assets, 0.15],
+        [scorePreviewValidationByViewport(previewValidation, viewport), 0.3],
+      ]),
+    ]),
+  ) as Partial<Record<ViewportName, number>>;
+  const desktop = breakpointScores.desktop ?? 0;
+  const laptop = breakpointScores.laptop ?? desktop;
+  const tablet = breakpointScores.tablet ?? laptop;
+  const mobile = breakpointScores.mobile ?? tablet;
+  const overall = weightedAverage([
+    [desktop, 0.38],
+    [laptop, 0.12],
+    [tablet, 0.16],
+    [mobile, 0.28],
+    [nodeMatch, 0.06],
+  ]);
+
+  return {
+    desktop,
+    laptop,
+    tablet,
+    mobile,
+    overall,
+    layout: Math.min(
+      100,
+      weightedAverage([
+        [desktop, 0.6],
+        [tablet, 0.15],
+        [mobile, 0.25],
+      ]) + 4,
+    ),
+    typography,
+    color: Math.min(100, desktop + 8),
+    assets,
+    motion,
+    nodeMatch,
+    breakpointScores,
+  };
+}
+
+function createBlockedPreviewValidation(reason: string): PreviewValidationResult {
+  return {
+    status: "blocked",
+    reason,
+    summary: {
+      viewportsValidated: 0,
+      inspectedNodes: 0,
+      foundNodes: 0,
+      nodesWithNonDefaultStyles: 0,
+      nodesExpectingMotion: 0,
+      nodesWithNonDefaultMotion: 0,
+    },
+  };
+}
+
+function selectRepresentativePreviewNodes(ir: ExportIR) {
+  return flattenExportTree(ir.exportTree ?? [])
+    .filter((node) => node.source.runtimeNodeId || node.source.domPath)
+    .slice(0, PREVIEW_INSPECTION_NODE_LIMIT);
+}
+
+async function waitForPreviewReady(page: Page) {
+  await page
+    .waitForFunction(
+      () =>
+        document.readyState !== "loading" &&
+        Boolean(document.querySelector("[data-coderelay-source], body")),
+      undefined,
+      { timeout: 10_000 },
+    )
+    .catch(() => undefined);
+  await page.waitForTimeout(250);
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  fallback: T,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timeout = setTimeout(() => resolve(fallback), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 export function scorePreviewValidation(
@@ -359,8 +440,10 @@ async function captureGeneratedPreview(
     >) {
       const page = await browser.newPage({ viewport });
       await page.goto(`file://${previewHtmlPath}`, {
-        waitUntil: "networkidle",
+        waitUntil: "domcontentloaded",
+        timeout: 20_000,
       });
+      await waitForPreviewReady(page);
       if (ir.runtimeCapture.mode === "page") {
         await page.screenshot({
           path: output[name],
@@ -395,9 +478,7 @@ async function collectComparisonDiagnostics(
 ): Promise<ComparisonDiagnostics> {
   const browser = await chromium.launch({ headless: true });
   try {
-    const sourceNodes = flattenExportTree(ir.exportTree ?? []).filter(
-      (node) => node.source.runtimeNodeId || node.source.domPath,
-    );
+    const sourceNodes = selectRepresentativePreviewNodes(ir);
     const generatedNodes = await inspectGeneratedPreviewNodes({
       previewHtmlPath,
       viewport,
@@ -469,7 +550,11 @@ export async function inspectGeneratedPreviewNodes(input: {
   const browser = input.browser ?? (await chromium.launch({ headless: true }));
   try {
     const page = await browser.newPage({ viewport: viewports[input.viewport] });
-    await page.goto(`file://${input.previewHtmlPath}`, { waitUntil: "networkidle" });
+    await page.goto(`file://${input.previewHtmlPath}`, {
+      waitUntil: "domcontentloaded",
+      timeout: 20_000,
+    });
+    await waitForPreviewReady(page);
     const nodes: GeneratedPreviewNodeInspection[] = [];
     for (const entry of input.nodeClasses) {
       const locator = page.locator(`.${entry.className}`).first();
@@ -603,9 +688,7 @@ async function collectPreviewValidationForViewport(
   ir: ExportIR,
   viewport: ViewportName,
 ): Promise<PreviewValidationViewportStats> {
-  const sourceNodes = flattenExportTree(ir.exportTree ?? []).filter(
-    (node) => node.source.runtimeNodeId || node.source.domPath,
-  );
+  const sourceNodes = selectRepresentativePreviewNodes(ir);
   const inspectedNodes = await inspectGeneratedPreviewNodes({
     previewHtmlPath,
     viewport,

@@ -29,9 +29,38 @@ export async function GET(
 ) {
   const { id } = await params;
   const job = await readJob(id);
-  if (!job?.artifacts) {
+  if (!job) {
     return NextResponse.json(
-      { error: "Job not found or has no artifacts yet." },
+      { error: "Job not found." },
+      { status: 404, headers: corsHeaders(request) },
+    );
+  }
+
+  if (job.status === "queued" || job.status === "running") {
+    return NextResponse.json(
+      {
+        error: "Artifacts are not ready yet.",
+        status: job.status,
+        updatedAt: job.updatedAt,
+      },
+      { status: 409, headers: corsHeaders(request) },
+    );
+  }
+
+  if (job.status === "failed") {
+    return NextResponse.json(
+      {
+        error: job.errorMessage ?? "Export failed before artifacts were ready.",
+        status: job.status,
+        updatedAt: job.updatedAt,
+      },
+      { status: 422, headers: corsHeaders(request) },
+    );
+  }
+
+  if (!job.artifacts) {
+    return NextResponse.json(
+      { error: "Artifact metadata is missing for this completed job." },
       { status: 404, headers: corsHeaders(request) },
     );
   }
@@ -56,7 +85,15 @@ export async function GET(
   }
 
   const resolved = path.resolve(pickPath);
-  const data = await fs.readFile(resolved);
+  let data: Buffer;
+  try {
+    data = await fs.readFile(resolved);
+  } catch {
+    return NextResponse.json(
+      { error: "Artifact file is missing on disk.", path: resolved },
+      { status: 404, headers: corsHeaders(request) },
+    );
+  }
   const filename =
     type === "zip"
       ? `${id}.zip`

@@ -92,13 +92,21 @@ export async function readAllJobs(): Promise<LocalExportJob[]> {
 
 export async function readJob(id: string): Promise<LocalExportJob | null> {
   await ensureDirs();
-  const filePath = jobPath(id);
-  try {
-    const raw = await fs.readFile(filePath, "utf8");
-    return JSON.parse(raw) as LocalExportJob;
-  } catch {
-    return null;
+  const paths =
+    legacyJobsDir === jobsDir
+      ? [jobPath(id)]
+      : [jobPath(id), path.join(legacyJobsDir, `${id}.json`)];
+
+  for (const filePath of paths) {
+    try {
+      const raw = await fs.readFile(filePath, "utf8");
+      return JSON.parse(raw) as LocalExportJob;
+    } catch {
+      // Try the next known local job directory.
+    }
   }
+
+  return null;
 }
 
 export async function writeJob(job: LocalExportJob) {
@@ -145,6 +153,11 @@ export async function createJobFromRequest(
   const exportMode = normalizeExportMode(
     input?.exportMode ?? pluginCapture?.context?.exportMode,
   );
+  if (!exportMode) {
+    throw new Error(
+      "Missing exportMode: request must specify selection, components, or full-site.",
+    );
+  }
   const id = `job_${crypto.randomBytes(8).toString("hex")}`;
   const now = new Date().toISOString();
 
@@ -163,8 +176,9 @@ export async function createJobFromRequest(
   return job;
 }
 
-function normalizeExportMode(value: unknown): LocalExportMode {
+function normalizeExportMode(value: unknown): LocalExportMode | undefined {
+  if (value === "selection") return "selection";
   if (value === "full-site") return "full-site";
   if (value === "components") return "components";
-  return "selection";
+  return undefined;
 }
