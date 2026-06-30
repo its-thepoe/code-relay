@@ -161,15 +161,20 @@ function scoreMatch(
 ): NodeMatch {
   const matchReasons: NodeMatch["matchReasons"] = [];
   let score = 0;
+  const pluginText =
+    pluginNode.text ??
+    (pluginNode.type?.toLowerCase().includes("text")
+      ? pluginNode.name
+      : undefined);
 
-  if (pluginNode.text && runtimeNode.text) {
+  if (pluginText && runtimeNode.text) {
     const textScore = similarity(
-      normalize(pluginNode.text),
+      normalize(pluginText),
       normalize(runtimeNode.text),
     );
 
     if (textScore > 0.55) {
-      score += textScore * 0.5;
+      score += textScore * 0.6;
       matchReasons.push("text");
     }
   }
@@ -183,10 +188,7 @@ function scoreMatch(
     }
   }
 
-  if (
-    pluginNode.type &&
-    pluginNode.type.toLowerCase() === runtimeNode.tag.toLowerCase()
-  ) {
+  if (pluginTypeMatchesTag(pluginNode.type, runtimeNode.tag)) {
     score += 0.08;
     matchReasons.push("type");
   }
@@ -252,6 +254,35 @@ function scoreMatch(
     confidence: Math.min(1, Number(score.toFixed(3))),
     matchReasons,
   };
+}
+
+function pluginTypeMatchesTag(type: string | undefined, tag: string) {
+  const pluginType = type?.toLowerCase() ?? "";
+  const runtimeTag = tag.toLowerCase();
+  if (pluginType === runtimeTag) return true;
+  if (pluginType.includes("text")) {
+    return [
+      "p",
+      "span",
+      "li",
+      "a",
+      "button",
+      "label",
+      "strong",
+      "em",
+      "small",
+      "blockquote",
+      "h1",
+      "h2",
+      "h3",
+      "h4",
+      "h5",
+      "h6",
+    ].includes(runtimeTag);
+  }
+  if (pluginType.includes("image")) return runtimeTag === "img";
+  if (pluginType.includes("svg")) return runtimeTag === "svg";
+  return pluginType.includes("frame") && ["div", "main", "section"].includes(runtimeTag);
 }
 
 function normalize(value: string) {

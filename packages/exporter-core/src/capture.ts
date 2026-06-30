@@ -14,6 +14,7 @@ import type {
   Rect,
   RuntimeCapture,
   RuntimeNode,
+  RuntimeRouteCapture,
   ViewportName,
 } from "../../shared/src/types.js";
 
@@ -21,6 +22,13 @@ type CaptureInput = {
   url: string;
   workDir: string;
   selector?: string;
+  routePath?: string;
+};
+
+type RouteCaptureInput = {
+  originUrl: string;
+  routes: Array<{ path: string; title?: string }>;
+  workDir: string;
 };
 
 const viewports: Record<ViewportName, { width: number; height: number }> = {
@@ -128,59 +136,157 @@ const INTERACTION_STYLE_PROPERTIES = [
 export async function captureRuntime(
   input: CaptureInput,
 ): Promise<RuntimeCapture> {
-  const captureDir = path.join(input.workDir, "original");
-  await mkdirp(captureDir);
-
   const browser = await chromium.launch({ headless: true });
 
   try {
-    const captures = await Promise.all(
-      (Object.keys(viewports) as ViewportName[]).map((viewportName) =>
-        captureViewport(browser, input, viewportName, captureDir),
-      ),
-    );
-    const desktop =
-      captures.find((capture) => capture.viewportName === "desktop") ??
-      captures[0]!;
-    const stylesheetUrls = unique(
-      captures.flatMap((capture) => capture.stylesheetUrls),
-    );
-
-    return {
-      url: input.url,
-      title: desktop.title,
-      mode: input.selector ? "section" : "page",
-      viewports: Object.fromEntries(
-        captures.map((capture) => [capture.viewportName, capture.viewport]),
-      ) as RuntimeCapture["viewports"],
-      nodes: desktop.nodes,
-      nodesByViewport: Object.fromEntries(
-        captures.map((capture) => [capture.viewportName, capture.nodes]),
-      ),
-      captureDiagnostics: {
-        breakpointsCaptured: captures.map((capture) => capture.viewportName),
-        fontReadiness: Object.fromEntries(
-          captures.map((capture) => [
-            capture.viewportName,
-            capture.fontsReady,
-          ]),
-        ),
-        stylesheetCount: Object.fromEntries(
-          captures.map((capture) => [
-            capture.viewportName,
-            capture.stylesheetUrls.length,
-          ]),
-        ),
-        nodeCount: Object.fromEntries(
-          captures.map((capture) => [capture.viewportName, capture.nodes.length]),
-        ),
-      },
-      framerStyleCss: desktop.framerStyleCss,
-      stylesheetUrls,
-    };
+    return await captureRuntimeWithBrowser(browser, input);
   } finally {
     await browser.close();
   }
+}
+
+export async function captureRuntimeRoutes(
+  input: RouteCaptureInput,
+): Promise<RuntimeCapture> {
+  const routes = unique(
+    input.routes
+      .map((route) => ({
+        path: normalizeRoutePath(route.path),
+        title: route.title,
+      }))
+      .filter((route) => route.path),
+    (route) => route.path,
+  );
+  if (routes.length === 0) {
+    routes.push({ path: "/", title: undefined });
+  }
+
+  const browser = await chromium.launch({ headless: true });
+  const routeCaptures: RuntimeRouteCapture[] = [];
+
+  try {
+    const concurrency = 3;
+    for (let index = 0; index < routes.length; index += concurrency) {
+      const batch = routes.slice(index, index + concurrency);
+      const captures = await Promise.all(
+        batch.map(async (route) => {
+          const url = new URL(route.path, input.originUrl).toString();
+          const routeWorkDir = path.join(
+            input.workDir,
+            "routes",
+            routeDirectoryName(route.path),
+          );
+          console.log(
+            "[coderelay:capture:route]",
+            JSON.stringify({ routePath: route.path, url }),
+          );
+          const capture = await captureRuntimeWithBrowser(browser, {
+            url,
+            workDir: routeWorkDir,
+            routePath: route.path,
+          });
+          return {
+            ...capture,
+            title: route.title?.trim() || capture.title,
+            routePath: route.path,
+          };
+        }),
+      );
+      routeCaptures.push(...captures);
+    }
+  } finally {
+    await browser.close();
+  }
+
+  const primary =
+    routeCaptures.find((capture) => capture.routePath === "/") ??
+    routeCaptures[0]!;
+  const stylesheetUrls = unique(
+    routeCaptures.flatMap((capture) => capture.stylesheetUrls ?? []),
+  );
+  const framerStyleCss = Array.from(
+    new Set(
+      routeCaptures
+        .map((capture) => capture.framerStyleCss?.trim())
+        .filter((css): css is string => Boolean(css)),
+    ),
+  ).join("\n\n");
+  return {
+    ...primary,
+    stylesheetUrls,
+    framerStyleCss,
+    routeCaptures,
+  };
+}
+
+async function captureRuntimeWithBrowser(
+  browser: Browser,
+  input: CaptureInput,
+): Promise<RuntimeCapture> {
+  const captureDir = path.join(input.workDir, "original");
+  await mkdirp(captureDir);
+  const captures = await Promise.all(
+    (Object.keys(viewports) as ViewportName[]).map((viewportName) =>
+      captureViewport(browser, input, viewportName, captureDir),
+    ),
+  );
+  const desktop =
+    captures.find((capture) => capture.viewportName === "desktop") ??
+    captures[0]!;
+  const stylesheetUrls = unique(
+    captures.flatMap((capture) => capture.stylesheetUrls),
+  );
+
+  return {
+    url: input.url,
+    title: desktop.title,
+    mode: input.selector ? "section" : "page",
+    viewports: Object.fromEntries(
+      captures.map((capture) => [capture.viewportName, capture.viewport]),
+    ) as RuntimeCapture["viewports"],
+    nodes: desktop.nodes,
+    nodesByViewport: Object.fromEntries(
+      captures.map((capture) => [capture.viewportName, capture.nodes]),
+    ),
+    captureDiagnostics: {
+      breakpointsCaptured: captures.map((capture) => capture.viewportName),
+      fontReadiness: Object.fromEntries(
+        captures.map((capture) => [capture.viewportName, capture.fontsReady]),
+      ),
+      stylesheetCount: Object.fromEntries(
+        captures.map((capture) => [
+          capture.viewportName,
+          capture.stylesheetUrls.length,
+        ]),
+      ),
+      nodeCount: Object.fromEntries(
+        captures.map((capture) => [capture.viewportName, capture.nodes.length]),
+      ),
+    },
+    framerStyleCss: desktop.framerStyleCss,
+    stylesheetUrls,
+  };
+}
+
+function normalizeRoutePath(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "/") return "/";
+  try {
+    const pathname = /^https?:\/\//.test(trimmed)
+      ? new URL(trimmed).pathname
+      : trimmed;
+    return `/${pathname.replace(/^\/+|\/+$/g, "")}`.replace(/\/{2,}/g, "/");
+  } catch {
+    return "/";
+  }
+}
+
+function routeDirectoryName(routePath: string) {
+  if (routePath === "/") return "home";
+  return routePath
+    .replace(/^\/+|\/+$/g, "")
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .slice(0, 120);
 }
 
 export function createSimulatedPluginCapture(
@@ -250,7 +356,7 @@ async function captureViewport(
     });
   }
 
-  const nodes = await extractNodes(page, input.selector);
+  const nodes = await extractNodes(page, input.selector, input.routePath ?? "/");
   const nodesWithInteractions = await collectInteractionStyles(page, nodes);
   const stylesheets = await extractStylesheets(page);
   const framerStyleCss = await downloadStylesheets(stylesheets);
@@ -550,12 +656,15 @@ async function getClip(
 async function extractNodes(
   page: Page,
   selector?: string,
+  routePath = "/",
 ): Promise<RuntimeNode[]> {
   const rootSelector = JSON.stringify(selector ?? null);
+  const route = JSON.stringify(routePath);
   const styleProperties = JSON.stringify(CAPTURED_STYLE_PROPERTIES);
 
   return page.evaluate(`(() => {
     const rootSelector = ${rootSelector}
+    const routePath = ${route}
     const styleProperties = ${styleProperties}
     const root = rootSelector ? document.querySelector(rootSelector) : document.body
     const base = root ?? document.body
@@ -597,9 +706,20 @@ async function extractNodes(
       const tag = element.tagName.toLowerCase()
       if (!textLikeTags.has(tag)) return undefined
 
-      const clone = element.cloneNode(true)
-      clone.querySelectorAll('script, style, noscript, template').forEach((node) => node.remove())
-      const text = clone.innerText?.trim().replace(/\\s+/g, ' ').slice(0, 500)
+      const directText = Array.from(element.childNodes)
+        .filter((node) => node.nodeType === Node.TEXT_NODE)
+        .map((node) => node.textContent || '')
+        .join(' ')
+        .trim()
+        .replace(/\\s+/g, ' ')
+      if (directText) return directText.slice(0, 500)
+
+      const ownsOnlyText =
+        !Array.from(element.querySelectorAll('*')).some((descendant) =>
+          textLikeTags.has(descendant.tagName.toLowerCase())
+        )
+      if (!ownsOnlyText) return undefined
+      const text = element.innerText?.trim().replace(/\\s+/g, ' ').slice(0, 500)
       return text || undefined
     }
 
@@ -638,9 +758,14 @@ async function extractNodes(
         )
 
         return {
-          id: element.id || 'node-' + (index + 1),
+          id: routePath + '::' + (element.id || 'node-' + (index + 1)),
+          routePath,
           tag: element.tagName.toLowerCase(),
           domPath: pathFor(element),
+          parentDomPath:
+            element.parentElement && element.parentElement !== base
+              ? pathFor(element.parentElement)
+              : undefined,
           text: readText(element),
           sectionIndex: section.index,
           sectionName: section.name,
@@ -652,7 +777,12 @@ async function extractNodes(
           },
           attributes: {
             src: element.currentSrc || element.src || undefined,
-            href: element.href || undefined,
+            href:
+              element.href && new URL(element.href, window.location.href).origin === window.location.origin
+                ? new URL(element.href, window.location.href).pathname +
+                  new URL(element.href, window.location.href).search +
+                  new URL(element.href, window.location.href).hash
+                : element.href || undefined,
             alt: element.alt || undefined,
             role: element.getAttribute('role') || undefined,
             className: element.className || undefined,
@@ -688,6 +818,13 @@ async function getPngSize(filePath: string) {
   };
 }
 
-function unique(values: string[]) {
-  return Array.from(new Set(values));
+function unique<T>(values: T[], key?: (value: T) => string) {
+  if (!key) return Array.from(new Set(values));
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    const identity = key(value);
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
 }

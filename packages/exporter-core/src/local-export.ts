@@ -4,6 +4,7 @@ import fs, { writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import path from "node:path";
 import { chromium } from "playwright";
+import { PNG } from "pngjs";
 import { generateNextProject } from "../../codegen/src/next-project.js";
 import { compareGeneratedPreview } from "../../fidelity/src/compare.js";
 import { matchPluginNodesToDom } from "../../matcher/src/match.js";
@@ -22,7 +23,11 @@ import type {
   RuntimeCapture,
   RuntimeNode,
 } from "../../shared/src/types.js";
-import { captureRuntime, createSimulatedPluginCapture } from "./capture.js";
+import {
+  captureRuntime,
+  captureRuntimeRoutes,
+  createSimulatedPluginCapture,
+} from "./capture.js";
 import { buildIntermediateRepresentation } from "./ir.js";
 import { zipDirectory } from "./package.js";
 import {
@@ -62,6 +67,14 @@ export type GeneratedProjectValidation = {
   renderedTextLength: number;
   consoleErrors: string[];
   pageErrors: string[];
+  routes: Array<{
+    path: string;
+    sourceTextLength: number;
+    sourceNodeCount: number;
+    renderedElementCount: number;
+    renderedTextLength: number;
+    screenshotColorCount: number;
+  }>;
 };
 
 type DebugArtifactsManifest = {
@@ -143,11 +156,17 @@ export async function runLocalExport(
     /^https?:\/\//.test(input.url) &&
     input.url.length > 0;
   const runtimeCapture = canCaptureFromUrl
-    ? await captureRuntime({
-        url: input.url!,
-        workDir,
-        selector: input.selector,
-      })
+    ? input.exportMode === "full-site"
+      ? await captureRuntimeRoutes({
+          originUrl: input.url!,
+          routes: readFullSiteRouteManifest(input.pluginCapture),
+          workDir,
+        })
+      : await captureRuntime({
+          url: input.url!,
+          workDir,
+          selector: input.selector,
+        })
     : createRuntimeCaptureFromPluginContext(input.pluginCapture);
   console.log(
     "[coderelay:core:capture]",
@@ -155,6 +174,7 @@ export async function runLocalExport(
       captureMode: canCaptureFromUrl ? "runtime-first" : "plugin-only",
       runtimeNodeCount: runtimeCapture.nodes.length,
       viewportNodeCounts: runtimeCapture.captureDiagnostics?.nodeCount,
+      routeCount: runtimeCapture.routeCaptures?.length ?? 1,
       framerStyleCssBytes: Buffer.byteLength(
         runtimeCapture.framerStyleCss ?? "",
       ),
@@ -163,10 +183,10 @@ export async function runLocalExport(
   const pluginCapture =
     input.pluginCapture ?? createSimulatedPluginCapture(runtimeCapture.nodes);
   const sourceUrl = input.url ?? runtimeCapture.url;
-  const nodeMatches = matchPluginNodesToDom(
-    pluginCapture,
-    runtimeCapture.nodes,
-  );
+  const nodeMatches =
+    input.exportMode === "full-site"
+      ? []
+      : matchPluginNodesToDom(pluginCapture, runtimeCapture.nodes);
   const ir = buildIntermediateRepresentation({
     url: sourceUrl,
     name: input.name,
@@ -196,6 +216,15 @@ export async function runLocalExport(
     targetFidelity: input.targetFidelity,
   });
   const bestAttempt = selectBestAttempt(attempts);
+  if (
+    input.exportMode === "full-site" &&
+    (bestAttempt.previewValidation?.summary.inspectedNodes ?? 0) > 0 &&
+    (bestAttempt.previewValidation?.summary.foundNodes ?? 0) === 0
+  ) {
+    throw new Error(
+      "Generated export failed validation: none of the runtime-derived nodes were found in the generated preview.",
+    );
+  }
   const validation = await validateGeneratedProject(bestAttempt.projectDir);
 
   await copy(bestAttempt.projectDir, exportDir);
@@ -266,6 +295,97 @@ export async function runLocalExport(
     bestAttempt,
     validation,
   };
+}
+
+function readFullSiteRouteManifest(pluginCapture?: PluginCanvasCapture) {
+  type RouteManifestEntry = {
+    path: string;
+    title?: string;
+    collectionId?: string;
+  };
+  const pages = Array.isArray(pluginCapture?.context?.sitePages)
+    ? pluginCapture.context.sitePages
+    : [];
+  const collections = Array.isArray(pluginCapture?.context?.cmsCollections)
+    ? pluginCapture.context.cmsCollections
+    : [];
+  const routes: RouteManifestEntry[] = pages
+    .map((page) => {
+      const record =
+        page && typeof page === "object"
+          ? (page as Record<string, unknown>)
+          : {};
+      const metadata =
+        record.metadata && typeof record.metadata === "object"
+          ? (record.metadata as Record<string, unknown>)
+          : {};
+      const pathValue = [
+        record.routePath,
+        record.path,
+        record.pathname,
+        record.pagePath,
+        record.route,
+        record.slug,
+        record.url,
+        metadata.routePath,
+        metadata.path,
+        metadata.pathname,
+        metadata.pagePath,
+      ].find((value) => typeof value === "string" && value.trim());
+      const titleValue = [
+        record.name,
+        record.title,
+        record.pageTitle,
+        record.displayName,
+        metadata.name,
+        metadata.title,
+      ].find((value) => typeof value === "string" && value.trim());
+      return {
+        path: typeof pathValue === "string" ? pathValue : "",
+        title: typeof titleValue === "string" ? titleValue : undefined,
+        collectionId:
+          typeof record.collectionId === "string"
+            ? record.collectionId
+            : typeof metadata.collectionId === "string"
+              ? metadata.collectionId
+              : undefined,
+      };
+    })
+    .filter((route) => route.path)
+    .flatMap((route): RouteManifestEntry[] => {
+      if (!route.path.includes(":slug")) return [route];
+      const collection = collections.find((entry) => {
+        const record =
+          entry && typeof entry === "object"
+            ? (entry as Record<string, unknown>)
+            : {};
+        return !route.collectionId || record.id === route.collectionId;
+      });
+      const collectionRecord =
+        collection && typeof collection === "object"
+          ? (collection as Record<string, unknown>)
+          : {};
+      const items = Array.isArray(collectionRecord.items)
+        ? collectionRecord.items
+        : [];
+      const expanded = items
+        .map<RouteManifestEntry | null>((item) => {
+          const record =
+            item && typeof item === "object"
+              ? (item as Record<string, unknown>)
+              : {};
+          const slug = typeof record.slug === "string" ? record.slug.trim() : "";
+          if (!slug) return null;
+          return {
+            path: route.path.replace(":slug", encodeURIComponent(slug)),
+            title: route.title ? `${route.title} - ${slug}` : slug,
+            collectionId: route.collectionId,
+          };
+        })
+        .filter((entry): entry is RouteManifestEntry => entry !== null);
+      return expanded.length > 0 ? expanded : [route];
+    });
+  return routes.length > 0 ? routes : [{ path: "/", title: "Home" }];
 }
 
 export async function validateGeneratedProject(
@@ -340,7 +460,11 @@ export async function validateGeneratedProject(
       );
     }
 
-    const runtime = await inspectBuiltProject(path.join(projectDir, "dist"));
+    const routeManifest = await readGeneratedRouteManifest(projectDir);
+    const runtime = await inspectBuiltProject(
+      path.join(projectDir, "dist"),
+      routeManifest,
+    );
     console.log(
       "[coderelay:core:runtime]",
       JSON.stringify(runtime),
@@ -355,6 +479,20 @@ export async function validateGeneratedProject(
         `Generated export crashed at runtime.\n${runtime.pageErrors.join("\n")}`,
       );
     }
+    const emptyRoute = runtime.routes.find(
+      (route) =>
+        (route.sourceTextLength > 0 && route.renderedTextLength === 0) ||
+        (route.sourceNodeCount >= 5 && route.renderedElementCount < 3) ||
+        (route.sourceNodeCount >= 5 && route.screenshotColorCount < 3),
+    );
+    if (emptyRoute) {
+      throw new Error(
+        `Generated export route ${emptyRoute.path} is near-empty ` +
+          `(sourceText=${emptyRoute.sourceTextLength}, renderedText=${emptyRoute.renderedTextLength}, ` +
+          `sourceNodes=${emptyRoute.sourceNodeCount}, visibleElements=${emptyRoute.renderedElementCount}, ` +
+          `screenshotColors=${emptyRoute.screenshotColorCount}).`,
+      );
+    }
 
     return {
       status: "passed",
@@ -364,6 +502,7 @@ export async function validateGeneratedProject(
       renderedTextLength: runtime.renderedTextLength,
       consoleErrors: runtime.consoleErrors,
       pageErrors: runtime.pageErrors,
+      routes: runtime.routes,
     };
   } finally {
     // Keep package-lock.json and dist, but never ship installed dependencies.
@@ -372,6 +511,37 @@ export async function validateGeneratedProject(
       force: true,
     });
   }
+}
+
+async function readGeneratedRouteManifest(projectDir: string) {
+  const manifestPath = path.join(projectDir, "route-manifest.json");
+  const parsed = await fs
+    .readFile(manifestPath, "utf8")
+    .then((content) => JSON.parse(content) as unknown)
+    .catch(() => []);
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    return [{ path: "/", sourceTextLength: 0, sourceNodeCount: 0 }];
+  }
+  return parsed.map((entry) => {
+    const record =
+      entry && typeof entry === "object"
+        ? (entry as Record<string, unknown>)
+        : {};
+    return {
+      path:
+        typeof record.path === "string" && record.path.startsWith("/")
+          ? record.path
+          : "/",
+      sourceTextLength:
+        typeof record.sourceTextLength === "number"
+          ? record.sourceTextLength
+          : 0,
+      sourceNodeCount:
+        typeof record.sourceNodeCount === "number"
+          ? record.sourceNodeCount
+          : 0,
+    };
+  });
 }
 
 async function summarizeGeneratedProject(projectDir: string) {
@@ -457,7 +627,14 @@ async function runCommand(
   });
 }
 
-async function inspectBuiltProject(distDir: string) {
+async function inspectBuiltProject(
+  distDir: string,
+  routeManifest: Array<{
+    path: string;
+    sourceTextLength: number;
+    sourceNodeCount: number;
+  }>,
+) {
   const server = createServer(async (request, response) => {
     try {
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -498,13 +675,15 @@ async function inspectBuiltProject(distDir: string) {
   });
 
   try {
-    await page.goto(`http://127.0.0.1:${address.port}/`, {
-      waitUntil: "networkidle",
-      timeout: 30_000,
-    });
-    await page.waitForTimeout(500);
-    return await page.evaluate(
-      ({ consoleErrors, pageErrors }) => {
+    const routes = [];
+    let rootChildCount = 0;
+    for (const route of routeManifest) {
+      await page.goto(`http://127.0.0.1:${address.port}${route.path}`, {
+        waitUntil: "networkidle",
+        timeout: 30_000,
+      });
+      await page.waitForTimeout(250);
+      const inspected = await page.evaluate(() => {
         const root = document.getElementById("root");
         const renderedElements = root
           ? Array.from(root.querySelectorAll("*")).filter((element) => {
@@ -523,16 +702,50 @@ async function inspectBuiltProject(distDir: string) {
           rootChildCount: root?.children.length ?? 0,
           renderedElementCount: renderedElements.length,
           renderedTextLength: root?.textContent?.trim().length ?? 0,
-          consoleErrors,
-          pageErrors,
         };
-      },
-      { consoleErrors, pageErrors },
-    );
+      });
+      const screenshotColorCount = countSampledScreenshotColors(
+        await page.screenshot({ animations: "disabled" }),
+      );
+      rootChildCount = Math.max(rootChildCount, inspected.rootChildCount);
+      routes.push({ ...route, ...inspected, screenshotColorCount });
+    }
+    return {
+      rootChildCount,
+      renderedElementCount: routes.reduce(
+        (total, route) => total + route.renderedElementCount,
+        0,
+      ),
+      renderedTextLength: routes.reduce(
+        (total, route) => total + route.renderedTextLength,
+        0,
+      ),
+      consoleErrors,
+      pageErrors,
+      routes,
+    };
   } finally {
     await browser.close();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+}
+
+function countSampledScreenshotColors(buffer: Buffer) {
+  const image = PNG.sync.read(buffer);
+  const colors = new Set<string>();
+  const pixelCount = image.width * image.height;
+  const step = Math.max(1, Math.floor(pixelCount / 20_000));
+  for (let pixel = 0; pixel < pixelCount; pixel += step) {
+    const offset = pixel * 4;
+    const alpha = image.data[offset + 3] ?? 0;
+    if (alpha === 0) continue;
+    const red = Math.round((image.data[offset] ?? 0) / 16);
+    const green = Math.round((image.data[offset + 1] ?? 0) / 16);
+    const blue = Math.round((image.data[offset + 2] ?? 0) / 16);
+    colors.add(`${red}:${green}:${blue}`);
+    if (colors.size >= 256) break;
+  }
+  return colors.size;
 }
 
 function contentType(filePath: string) {
@@ -567,7 +780,9 @@ async function bundleDebugArtifacts(input: {
   await mkdirp(attemptsDir);
 
   const sourceScreenshotPaths = await copyDirectoryIfExists(
-    path.join(input.workDir, "original"),
+    (await pathExists(path.join(input.workDir, "routes")))
+      ? path.join(input.workDir, "routes")
+      : path.join(input.workDir, "original"),
     sourceDir,
   );
 
@@ -658,13 +873,21 @@ async function copyDirectoryIfExists(sourceDir: string, targetDir: string) {
   const entries = await readDirSafe(sourceDir);
   const copied: string[] = [];
   for (const entry of entries) {
-    if (entry.isDirectory()) continue;
     const source = path.join(sourceDir, entry.name);
     const target = path.join(targetDir, entry.name);
+    if (entry.isDirectory()) {
+      await mkdirp(target);
+      copied.push(...(await copyDirectoryIfExists(source, target)));
+      continue;
+    }
     await fs.copyFile(source, target);
     copied.push(target);
   }
   return copied;
+}
+
+async function pathExists(targetPath: string) {
+  return Boolean(await fs.stat(targetPath).catch(() => null));
 }
 
 async function copyFileIfExists(source: string, target: string) {
@@ -1478,6 +1701,14 @@ function createReport(
       stylesheetCount: ir.runtimeCapture.captureDiagnostics?.stylesheetCount,
       nodeCount: ir.runtimeCapture.captureDiagnostics?.nodeCount,
       fontsReady: ir.runtimeCapture.captureDiagnostics?.fontReadiness,
+      routes: (ir.runtimeCapture.routeCaptures ?? []).map((capture) => ({
+        path: capture.routePath,
+        url: capture.url,
+        title: capture.title,
+        nodeCount: capture.captureDiagnostics?.nodeCount,
+        stylesheetCount: capture.captureDiagnostics?.stylesheetCount,
+        fontsReady: capture.captureDiagnostics?.fontReadiness,
+      })),
     },
     previewValidation: bestAttempt.previewValidation,
     debugArtifacts,

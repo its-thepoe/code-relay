@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
-import { runLocalExport } from "./local-export.js";
+import { createServer } from "node:http";
+import {
+  runLocalExport,
+  validateGeneratedProject,
+} from "./local-export.js";
 import { CAPTURED_STYLE_PROPERTIES } from "./capture.js";
 import type { PluginCanvasCapture } from "../../shared/src/types.js";
 
@@ -95,6 +99,56 @@ test("runLocalExport rejects a missing exportMode before generating files", asyn
     /Missing exportMode/,
   );
   assert.deepEqual(await fs.readdir(outDir), []);
+});
+
+test("generated validation rejects a mounted but visually empty route", async () => {
+  const projectDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-empty-route-"),
+  );
+  await fs.mkdir(path.join(projectDir, "dist"), { recursive: true });
+  await fs.writeFile(
+    path.join(projectDir, "package.json"),
+    JSON.stringify({
+      name: "empty-route",
+      private: true,
+      scripts: { build: "node -e \"process.exit(0)\"" },
+    }),
+  );
+  await fs.writeFile(
+    path.join(projectDir, "route-manifest.json"),
+    JSON.stringify([
+      {
+        path: "/",
+        sourceTextLength: 120,
+        sourceNodeCount: 12,
+      },
+    ]),
+  );
+  await fs.writeFile(
+    path.join(projectDir, "placeholder.tsx"),
+    "export const Placeholder = () => null\n",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "placeholder.css"),
+    "body { background: #001a4c; }\n",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "preview.html"),
+    "<!doctype html><html><body>preview</body></html>",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "dist", "index.html"),
+    `<!doctype html><html><body style="margin:0;background:#001a4c">
+      <div id="root"><main style="min-height:100vh">
+        <div></div><div></div><div></div><div></div><div></div><div></div>
+      </main></div>
+    </body></html>`,
+  );
+
+  await assert.rejects(
+    validateGeneratedProject(projectDir),
+    /near-empty.*sourceText=120.*renderedText=0/s,
+  );
 });
 
 test("runLocalExport writes raw runtime capture artifact for plugin-only exports", async () => {
@@ -284,4 +338,83 @@ test("runLocalExport reconstructs plugin-only runtime nodes from framerTree when
     true,
   );
   assert.equal(exportTree[0]?.children?.length, 2);
+});
+
+test("runLocalExport crawls, builds, and validates every full-site route", async () => {
+  const server = createServer((request, response) => {
+    const pricing = request.url === "/pricing";
+    response.setHeader("content-type", "text/html; charset=utf-8");
+    response.end(`<!doctype html>
+      <html>
+        <head><title>${pricing ? "Pricing" : "Home"}</title></head>
+        <body style="margin:0">
+          <main style="min-height:100vh;background:${pricing ? "#fff7ed" : "#eff6ff"}">
+            <section style="padding:48px">
+              <h1 style="font-size:48px;color:#172554">${pricing ? "Choose a plan" : "Runtime home"}</h1>
+              <p style="font-size:18px">${pricing ? "Pricing route content" : "Home route content"}</p>
+            </section>
+          </main>
+        </body>
+      </html>`);
+  });
+  await new Promise<void>((resolve) =>
+    server.listen(0, "127.0.0.1", resolve),
+  );
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const outDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-full-site-routes-"),
+  );
+
+  try {
+    const result = await runLocalExport({
+      outDir,
+      url: `http://127.0.0.1:${address.port}/`,
+      exportMode: "full-site",
+      pluginCapture: {
+        mode: "framer-plugin",
+        capturedAt: "2026-06-30T00:00:00.000Z",
+        selectedNodes: [],
+        context: {
+          exportMode: "full-site",
+          captureMode: "runtime-first",
+          sitePages: [
+            { name: "Home", path: "/" },
+            { name: "Pricing", path: "/pricing" },
+          ],
+        },
+      },
+      maxAttempts: 1,
+      targetFidelity: 0.9,
+    });
+
+    assert.equal(result.validation.routes.length, 2);
+    assert.equal(
+      result.validation.routes.every(
+        (route) =>
+          route.renderedTextLength > 0 && route.renderedElementCount >= 3,
+      ),
+      true,
+    );
+    assert.match(
+      await fs.readFile(path.join(result.exportDir, "pages", "Home.tsx"), "utf8"),
+      /Runtime home/,
+    );
+    assert.match(
+      await fs.readFile(
+        path.join(result.exportDir, "pages", "Pricing.tsx"),
+        "utf8",
+      ),
+      /Choose a plan/,
+    );
+    const rawRuntime = JSON.parse(
+      await fs.readFile(
+        path.join(result.exportDir, "raw-runtime-capture.json"),
+        "utf8",
+      ),
+    );
+    assert.equal(rawRuntime.routeCaptures.length, 2);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });
