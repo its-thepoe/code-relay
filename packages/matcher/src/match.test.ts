@@ -83,3 +83,34 @@ test("matchPluginNodesToDom falls back to framerTree nodes when selectedNodes ar
   assert.equal(matches[1]?.domPath, "plugin > div:nth-child(1) > p:nth-child(1)");
   assert.equal(matches[1]?.matchReasons.includes("text"), true);
 });
+
+test("matchPluginNodesToDom uses a TextNode name when getText returned null", () => {
+  const pluginCapture: PluginCanvasCapture = {
+    mode: "framer-plugin",
+    capturedAt: "2026-06-30T00:00:00.000Z",
+    selectedNodes: [
+      {
+        id: "editor-heading",
+        type: "TextNode",
+        name: "Choose a plan",
+      },
+    ],
+  };
+  const runtimeNodes: RuntimeNode[] = [
+    {
+      id: "/pricing::heading",
+      routePath: "/pricing",
+      tag: "h1",
+      domPath: "body:nth-child(2) > main:nth-child(1) > h1:nth-child(1)",
+      text: "Choose a plan",
+      rect: { x: 32, y: 32, width: 300, height: 56 },
+      attributes: {},
+      styles: {},
+    },
+  ];
+
+  const [match] = matchPluginNodesToDom(pluginCapture, runtimeNodes);
+  assert.equal(match?.domPath, runtimeNodes[0]?.domPath);
+  assert.equal(match?.matchReasons.includes("text"), true);
+  assert.equal(match?.confidence >= 0.6, true);
+});

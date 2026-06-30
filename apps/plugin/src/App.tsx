@@ -8,7 +8,7 @@ import {
   FramerPluginClosedError,
   type ComponentNode,
   type CanvasNode,
-} from "framer-plugin";
+} from "@framer/plugin";
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { extractFramerNodeStyles } from "./framer-style-extraction";
 import "./App.css";
@@ -264,14 +264,15 @@ export function App() {
       let fullSiteRoots: FullSiteRoots | null = null;
 
       if (exportMode === "full-site") {
-        log("info", "Reading full site roots from Framer");
+        log("info", "Reading full site route and component manifests from Framer");
         fullSiteRoots = await readFullSiteRoots(components);
-        sourceNodes = fullSiteRoots.roots;
+        // Full-site visual output is captured from each published route. Editor
+        // trees are a different identity/coordinate space and are metadata only.
+        sourceNodes = [];
         log("info", "Read full site roots", {
-          roots: sourceNodes.length,
+          roots: fullSiteRoots.roots.length,
           pages: fullSiteRoots.pages.length,
           components: fullSiteRoots.components.length,
-          ids: sourceNodes.map((n: any) => n?.id).filter(Boolean),
         });
       } else if (
         exportMode === "components" ||
@@ -298,7 +299,10 @@ export function App() {
         });
       }
 
-      const liveSimplified = simplifySelection(sourceNodes);
+      const liveSimplified =
+        exportMode === "full-site"
+          ? simplifySelection(fullSiteRoots?.pages ?? [])
+          : simplifySelection(sourceNodes);
 
       if (liveSimplified.length === 0) {
         const reason =
@@ -316,18 +320,31 @@ export function App() {
         return;
       }
 
-      const richSelectedNodes = await captureSelectionMetadata(sourceNodes, {
-        rootKinds: fullSiteRoots?.rootKinds,
-      });
+      const richSelectedNodes =
+        exportMode === "full-site"
+          ? []
+          : await captureSelectionMetadata(sourceNodes, {
+              rootKinds: fullSiteRoots?.rootKinds,
+              onReadFailure: (failure) =>
+                log("warn", "Framer node read failed", failure),
+              onChunkComplete: (chunk) =>
+                log("info", "Captured editor root chunk", chunk),
+            });
       log("info", "Captured selection metadata", {
         count: richSelectedNodes.length,
         textNodes: richSelectedNodes.filter((node) => node.text).length,
       });
-      const exportProps = inferExportPropsFromSelection(sourceNodes);
+      const exportProps =
+        exportMode === "full-site"
+          ? undefined
+          : inferExportPropsFromSelection(sourceNodes);
       log("info", "Inferred export props", exportProps);
       const context = await collectPluginContext({
         exportMode,
-        selection: sourceNodes,
+        selection:
+          exportMode === "full-site"
+            ? []
+            : sourceNodes,
         project,
         components,
         selectedComponentIds:
@@ -1301,6 +1318,7 @@ function sanitizeNode(node: unknown) {
     routePath: raw.routePath,
     url: raw.url,
     canonicalPath: raw.canonicalPath,
+    collectionId: raw.collectionId,
     type: raw.type,
     visible: raw.visible,
     locked: raw.locked,
@@ -1680,6 +1698,17 @@ async function captureSelectionMetadata(
   selection: CapturableNode[],
   options: {
     rootKinds?: Record<string, "page" | "component" | "canvas-root">;
+    onReadFailure?: (failure: {
+      operation: "getRect" | "getChildren" | "getText";
+      nodeId: string;
+      message: string;
+    }) => void;
+    onChunkComplete?: (chunk: {
+      rootId: string;
+      rootIndex: number;
+      rootCount: number;
+      capturedNodeCount: number;
+    }) => void;
   } = {},
 ) {
   const richNodes: SelectionNode[] = [];
@@ -1697,15 +1726,7 @@ async function captureSelectionMetadata(
     else structuralNodes.push(node);
   };
 
-  const totalMaxNodes = 3000;
-  const maxNodesPerRoot = Math.max(
-    24,
-    Math.min(260, Math.floor(totalMaxNodes / Math.max(1, selection.length))),
-  );
-
   for (const [rootIndex, root] of selection.entries()) {
-    if (richNodes.length + structuralNodes.length >= totalMaxNodes) break;
-
     const rootId = String((root as any)?.id ?? "");
     if (!rootId) continue;
 
@@ -1720,11 +1741,7 @@ async function captureSelectionMetadata(
     const seenVisit = new Set<string>();
     let capturedForRoot = 0;
 
-    while (
-      queue.length > 0 &&
-      capturedForRoot < maxNodesPerRoot &&
-      richNodes.length + structuralNodes.length < totalMaxNodes
-    ) {
+    while (queue.length > 0) {
       const current = queue.shift()!;
       const node = current.node;
       const id = String((node as any).id ?? "");
@@ -1735,7 +1752,14 @@ async function captureSelectionMetadata(
         typeof (node as any).name === "string" ? (node as any).name : undefined;
       const type = getReadableNodeType(node);
 
-      const rect = await framer.getRect(id).catch(() => null);
+      const rect = await framer.getRect(id).catch((error) => {
+        options.onReadFailure?.({
+          operation: "getRect",
+          nodeId: id,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+      });
       const bounds =
         rect && typeof (rect as any).width === "number"
           ? {
@@ -1745,7 +1769,14 @@ async function captureSelectionMetadata(
               height: Number((rect as any).height ?? 0),
             }
           : undefined;
-      const children = await framer.getChildren(id).catch(() => []);
+      const children = await framer.getChildren(id).catch((error) => {
+        options.onReadFailure?.({
+          operation: "getChildren",
+          nodeId: id,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        return [];
+      });
       const childIds = children
         .map((child: any) => (typeof child?.id === "string" ? child.id : ""))
         .filter(Boolean);
@@ -1774,7 +1805,17 @@ async function captureSelectionMetadata(
       };
 
       if (isTextNode(node)) {
-        const text = (await node.getText().catch(() => null)) ?? undefined;
+        const text =
+          (await node.getText().catch((error) => {
+            options.onReadFailure?.({
+              operation: "getText",
+              nodeId: id,
+              message: error instanceof Error ? error.message : String(error),
+            });
+            return null;
+          })) ??
+          name ??
+          undefined;
         push(
           {
             id,
@@ -1851,9 +1892,15 @@ async function captureSelectionMetadata(
         });
       }
     }
+    options.onChunkComplete?.({
+      rootId,
+      rootIndex,
+      rootCount: selection.length,
+      capturedNodeCount: capturedForRoot,
+    });
   }
 
-  return [...richNodes, ...structuralNodes].slice(0, totalMaxNodes);
+  return [...richNodes, ...structuralNodes];
 }
 
 function readNodeLabel(node: unknown) {

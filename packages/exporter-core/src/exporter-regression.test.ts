@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
+import { createServer } from "node:http";
 import { buildIntermediateRepresentation } from "./ir.js";
 import { generateNextProject } from "../../codegen/src/next-project.js";
 import { inspectGeneratedPreviewNodes } from "../../fidelity/src/compare.js";
+import { captureRuntimeRoutes } from "./capture.js";
 import type {
+  ExportTreeNode,
   NodeMatch,
   PluginCanvasCapture,
   RuntimeCapture,
@@ -501,7 +504,7 @@ test("buildIntermediateRepresentation drops inherited stylesheet text from runti
     nodeMatches: createNodeMatches(),
   });
 
-  const runtimeRoot = ir.exportTree?.find((node) => node.id === "runtime-root-1");
+  const runtimeRoot = ir.exportTree?.find((node) => node.id === "runtime-main");
   assert.equal(runtimeRoot?.tag, "main");
   assert.equal(runtimeRoot?.text, undefined);
   assert.equal(runtimeRoot?.kind, "frame");
@@ -630,17 +633,37 @@ test("full-site export ignores anonymous page roots and component catalog noise"
 });
 
 test("full-site export preserves explicit Framer page names and routes", () => {
+  const homeCapture = {
+    ...createRuntimeCapture(),
+    url: "https://example.com/",
+    title: "Home",
+    routePath: "/",
+  };
+  const pricingCapture = {
+    ...createRuntimeCapture(),
+    url: "https://example.com/pricing",
+    title: "Pricing",
+    routePath: "/pricing",
+    nodes: createRuntimeCapture().nodes.map((node) => ({
+      ...node,
+      id: `/pricing::${node.id}`,
+      routePath: "/pricing",
+    })),
+  };
   const ir = buildIntermediateRepresentation({
-    url: "framer://project/site",
+    url: "https://example.com/",
     name: "MarketingSite",
     exportMode: "full-site",
-    captureMode: "plugin-only",
-    runtimeCapture: createRuntimeCapture(),
+    captureMode: "runtime-first",
+    runtimeCapture: {
+      ...homeCapture,
+      routeCaptures: [homeCapture, pricingCapture],
+    },
     pluginCapture: {
       ...createPluginCapture(),
       context: {
         exportMode: "full-site",
-        captureMode: "plugin-only",
+        captureMode: "runtime-first",
         sitePages: [
           { id: "home", name: "Home", path: "/" },
           { id: "pricing", title: "Pricing", slug: "pricing" },
@@ -661,7 +684,133 @@ test("full-site export preserves explicit Framer page names and routes", () => {
       { componentName: "Pricing", routePath: "/pricing", title: "Pricing" },
     ],
   );
+  assert.equal(ir.exportEngine, "published-runtime");
+  assert.equal(ir.sitePages?.[0]?.exportTree?.[0]?.source.pluginNodeId, undefined);
+  assert.equal(
+    ir.sitePages?.[1]?.exportTree?.some((node) =>
+      node.id.startsWith("/pricing::"),
+    ),
+    true,
+  );
 });
+
+test("full-site capture builds each page from its own published runtime tree", async () => {
+  const server = createServer((request, response) => {
+    const pricing = request.url === "/pricing";
+    response.setHeader("content-type", "text/html; charset=utf-8");
+    response.end(`<!doctype html>
+      <html>
+        <head><title>${pricing ? "Pricing" : "Home"}</title></head>
+        <body style="margin:0">
+          <main style="min-height:100vh;background:${pricing ? "#fff7ed" : "#eff6ff"}">
+            <section style="padding:48px">
+              <h1 style="font-size:48px;color:#172554">${pricing ? "Choose a plan" : "Runtime home"}</h1>
+              <p>${pricing ? "Pricing route content" : "Home route content"}</p>
+            </section>
+          </main>
+        </body>
+      </html>`);
+  });
+  await new Promise<void>((resolve) =>
+    server.listen(0, "127.0.0.1", resolve),
+  );
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const workDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-route-capture-"),
+  );
+
+  try {
+    const capture = await captureRuntimeRoutes({
+      originUrl: `http://127.0.0.1:${address.port}/`,
+      routes: [
+        { path: "/", title: "Home" },
+        { path: "/pricing", title: "Pricing" },
+      ],
+      workDir,
+    });
+    assert.equal(capture.routeCaptures?.length, 2);
+    assert.equal(
+      capture.routeCaptures?.[0]?.nodes.some(
+        (node) => node.text === "Runtime home",
+      ),
+      true,
+    );
+    assert.equal(
+      capture.routeCaptures?.[1]?.nodes.some(
+        (node) => node.text === "Choose a plan",
+      ),
+      true,
+    );
+    assert.equal(
+      capture.routeCaptures?.[1]?.nodes.every((node) =>
+        node.id.startsWith("/pricing::"),
+      ),
+      true,
+    );
+
+    const ir = buildIntermediateRepresentation({
+      url: `http://127.0.0.1:${address.port}/`,
+      name: "RuntimeSite",
+      exportMode: "full-site",
+      captureMode: "runtime-first",
+      runtimeCapture: capture,
+      pluginCapture: {
+        mode: "framer-plugin",
+        capturedAt: "2026-06-30T00:00:00.000Z",
+        selectedNodes: [],
+        context: {
+          exportMode: "full-site",
+          sitePages: [
+            { name: "Home", path: "/" },
+            { name: "Pricing", path: "/pricing" },
+          ],
+        },
+      },
+      nodeMatches: [],
+    });
+    assert.equal(ir.sitePages?.length, 2);
+    assert.equal(
+      flattenTree(ir.sitePages?.[0]?.exportTree ?? []).some(
+        (node) => node.text === "Runtime home",
+      ),
+      true,
+    );
+    assert.equal(
+      flattenTree(ir.sitePages?.[1]?.exportTree ?? []).some(
+        (node) => node.text === "Choose a plan",
+      ),
+      true,
+    );
+
+    const projectDir = path.join(workDir, "project");
+    await generateNextProject({
+      ir,
+      projectDir,
+      strategy: {
+        id: "runtime-routes",
+        structuredLayout: true,
+        compactSpacing: false,
+        aggressiveMobileStacking: false,
+        preserveImageAspectRatio: true,
+      },
+    });
+    assert.match(
+      await fs.readFile(path.join(projectDir, "pages", "Home.tsx"), "utf8"),
+      /Runtime home/,
+    );
+    assert.match(
+      await fs.readFile(path.join(projectDir, "pages", "Pricing.tsx"), "utf8"),
+      /Choose a plan/,
+    );
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+function flattenTree(nodes: ExportTreeNode[]): ExportTreeNode[] {
+  return nodes.flatMap((node) => [node, ...flattenTree(node.children)]);
+}
 
 test("component modules with colliding generated names are deduplicated", () => {
   const pluginCapture = createPluginCapture();

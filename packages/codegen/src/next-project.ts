@@ -64,7 +64,12 @@ export async function generateNextProject(
     input.ir.libraryComponents.length > 0;
   const sitePages = Array.isArray(input.ir.sitePages)
     ? input.ir.sitePages.map((entry) =>
-        deriveIrForComponent(input.ir, entry.componentName, entry.nodes),
+        deriveIrForComponent(
+          input.ir,
+          entry.componentName,
+          entry.nodes,
+          entry.exportTree,
+        ),
       )
     : [];
   const isFullSite =
@@ -112,6 +117,21 @@ export async function generateNextProject(
   await writeFile(
     path.join(input.projectDir, "asset-manifest.json"),
     `${JSON.stringify(createAssetManifest(input.ir), null, 2)}\n`,
+  );
+  await writeFile(
+    path.join(input.projectDir, "route-manifest.json"),
+    `${JSON.stringify(
+      (input.ir.sitePages ?? []).map((page) => ({
+        path: page.routePath,
+        title: page.title,
+        sourceTextLength: page.sourceTextLength ?? 0,
+        sourceNodeCount: page.exportTree
+          ? countExportTreeNodes(page.exportTree)
+          : page.nodes.length,
+      })),
+      null,
+      2,
+    )}\n`,
   );
 
   for (const module of componentModules) {
@@ -270,12 +290,24 @@ export async function generateNextProject(
   };
 }
 
+function countExportTreeNodes(nodes: ExportTreeNode[]): number {
+  return nodes.reduce(
+    (total, node) => total + 1 + countExportTreeNodes(node.children),
+    0,
+  );
+}
+
 function deriveIrForComponent(
   base: ExportIR,
   componentName: string,
   nodes: RuntimeNode[],
+  runtimeExportTree?: ExportTreeNode[],
 ): ExportIR {
-  const exportTree = scopeExportTreeToNodes(base.exportTree, nodes);
+  const exportTree =
+    runtimeExportTree ??
+    (base.exportMode === "full-site"
+      ? undefined
+      : scopeExportTreeToNodes(base.exportTree, nodes));
 
   return {
     ...base,

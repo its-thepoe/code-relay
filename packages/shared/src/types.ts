@@ -29,8 +29,10 @@ export type InteractionStateStyles = {
 
 export type RuntimeNode = {
   id: string;
+  routePath?: string;
   tag: string;
   domPath: string;
+  parentDomPath?: string;
   text?: string;
   rect: Rect;
   sectionIndex?: number;
@@ -70,6 +72,11 @@ export type RuntimeCapture = {
   };
   framerStyleCss?: string;
   stylesheetUrls?: string[];
+  routeCaptures?: RuntimeRouteCapture[];
+};
+
+export type RuntimeRouteCapture = Omit<RuntimeCapture, "routeCaptures"> & {
+  routePath: string;
 };
 
 export type ExportMode = "selection" | "components" | "full-site";
@@ -390,6 +397,8 @@ export type ExportIR = {
     routePath: string;
     title: string;
     nodes: RuntimeNode[];
+    exportTree?: ExportTreeNode[];
+    sourceTextLength?: number;
   }>;
   exportTreeDiagnostics?: {
     totalNodes: number;

@@ -40,7 +40,7 @@ export function buildIntermediateRepresentation(input: BuildIrInput): ExportIR {
     (match) => match.confidence < 0.45,
   );
 
-  if (lowConfidenceMatches.length > 0) {
+  if (lowConfidenceMatches.length > 0 && input.exportMode !== "full-site") {
     warnings.push({
       type: "node_match_low_confidence",
       severity: "warning",
@@ -57,8 +57,11 @@ export function buildIntermediateRepresentation(input: BuildIrInput): ExportIR {
     });
   }
 
+  const runtimeNodesForAssets =
+    input.runtimeCapture.routeCaptures?.flatMap((capture) => capture.nodes) ??
+    input.runtimeCapture.nodes;
   const assets = unique(
-    input.runtimeCapture.nodes
+    runtimeNodesForAssets
       .filter((node) => node.tag === "img" && node.attributes.src)
       .map((node) => ({
         url: node.attributes.src!,
@@ -75,11 +78,14 @@ export function buildIntermediateRepresentation(input: BuildIrInput): ExportIR {
   const fonts = readFonts(input);
   const cmsCollections = readCmsCollections(input.pluginCapture);
   const framerTree = buildFramerTree(input.pluginCapture);
-  const exportTree = buildExportTree(
-    framerTree,
-    input.runtimeCapture,
-    input.nodeMatches,
-  );
+  const exportTree =
+    exportMode === "full-site"
+      ? buildRuntimeExportTree(input.runtimeCapture)
+      : buildExportTree(
+          framerTree,
+          input.runtimeCapture,
+          input.nodeMatches,
+        );
   const exportEngine = chooseExportEngine({
     exportMode,
     sourceUrl: input.url,
@@ -88,7 +94,7 @@ export function buildIntermediateRepresentation(input: BuildIrInput): ExportIR {
   });
   const sitePages =
     exportMode === "full-site"
-      ? buildSitePages(input, componentName)
+      ? buildRuntimeSitePages(input, componentName)
       : undefined;
 
   return {
@@ -119,6 +125,69 @@ export function buildIntermediateRepresentation(input: BuildIrInput): ExportIR {
     exportTreeDiagnostics: summarizeExportTree(exportTree, input.runtimeCapture),
     warnings,
   };
+}
+
+function buildRuntimeSitePages(input: BuildIrInput, fallbackName: string) {
+  const routeCaptures = input.runtimeCapture.routeCaptures ?? [];
+  if (routeCaptures.length === 0) {
+    const fallback = buildRuntimeFallbackPage(input, fallbackName);
+    return [
+      {
+        ...fallback,
+        exportTree: buildRuntimeExportTree(input.runtimeCapture),
+        sourceTextLength: runtimeTextLength(input.runtimeCapture.nodes),
+      },
+    ];
+  }
+
+  const usedNames = new Map<string, number>();
+  return routeCaptures.map((capture, index) => {
+    const routePage = readPluginPageForRoute(
+      input.pluginCapture.context?.sitePages,
+      capture.routePath,
+    );
+    const title =
+      (routePage ? readPageTitle(routePage) : undefined) ??
+      capture.title?.trim() ??
+      (capture.routePath === "/" ? "Home" : fallbackName);
+    const baseName = toComponentName(title);
+    const count = usedNames.get(baseName) ?? 0;
+    usedNames.set(baseName, count + 1);
+    const nodes = promoteFallbackHeading(pickContentNodes(capture.nodes));
+
+    return {
+      componentName: count === 0 ? baseName : `${baseName}${count + 1}`,
+      routePath: capture.routePath,
+      title,
+      nodes:
+        nodes.length > 0
+          ? nodes
+          : [
+              createComponentPlaceholderNode(
+                { id: `runtime-route-${index + 1}`, path: capture.routePath },
+                title,
+                index,
+              ),
+            ],
+      exportTree: buildRuntimeExportTree(capture),
+      sourceTextLength: runtimeTextLength(capture.nodes),
+    };
+  });
+}
+
+function readPluginPageForRoute(
+  pages: Array<Record<string, unknown>> | undefined,
+  routePath: string,
+) {
+  if (!Array.isArray(pages)) return undefined;
+  return pages.find((page) => readPageRoutePath(page) === routePath);
+}
+
+function runtimeTextLength(nodes: RuntimeNode[]) {
+  return nodes.reduce(
+    (total, node) => total + (node.text?.trim().length ?? 0),
+    0,
+  );
 }
 
 function resolveCaptureMode(input: BuildIrInput): CaptureMode {
@@ -540,6 +609,11 @@ function chooseExportEngine(input: {
   componentModules: FramerComponentModule[];
   pluginCapture: PluginCanvasCapture;
 }): ExportIR["exportEngine"] {
+  const hasPublishedRuntime = /^https?:\/\//.test(input.sourceUrl);
+  if (input.exportMode === "full-site" && hasPublishedRuntime) {
+    return "published-runtime";
+  }
+
   const contextEngine = input.pluginCapture.context?.exportEngine;
   if (
     contextEngine === "component-module" ||
@@ -551,11 +625,9 @@ function chooseExportEngine(input: {
     return contextEngine;
   }
 
-  const hasPublishedRuntime = /^https?:\/\//.test(input.sourceUrl);
   if (input.exportMode === "components" && input.componentModules.length > 0) {
     return "component-module";
   }
-  if (input.exportMode === "full-site" && hasPublishedRuntime) return "hybrid";
   if (input.exportMode === "full-site") return "page-node-tree";
   if (hasPublishedRuntime) return "published-runtime";
   return input.componentModules.length > 0
@@ -1114,10 +1186,10 @@ function buildRuntimeExportTree(runtimeCapture: RuntimeCapture): ExportTreeNode[
   const roots: RuntimeNode[] = [];
 
   for (const node of runtimeCapture.nodes) {
-    const parentPath = nearestCapturedParentDomPath(
-      node.domPath,
-      runtimeByDomPath,
-    );
+    const parentPath =
+      node.parentDomPath && runtimeByDomPath.has(node.parentDomPath)
+        ? node.parentDomPath
+        : nearestCapturedParentDomPath(node.domPath, runtimeByDomPath);
     const parent = parentPath ? runtimeByDomPath.get(parentPath) : undefined;
     if (!parent || !parentPath) {
       roots.push(node);
