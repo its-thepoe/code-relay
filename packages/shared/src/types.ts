@@ -81,6 +81,9 @@ export type RuntimeCapture = {
 
 export type RuntimeRouteCapture = Omit<RuntimeCapture, "routeCaptures"> & {
   routePath: string;
+  templateId?: string;
+  templatePath?: string;
+  templateKind?: "static" | "cms" | "component";
 };
 
 export type ExportMode = "selection" | "components" | "full-site";
@@ -106,6 +109,12 @@ export type FramerComponentModule = {
   codeFileId?: string;
   codeFileName?: string;
   isDefaultExport?: boolean;
+  isVariant?: boolean;
+  isPrimaryVariant?: boolean;
+  gesture?: string;
+  inheritsFromId?: string;
+  breakpoint?: string;
+  variantName?: string;
   controls?: Record<string, unknown>;
   typedControls?: Record<string, unknown>;
 };
@@ -114,10 +123,58 @@ export type FramerCodeFile = {
   id?: string;
   name: string;
   path?: string;
+  versionId?: string;
   exports?: string[];
+  exportDetails?: Array<{
+    name?: string;
+    type?: string;
+    insertURL?: string;
+    isDefaultExport?: boolean;
+    componentIdentifier?: string;
+    componentName?: string;
+    isVariant?: boolean;
+    isPrimaryVariant?: boolean;
+    gesture?: string;
+    inheritsFromId?: string;
+    breakpoint?: string;
+    variantName?: string;
+  }>;
   isDefaultExport?: boolean;
   insertURL?: string;
   source?: string;
+  content?: string;
+  contentHash?: string;
+  contentByteLength?: number;
+  hasContent?: boolean;
+};
+
+export type FramerComponentFamily = {
+  id: string;
+  name: string;
+  primaryVariantId: string;
+  variants: Array<{
+    id: string;
+    name: string;
+    gesture?: string;
+    inheritsFromId?: string;
+    breakpoint?: string;
+    variantName?: string;
+    codeFileId?: string;
+  }>;
+  instances: Array<{
+    nodeId: string;
+    routePath?: string;
+    controls?: Record<string, unknown>;
+    initialVariantId?: string;
+  }>;
+  transitions: Array<{
+    fromVariantId: string;
+    toVariantId?: string;
+    trigger?: string;
+    confidence: number;
+    provenance: "plugin" | "runtime" | "source" | "merged";
+  }>;
+  provenance: "plugin" | "runtime" | "source" | "merged";
 };
 
 export type FramerFont = {
@@ -388,6 +445,7 @@ export type ExportIR = {
   framerTree?: FramerTreeNode[];
   exportTree?: ExportTreeNode[];
   componentModules?: FramerComponentModule[];
+  componentFamilies?: FramerComponentFamily[];
   codeFiles?: FramerCodeFile[];
   fonts?: FramerFont[];
   cmsCollections?: FramerCmsCollection[];
@@ -403,6 +461,19 @@ export type ExportIR = {
     nodes: RuntimeNode[];
     exportTree?: ExportTreeNode[];
     sourceTextLength?: number;
+    templateId?: string;
+    templatePath?: string;
+    templateKind?: "static" | "cms" | "component";
+  }>;
+  routeTemplates?: Array<{
+    templateId: string;
+    templatePath: string;
+    templateKind: "static" | "cms" | "component";
+    representativeRoutePath: string;
+    routePaths: string[];
+    routeCount: number;
+    sourceTextLength: number;
+    nodeCount: number;
   }>;
   exportTreeDiagnostics?: {
     totalNodes: number;

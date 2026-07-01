@@ -5,6 +5,11 @@ import crypto from "node:crypto";
 
 export type LocalJobStatus = "queued" | "running" | "completed" | "failed";
 export type LocalExportMode = "selection" | "components" | "full-site";
+export type LocalRevisionFocus =
+  | "responsiveness"
+  | "components"
+  | "both"
+  | "revalidate";
 
 export type LocalExportJob = {
   id: string;
@@ -24,11 +29,21 @@ export type LocalExportJob = {
     routePath?: string;
     failed?: number;
   };
+  revision?: {
+    kind: "initial" | "improvement";
+    parentJobId?: string;
+    parentRevisionId?: string;
+    requestedFocus?: LocalRevisionFocus;
+  };
   artifacts?: {
     exportDir?: string;
     zipPath?: string;
     reportPath?: string;
     previewPath?: string;
+    revisionManifestPath?: string;
+    validationPath?: string;
+    invalidationPlanPath?: string;
+    artifactIndexPath?: string;
   };
 };
 
@@ -124,6 +139,9 @@ export async function writeJob(job: LocalExportJob) {
 export async function createJobFromRequest(
   input: any,
 ): Promise<LocalExportJob> {
+  if (typeof input?.parentJobId === "string" && input.parentJobId.trim()) {
+    return createImprovementJobFromParent(input.parentJobId.trim(), input);
+  }
   const pluginCapture = input?.pluginCapture;
   const projectId =
     typeof pluginCapture?.project?.id === "string"
@@ -177,6 +195,64 @@ export async function createJobFromRequest(
     pluginCapture,
     createdAt: now,
     updatedAt: now,
+    revision: {
+      kind: "initial",
+    },
+  };
+
+  await writeJob(job);
+  return job;
+}
+
+async function createImprovementJobFromParent(
+  parentJobId: string,
+  input: Record<string, unknown>,
+): Promise<LocalExportJob> {
+  const parent = await readJob(parentJobId);
+  if (!parent) {
+    throw new Error(`Parent job not found: ${parentJobId}`);
+  }
+  if (!parent.sourceUrl && !parent.pluginCapture) {
+    throw new Error(
+      `Parent job ${parentJobId} does not have enough source context to create an improved revision.`,
+    );
+  }
+
+  const requestedFocus = normalizeRevisionFocus(input.requestedFocus);
+  const parentRevisionId = await readParentRevisionId(parent);
+  const pluginCapture =
+    input.pluginCapture !== undefined
+      ? cloneSerializable(input.pluginCapture)
+      : cloneSerializable(parent.pluginCapture);
+  const sourceUrl =
+    typeof input.sourceUrl === "string" && input.sourceUrl.trim()
+      ? input.sourceUrl.trim()
+      : parent.sourceUrl;
+  const selector =
+    typeof input.selector === "string" && input.selector.trim()
+      ? input.selector.trim()
+      : parent.selector;
+  const exportMode =
+    normalizeExportMode(input.exportMode) ?? parent.exportMode;
+  const id = `job_${crypto.randomBytes(8).toString("hex")}`;
+  const now = new Date().toISOString();
+
+  const job: LocalExportJob = {
+    id,
+    status: "queued",
+    sourceUrl,
+    selector,
+    exportMode,
+    pluginCapture,
+    title: createImprovementTitle(parent, requestedFocus),
+    createdAt: now,
+    updatedAt: now,
+    revision: {
+      kind: "improvement",
+      parentJobId,
+      parentRevisionId,
+      requestedFocus,
+    },
   };
 
   await writeJob(job);
@@ -188,4 +264,46 @@ function normalizeExportMode(value: unknown): LocalExportMode | undefined {
   if (value === "full-site") return "full-site";
   if (value === "components") return "components";
   return undefined;
+}
+
+function normalizeRevisionFocus(value: unknown): LocalRevisionFocus {
+  if (value === "responsiveness") return "responsiveness";
+  if (value === "components") return "components";
+  if (value === "revalidate") return "revalidate";
+  return "both";
+}
+
+async function readParentRevisionId(job: LocalExportJob) {
+  const manifestPath = job.artifacts?.revisionManifestPath;
+  if (!manifestPath) return undefined;
+  try {
+    const raw = JSON.parse(await fs.readFile(manifestPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    return typeof raw.revisionId === "string" ? raw.revisionId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function createImprovementTitle(
+  parent: LocalExportJob,
+  requestedFocus: LocalRevisionFocus,
+) {
+  const base = parent.title ?? parent.sourceUrl ?? parent.id;
+  const label =
+    requestedFocus === "responsiveness"
+      ? "Responsive revision"
+      : requestedFocus === "components"
+        ? "Component revision"
+        : requestedFocus === "revalidate"
+          ? "Validation rerun"
+          : "Improved revision";
+  return `${base} · ${label}`;
+}
+
+function cloneSerializable<T>(value: T): T {
+  if (value === undefined) return value;
+  return JSON.parse(JSON.stringify(value)) as T;
 }

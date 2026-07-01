@@ -39,14 +39,18 @@ export async function generateNextProject(
   const componentDir = path.join(input.projectDir, "components");
   const moduleDir = path.join(input.projectDir, "framer-modules");
   const pageDir = path.join(input.projectDir, "pages");
+  const templateDir = path.join(input.projectDir, "templates");
   const srcDir = path.join(input.projectDir, "src");
   const framerDataDir = path.join(srcDir, "framer-data");
+  const routeDataDir = path.join(framerDataDir, "routes");
 
   await mkdirp(componentDir);
   await mkdirp(moduleDir);
   await mkdirp(pageDir);
+  await mkdirp(templateDir);
   await mkdirp(srcDir);
   await mkdirp(framerDataDir);
+  await mkdirp(routeDataDir);
 
   const componentPath = path.join(
     componentDir,
@@ -75,6 +79,9 @@ export async function generateNextProject(
     : [];
   const isFullSite =
     input.ir.exportMode === "full-site" && sitePages.length > 0;
+  const templateGroups = isFullSite
+    ? buildTemplateGroups(input.ir, sitePages)
+    : [];
   const diagnosticSitePage = (() => {
     if (!isFullSite) return [];
     const primaryIndex = input.ir.sitePages?.findIndex(
@@ -137,8 +144,12 @@ export async function generateNextProject(
     path.join(input.projectDir, "route-manifest.json"),
     `${JSON.stringify(
       (input.ir.sitePages ?? []).map((page) => ({
+        componentName: page.componentName,
         path: page.routePath,
         title: page.title,
+        templateId: page.templateId ?? page.routePath,
+        templatePath: page.templatePath ?? page.routePath,
+        templateKind: page.templateKind ?? "static",
         sourceTextLength: page.sourceTextLength ?? 0,
         sourceNodeCount: page.exportTree
           ? countExportTreeNodes(page.exportTree)
@@ -147,6 +158,10 @@ export async function generateNextProject(
       null,
       2,
     )}\n`,
+  );
+  await writeFile(
+    path.join(input.projectDir, "route-template-manifest.json"),
+    `${JSON.stringify(input.ir.routeTemplates ?? [], null, 2)}\n`,
   );
 
   for (const module of runtimeComponentModules) {
@@ -182,6 +197,33 @@ export async function generateNextProject(
   }
 
   for (const entry of sitePages) {
+    const templateGroup = templateGroups.find((group) =>
+      group.memberPages.some((page) => page.componentName === entry.componentName),
+    );
+    if (templateGroup && templateGroup.isShared) {
+      const routeDataName = `${entry.componentName}RouteData`;
+      const routeDataPath = path.join(routeDataDir, `${routeDataName}.ts`);
+      const routePagePath = path.join(pageDir, `${entry.componentName}.tsx`);
+      await writeFile(
+        routeDataPath,
+        await formatTsx(
+          createRouteDataModule(routeDataName, entry),
+          "typescript",
+        ),
+      );
+      await writeFile(
+        routePagePath,
+        await formatTsx(
+          createSharedTemplateRoutePage({
+            pageComponentName: entry.componentName,
+            templateComponentName: templateGroup.templateComponentName,
+            routeDataImportName: routeDataName,
+          }),
+          "typescript",
+        ),
+      );
+      continue;
+    }
     const entryComponentPath = path.join(pageDir, `${entry.componentName}.tsx`);
     const entryCssPath = path.join(
       pageDir,
@@ -198,6 +240,36 @@ export async function generateNextProject(
     await writeFile(entryComponentPath, pageComponent);
     await writeFile(entryCssPath, createCss(entry, input.strategy));
     await writeFile(entryDtsPath, createDts(entry, false));
+  }
+
+  for (const group of templateGroups.filter((candidate) => candidate.isShared)) {
+    const templateComponentPath = path.join(
+      templateDir,
+      `${group.templateComponentName}.tsx`,
+    );
+    const templateCssPath = path.join(
+      templateDir,
+      `${group.templateComponentName}.module.css`,
+    );
+    const templateDtsPath = path.join(
+      templateDir,
+      `${group.templateComponentName}.d.ts`,
+    );
+    await writeFile(
+      templateComponentPath,
+      await formatTsx(
+        createSharedTemplateComponent(group.representativePage, group.templateComponentName),
+        "typescript",
+      ),
+    );
+    await writeFile(
+      templateCssPath,
+      createCss(group.representativePage, input.strategy),
+    );
+    await writeFile(
+      templateDtsPath,
+      createSharedTemplateDts(group.templateComponentName),
+    );
   }
 
   const app = await formatTsx(
@@ -266,6 +338,10 @@ export async function generateNextProject(
     path.join(framerDataDir, "index.ts"),
     await formatTsx(createFramerDataIndexModule(input.ir), "typescript"),
   );
+  await writeFile(
+    path.join(framerDataDir, "route-template-runtime.tsx"),
+    await formatTsx(createRouteTemplateRuntimeModule(), "typescript"),
+  );
   await writeFile(path.join(srcDir, "main.tsx"), main);
   await writeFile(path.join(srcDir, "styles.css"), globalCss);
   if (framerStyleCss) {
@@ -317,6 +393,56 @@ function countExportTreeNodes(nodes: ExportTreeNode[]): number {
   );
 }
 
+type TemplateGroup = {
+  templateId: string;
+  templateComponentName: string;
+  representativePage: ExportIR;
+  memberPages: ExportIR[];
+  isShared: boolean;
+};
+
+function buildTemplateGroups(base: ExportIR, pages: ExportIR[]): TemplateGroup[] {
+  const grouped = new Map<string, ExportIR[]>();
+  for (const page of pages) {
+    const sitePageRecord = findSitePageRecord(base, page.componentName);
+    const templateId =
+      sitePageRecord?.templateId ??
+      sitePageRecord?.routePath ??
+      page.componentName;
+    grouped.set(templateId, [...(grouped.get(templateId) ?? []), page]);
+  }
+
+  const templateManifest = new Map(
+    (base.routeTemplates ?? []).map((template) => [template.templateId, template] as const),
+  );
+  const usedNames = new Map<string, number>();
+
+  return [...grouped.entries()].map(([templateId, memberPages]) => {
+    const manifest = templateManifest.get(templateId);
+    const representativePage =
+      memberPages.find(
+        (page) =>
+          findSitePageRecord(base, page.componentName)?.routePath ===
+          manifest?.representativeRoutePath,
+      ) ?? memberPages[0]!;
+    const baseName = `${representativePage.componentName}Template`;
+    const deduped = usedNames.get(baseName) ?? 0;
+    usedNames.set(baseName, deduped + 1);
+    return {
+      templateId,
+      templateComponentName:
+        deduped === 0 ? baseName : `${baseName}${deduped + 1}`,
+      representativePage,
+      memberPages,
+      isShared: memberPages.length > 1,
+    };
+  });
+}
+
+function findSitePageRecord(base: ExportIR, componentName: string) {
+  return base.sitePages?.find((page) => page.componentName === componentName);
+}
+
 function deriveIrForComponent(
   base: ExportIR,
   componentName: string,
@@ -354,6 +480,209 @@ function deriveIrForComponent(
       ],
     },
   };
+}
+
+function createRouteDataModule(routeDataName: string, entry: ExportIR) {
+  const exportTree = sanitizeRouteTemplateTree(entry.exportTree ?? []);
+  return `export const ${routeDataName} = ${JSON.stringify(
+    {
+      sourceUrl: entry.sourceUrl,
+      exportTree,
+    },
+    null,
+    2,
+  )} as const
+`;
+}
+
+function sanitizeRouteTemplateTree(nodes: ExportTreeNode[]): Array<Record<string, unknown>> {
+  return nodes.map((node) => ({
+    id: node.id,
+    classKey: treeNodeClass(node),
+    tag: node.tag,
+    text: node.text,
+    kind: node.kind,
+    attributes: {
+      src: node.attributes.src,
+      href: node.attributes.href,
+      alt: node.attributes.alt,
+      role: node.attributes.role,
+      className:
+        typeof node.attributes.className === "string"
+          ? node.attributes.className
+          : undefined,
+      dataFramerName:
+        typeof node.attributes.dataFramerName === "string"
+          ? node.attributes.dataFramerName
+          : undefined,
+    },
+    inlineStyle: Object.fromEntries(treeInlineStyleEntries(node)),
+    children: sanitizeRouteTemplateTree(node.children),
+  }));
+}
+
+function createSharedTemplateRoutePage(input: {
+  pageComponentName: string;
+  templateComponentName: string;
+  routeDataImportName: string;
+}) {
+  return `import { ${input.templateComponentName} } from '../templates/${input.templateComponentName}'
+import { ${input.routeDataImportName} } from '../src/framer-data/routes/${input.routeDataImportName}'
+
+export function ${input.pageComponentName}() {
+  return <${input.templateComponentName} pageData={${input.routeDataImportName}} />
+}
+`;
+}
+
+function createSharedTemplateComponent(entry: ExportIR, templateComponentName: string) {
+  return `import styles from './${templateComponentName}.module.css'
+import { FramerRouteTemplateRuntime } from '../src/framer-data/route-template-runtime'
+
+export type ${templateComponentName}Props = {
+  pageData: {
+    sourceUrl: string
+    exportTree: Array<Record<string, unknown>>
+  }
+}
+
+export function ${templateComponentName}(props: ${templateComponentName}Props) {
+  return (
+    <main className={styles.page} data-coderelay-source={props.pageData.sourceUrl}>
+      <FramerRouteTemplateRuntime tree={props.pageData.exportTree} styles={styles} />
+    </main>
+  )
+}
+`;
+}
+
+function createSharedTemplateDts(templateComponentName: string) {
+  return `export type ${templateComponentName}Props = {
+  pageData: {
+    sourceUrl: string
+    exportTree: Array<Record<string, unknown>>
+  }
+}
+
+export declare function ${templateComponentName}(props: ${templateComponentName}Props): React.JSX.Element
+`;
+}
+
+function createRouteTemplateRuntimeModule() {
+  return `import * as React from 'react'
+
+type RouteTemplateNode = {
+  id?: string
+  classKey?: string
+  tag?: string
+  text?: string
+  kind?: string
+  attributes?: Record<string, unknown>
+  inlineStyle?: Record<string, unknown>
+  children?: RouteTemplateNode[]
+}
+
+type RuntimeProps = {
+  tree: Array<Record<string, unknown>>
+  styles: Record<string, string>
+}
+
+const textTags = new Set(['p', 'span', 'li', 'label', 'strong', 'em', 'small', 'blockquote'])
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function asNode(value: Record<string, unknown>): RouteTemplateNode {
+  return {
+    id: typeof value.id === 'string' ? value.id : undefined,
+    classKey: typeof value.classKey === 'string' ? value.classKey : undefined,
+    tag: typeof value.tag === 'string' ? value.tag : 'div',
+    text: typeof value.text === 'string' ? value.text : undefined,
+    kind: typeof value.kind === 'string' ? value.kind : undefined,
+    attributes: isRecord(value.attributes) ? value.attributes : {},
+    inlineStyle: isRecord(value.inlineStyle) ? value.inlineStyle : {},
+    children: Array.isArray(value.children)
+      ? value.children.filter(isRecord).map(asNode)
+      : [],
+  }
+}
+
+function baseClassForTag(node: RouteTemplateNode) {
+  if (node.tag === 'img') return 'image'
+  if (node.tag === 'h1') return 'heading'
+  if (node.tag === 'h2' || node.tag === 'h3') return 'subheading'
+  if (node.tag === 'a') return 'link'
+  if (node.tag === 'button') return 'button'
+  if (node.kind === 'text' || textTags.has(node.tag ?? '')) return 'body'
+  return 'surface'
+}
+
+function tagForNode(node: RouteTemplateNode, depth: number) {
+  if (node.tag && /^h[1-6]$/.test(node.tag)) return node.tag
+  if (node.tag === 'a' || node.tag === 'button' || node.tag === 'img') return node.tag
+  if (textTags.has(node.tag ?? '')) return node.tag ?? 'span'
+  if (depth === 0 && node.kind === 'component') return 'section'
+  if (node.tag === 'section' || node.tag === 'main' || node.tag === 'article') {
+    return node.tag
+  }
+  return 'div'
+}
+
+function toStyleObject(value: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => typeof entry === 'string' && entry.length > 0),
+  ) as React.CSSProperties
+}
+
+function classNameForNode(node: RouteTemplateNode, styles: Record<string, string>) {
+  const classes = [styles[baseClassForTag(node)]]
+  if (node.classKey && styles[node.classKey]) classes.push(styles[node.classKey])
+  const extra = typeof node.attributes?.className === 'string' ? node.attributes.className : ''
+  if (extra) classes.push(extra)
+  return classes.filter(Boolean).join(' ')
+}
+
+function renderNode(node: RouteTemplateNode, styles: Record<string, string>, depth: number): React.ReactNode {
+  const tag = tagForNode(node, depth)
+  const children = (node.children ?? []).map((child, index) =>
+    renderNode(child, styles, depth + 1) ?? <React.Fragment key={index} />,
+  )
+  const style = toStyleObject(isRecord(node.inlineStyle) ? node.inlineStyle : {})
+  const className = classNameForNode(node, styles)
+  const key = node.id ?? node.classKey ?? \`node-\${depth}\`
+
+  if (tag === 'img' && typeof node.attributes?.src === 'string') {
+    return React.createElement('img', {
+      key,
+      className,
+      style,
+      src: node.attributes.src,
+      alt: typeof node.attributes.alt === 'string' ? node.attributes.alt : '',
+    })
+  }
+
+  const props: Record<string, unknown> = {
+    key,
+    className,
+    style,
+  }
+
+  if (tag === 'a') {
+    props.href = typeof node.attributes?.href === 'string' ? node.attributes.href : '#'
+  }
+  if (tag === 'button') {
+    props.type = 'button'
+  }
+
+  return React.createElement(tag, props, node.text, ...children)
+}
+
+export function FramerRouteTemplateRuntime({ tree, styles }: RuntimeProps) {
+  const nodes = Array.isArray(tree) ? tree.filter(isRecord).map(asNode) : []
+  return <>{nodes.map((node, index) => renderNode(node, styles, index))}</>
+}
+`;
 }
 
 function scopeExportTreeToNodes(
@@ -713,6 +1042,25 @@ export default function App() {
 }
 
 function createViteSiteApp(base: ExportIR, pages: ExportIR[]) {
+  const sitePages =
+    base.sitePages ??
+    pages.map((entry) => ({
+      componentName: entry.componentName,
+      routePath: "/",
+      title: entry.componentName,
+      nodes: entry.component.nodes,
+      templateId: "/",
+      templatePath: "/",
+      templateKind: "static" as const,
+    }));
+  const pageMetadata = sitePages.map((page, index) => ({
+    componentName: pages[index]?.componentName ?? page.componentName,
+    routePath: page.routePath,
+    title: page.title,
+    templateId: page.templateId ?? page.routePath,
+    templatePath: page.templatePath ?? page.routePath,
+    templateKind: page.templateKind ?? "static",
+  }));
   const lazyComponents = pages
     .map(
       (entry) =>
@@ -723,60 +1071,232 @@ function createViteSiteApp(base: ExportIR, pages: ExportIR[]) {
 )`,
     )
     .join("\n\n");
-  const pageMetadata = (
-    base.sitePages ??
-    pages.map((entry) => ({
-      componentName: entry.componentName,
-      routePath: "/",
-      title: entry.componentName,
-      nodes: entry.component.nodes,
-    }))
-  ).map((page, index) => ({
-    componentName: pages[index]?.componentName ?? page.componentName,
-    routePath: page.routePath,
-    title: page.title,
-  }));
+  const preloaders = pages
+    .map(
+      (entry, index) =>
+        `  ${JSON.stringify(pageMetadata[index]?.routePath ?? "/")}: () =>
+    import('../pages/${entry.componentName}').then((module) => ({
+      default: module.${entry.componentName},
+    })),`,
+    )
+    .join("\n");
   const pageObjects = pageMetadata
     .map(
       (page) => `{
-	    path: ${JSON.stringify(page.routePath)},
-	    title: ${JSON.stringify(page.title)},
-	    Component: ${page.componentName},
-	  }`,
+      path: ${JSON.stringify(page.routePath)},
+      title: ${JSON.stringify(page.title)},
+      templateId: ${JSON.stringify(page.templateId)},
+      templatePath: ${JSON.stringify(page.templatePath)},
+      templateKind: ${JSON.stringify(page.templateKind)},
+      Component: ${page.componentName},
+    }`,
     )
     .join(",\n");
 
-	  return `import { lazy, Suspense, useMemo } from 'react'
+  return `import { Component, lazy, Suspense, startTransition, useEffect, useState, type ReactNode } from 'react'
 
-    ${lazyComponents}
+${lazyComponents}
 
-		const pages = [
-		  ${pageObjects}
-		]
+const pages = [
+  ${pageObjects}
+]
 
-		function getInitialPath() {
-		  if (typeof window === 'undefined') return pages[0]?.path ?? '/'
-		  const hashPath = window.location.hash.replace(/^#/, '')
-      const browserPath = window.location.pathname
-      if (pages.some((page) => page.path === browserPath)) return browserPath
-		  return pages.some((page) => page.path === hashPath) ? hashPath : pages[0]?.path ?? '/'
-		}
+const pagePreloaders: Record<string, () => Promise<unknown>> = {
+${preloaders}
+}
 
-		export default function App() {
-		  const currentPath = getInitialPath()
-		  const currentPage = useMemo(
-		    () => pages.find((page) => page.path === currentPath) ?? pages[0],
-		    [currentPath],
-		  )
-		  const Page = currentPage.Component
+function normalizePath(path: string) {
+  if (!path) return '/'
+  if (path === '/') return '/'
+  return path.endsWith('/') ? path.slice(0, -1) : path
+}
 
-		  return (
-        <Suspense fallback={<div aria-live="polite">Loading page...</div>}>
+function getInitialPath() {
+  if (typeof window === 'undefined') return pages[0]?.path ?? '/'
+  const browserPath = normalizePath(window.location.pathname)
+  if (pages.some((page) => normalizePath(page.path) === browserPath)) {
+    return browserPath
+  }
+  const hashPath = normalizePath(window.location.hash.replace(/^#/, ''))
+  if (pages.some((page) => normalizePath(page.path) === hashPath)) {
+    return hashPath
+  }
+  return normalizePath(pages[0]?.path ?? '/')
+}
+
+function preloadRoute(path: string) {
+  const preload = pagePreloaders[normalizePath(path)]
+  if (!preload) return
+  void preload()
+}
+
+function navigateTo(path: string, options: { replace?: boolean } = {}) {
+  if (typeof window === 'undefined') return
+  const nextPath = normalizePath(path)
+  const method = options.replace ? 'replaceState' : 'pushState'
+  window.history[method](null, '', nextPath)
+  window.dispatchEvent(new PopStateEvent('popstate'))
+}
+
+function isModifiedEvent(event: MouseEvent) {
+  return event.metaKey || event.ctrlKey || event.shiftKey || event.altKey
+}
+
+function findInternalAnchor(target: EventTarget | null) {
+  if (!(target instanceof Element)) return null
+  const anchor = target.closest('a[href]')
+  if (!(anchor instanceof HTMLAnchorElement)) return null
+  if (!anchor.href) return null
+  const url = new URL(anchor.href, window.location.href)
+  if (url.origin !== window.location.origin) return null
+  return {
+    anchor,
+    path: normalizePath(url.pathname),
+  }
+}
+
+class RouteErrorBoundary extends Component<
+  { path: string; children: ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { path: string; children: ReactNode }) {
+    super(props)
+    this.state = { hasError: false }
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error('CodeRelay route render failed', { path: this.props.path, error })
+  }
+
+  componentDidUpdate(prevProps: { path: string }) {
+    if (prevProps.path !== this.props.path && this.state.hasError) {
+      this.setState({ hasError: false })
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="routeStateCard" role="alert">
+          <div className="routeStateEyebrow">Route error</div>
+          <h2>We could not render this exported page.</h2>
+          <p>Try another route or regenerate this export with fresh source evidence.</p>
+        </div>
+      )
+    }
+
+    return this.props.children
+  }
+}
+
+export default function App() {
+  const [currentPath, setCurrentPath] = useState(() => getInitialPath())
+
+  useEffect(() => {
+    const updatePath = () => {
+      startTransition(() => {
+        setCurrentPath(getInitialPath())
+      })
+    }
+
+    const handleMouseOver = (event: MouseEvent) => {
+      const match = findInternalAnchor(event.target)
+      if (!match) return
+      preloadRoute(match.path)
+    }
+
+    const handleDocumentClick = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || isModifiedEvent(event)) {
+        return
+      }
+      const match = findInternalAnchor(event.target)
+      if (!match) return
+      if (!pages.some((page) => normalizePath(page.path) === match.path)) return
+      event.preventDefault()
+      preloadRoute(match.path)
+      navigateTo(match.path)
+    }
+
+    updatePath()
+    preloadRoute(currentPath)
+    window.addEventListener('popstate', updatePath)
+    document.addEventListener('click', handleDocumentClick)
+    document.addEventListener('mouseover', handleMouseOver)
+
+    return () => {
+      window.removeEventListener('popstate', updatePath)
+      document.removeEventListener('click', handleDocumentClick)
+      document.removeEventListener('mouseover', handleMouseOver)
+    }
+  }, [currentPath])
+
+  const currentPage =
+    pages.find((page) => normalizePath(page.path) === normalizePath(currentPath)) ??
+    pages[0]
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    document.title = currentPage?.title
+      ? \`\${currentPage.title} · CodeRelay Preview\`
+      : 'CodeRelay Preview'
+  }, [currentPage])
+
+  useEffect(() => {
+    const currentIndex = pages.findIndex(
+      (page) => normalizePath(page.path) === normalizePath(currentPage?.path ?? ''),
+    )
+    if (currentIndex < 0) return
+    preloadRoute(pages[currentIndex - 1]?.path ?? '')
+    preloadRoute(pages[currentIndex + 1]?.path ?? '')
+  }, [currentPage])
+
+  if (!currentPage) {
+    return (
+      <main className="previewShell">
+        <div className="routeStateCard" role="alert">
+          <div className="routeStateEyebrow">No route</div>
+          <h2>This export has no routable pages.</h2>
+        </div>
+      </main>
+    )
+  }
+
+  const Page = currentPage.Component
+
+  return (
+    <main className="previewShell">
+      <header className="previewTopbar">
+        <div>
+          <div className="previewEyebrow">Coderelay export</div>
+          <h1>{currentPage.title}</h1>
+          <p className="previewRouteMeta">
+            <code>{currentPage.path}</code>
+            <span>{currentPage.templateKind} template</span>
+          </p>
+        </div>
+        <span>{pages.length} page{pages.length === 1 ? '' : 's'}</span>
+      </header>
+      <RouteErrorBoundary path={currentPage.path}>
+        <Suspense
+          fallback={
+            <div className="routeStateCard" aria-live="polite">
+              <div className="routeStateEyebrow">Loading route</div>
+              <h2>{currentPage.title}</h2>
+              <p>Preparing the generated page module and its styles.</p>
+            </div>
+          }
+        >
           <Page />
         </Suspense>
-      )
-	}
-	`;
+      </RouteErrorBoundary>
+    </main>
+  )
+}
+`;
 }
 
 function createMultiEntryPreviewHtml(
@@ -1516,9 +2036,39 @@ function renderComponentModulesPreviewHtml(ir: ExportIR) {
   <div style="display:grid;gap:8px;">
     <strong>${escapeText(module.name)}</strong>
     <code style="color:#71717a;font-size:12px;">${escapeText(module.source)}</code>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;">
+      ${
+        module.isDefaultExport
+          ? `<span style="border:1px solid rgb(24 24 27 / 8%);border-radius:999px;padding:2px 8px;font-size:11px;">default export</span>`
+          : ""
+      }
+      ${
+        module.isVariant
+          ? `<span style="border:1px solid rgb(24 24 27 / 8%);border-radius:999px;padding:2px 8px;font-size:11px;">variant${module.isPrimaryVariant ? " primary" : ""}</span>`
+          : ""
+      }
+      ${
+        module.breakpoint
+          ? `<span style="border:1px solid rgb(24 24 27 / 8%);border-radius:999px;padding:2px 8px;font-size:11px;">${escapeText(module.breakpoint)}</span>`
+          : ""
+      }
+      ${
+        module.gesture
+          ? `<span style="border:1px solid rgb(24 24 27 / 8%);border-radius:999px;padding:2px 8px;font-size:11px;">${escapeText(module.gesture)}</span>`
+          : ""
+      }
+    </div>
     ${
       module.componentIdentifier
         ? `<div style="font-size:13px;color:#3f3f46;">Identifier: ${escapeText(module.componentIdentifier)}</div>`
+        : ""
+    }
+    ${
+      module.variantName || module.inheritsFromId
+        ? `<div style="font-size:12px;color:#52525b;display:grid;gap:2px;">
+            ${module.variantName ? `<div>Variant name: ${escapeText(module.variantName)}</div>` : ""}
+            ${module.inheritsFromId ? `<div>Inherits from: ${escapeText(module.inheritsFromId)}</div>` : ""}
+          </div>`
         : ""
     }
     ${
@@ -1558,6 +2108,11 @@ function renderCodeFilesPreviewHtml(ir: ExportIR) {
     <strong>${escapeText(file.name)}</strong>
     <code style="color:#71717a;font-size:12px;">${escapeText(file.path ?? file.source ?? "code-file")}</code>
     ${
+      file.versionId
+        ? `<div style="font-size:12px;color:#52525b;">Version: ${escapeText(file.versionId)}</div>`
+        : ""
+    }
+    ${
       file.insertURL
         ? `<a href="${escapeAttribute(file.insertURL)}" style="font-weight:700;color:#18181b;">${escapeText(file.insertURL)}</a>`
         : ""
@@ -1570,6 +2125,11 @@ function renderCodeFilesPreviewHtml(ir: ExportIR) {
                 `<li style="border:1px solid rgb(24 24 27 / 8%);border-radius:999px;padding:4px 10px;font-size:12px;">${escapeText(entry)}</li>`,
             )
             .join("")}</ul>`
+        : ""
+    }
+    ${
+      typeof file.content === "string" && file.content.length > 0
+        ? `<pre style="margin:0;max-height:160px;overflow:auto;padding:12px;border-radius:12px;background:rgb(24 24 27 / 4%);font-size:11px;line-height:1.5;white-space:pre-wrap;word-break:break-word;">${escapeText(file.content.slice(0, 1200))}${file.content.length > 1200 ? "\n…" : ""}</pre>`
         : ""
     }
   </div>
@@ -2018,6 +2578,53 @@ img {
   line-height: 1.1;
 }
 
+.previewRouteMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 0;
+  color: #52525b;
+  font-size: 13px;
+}
+
+.previewRouteMeta code {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgb(24 24 27 / 6%);
+}
+
+.routeStateCard {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px;
+  border: 1px solid rgb(24 24 27 / 10%);
+  border-radius: 18px;
+  background: white;
+  box-shadow: 0 18px 50px rgb(24 24 27 / 8%);
+}
+
+.routeStateCard h2 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.routeStateCard p {
+  margin: 12px 0 0;
+  color: #52525b;
+  line-height: 1.6;
+}
+
+.routeStateEyebrow {
+  margin-bottom: 8px;
+  color: #71717a;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .previewEyebrow {
   margin-bottom: 4px;
   color: #71717a;
@@ -2285,6 +2892,34 @@ export function FramerComponentRegistryPreview() {
             <header style={{ display: 'grid', gap: '0.25rem' }}>
               <strong>{name}</strong>
               <code style={{ color: '#71717a', fontSize: '0.8rem' }}>{entry.meta.source}</code>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.375rem' }}>
+                {entry.meta.isDefaultExport ? (
+                  <span style={{ border: '1px solid rgb(24 24 27 / 0.08)', borderRadius: '999px', padding: '0.125rem 0.5rem', fontSize: '0.7rem' }}>
+                    default export
+                  </span>
+                ) : null}
+                {entry.meta.isVariant ? (
+                  <span style={{ border: '1px solid rgb(24 24 27 / 0.08)', borderRadius: '999px', padding: '0.125rem 0.5rem', fontSize: '0.7rem' }}>
+                    {entry.meta.isPrimaryVariant ? 'variant primary' : 'variant'}
+                  </span>
+                ) : null}
+                {entry.meta.breakpoint ? (
+                  <span style={{ border: '1px solid rgb(24 24 27 / 0.08)', borderRadius: '999px', padding: '0.125rem 0.5rem', fontSize: '0.7rem' }}>
+                    {entry.meta.breakpoint}
+                  </span>
+                ) : null}
+                {entry.meta.gesture ? (
+                  <span style={{ border: '1px solid rgb(24 24 27 / 0.08)', borderRadius: '999px', padding: '0.125rem 0.5rem', fontSize: '0.7rem' }}>
+                    {entry.meta.gesture}
+                  </span>
+                ) : null}
+              </div>
+              {entry.meta.variantName || entry.meta.inheritsFromId ? (
+                <div style={{ color: '#52525b', fontSize: '0.75rem', display: 'grid', gap: '0.125rem' }}>
+                  {entry.meta.variantName ? <div>Variant name: {entry.meta.variantName}</div> : null}
+                  {entry.meta.inheritsFromId ? <div>Inherits from: {entry.meta.inheritsFromId}</div> : null}
+                </div>
+              ) : null}
             </header>
             <div>
               <Component />
@@ -2338,6 +2973,9 @@ export function FramerCodeFilePreview(props: {
       <header style={{ display: 'grid', gap: '0.25rem' }}>
         <strong>{file.name}</strong>
         <code style={{ color: '#71717a', fontSize: '0.8rem' }}>{file.path ?? file.source ?? 'code-file'}</code>
+        {file.versionId ? (
+          <div style={{ color: '#52525b', fontSize: '0.75rem' }}>Version: {file.versionId}</div>
+        ) : null}
       </header>
       {Array.isArray(file.exports) && file.exports.length > 0 ? (
         <ul style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', padding: 0, margin: 0, listStyle: 'none' }}>
@@ -2355,6 +2993,11 @@ export function FramerCodeFilePreview(props: {
             </li>
           ))}
         </ul>
+      ) : null}
+      {typeof file.content === 'string' && file.content.length > 0 ? (
+        <pre style={{ margin: 0, maxHeight: '10rem', overflow: 'auto', padding: '0.75rem', borderRadius: '0.75rem', background: 'rgb(24 24 27 / 0.04)', fontSize: '0.7rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {file.content.slice(0, 1200)}{file.content.length > 1200 ? '\\n…' : ''}
+        </pre>
       ) : null}
     </article>
   )
@@ -3333,7 +3976,19 @@ function treeBaseClass(node: ExportTreeNode) {
 }
 
 function treeNodeClass(node: ExportTreeNode) {
-  return `node${toSafeIdentifier(node.id)}`;
+  return `node${toSafeIdentifier(stableTreeNodeKey(node))}`;
+}
+
+function stableTreeNodeKey(node: ExportTreeNode) {
+  const pluginNodeId = node.source.pluginNodeId;
+  if (typeof pluginNodeId === "string" && pluginNodeId.length > 0) {
+    return pluginNodeId;
+  }
+  const domPath = node.source.domPath;
+  if (typeof domPath === "string" && domPath.length > 0) {
+    return domPath;
+  }
+  return node.id;
 }
 
 function isTreeTextNode(node: ExportTreeNode) {

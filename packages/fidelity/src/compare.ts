@@ -484,7 +484,7 @@ async function collectComparisonDiagnostics(
       viewport,
       nodeClasses: sourceNodes.map((node) => ({
         nodeId: node.id,
-        className: treeNodeClass(node.id),
+        className: treeNodeClass(node),
       })),
       browser,
     });
@@ -516,7 +516,7 @@ async function collectComparisonDiagnostics(
         nodeId: node.id,
         tag: node.tag,
         sourceDomPath: node.source.domPath,
-        className: treeNodeClass(node.id),
+        className: treeNodeClass(node),
         issueTypes: Array.from(issueTypes),
         propertyDiffs,
       };
@@ -694,7 +694,7 @@ async function collectPreviewValidationForViewport(
     viewport,
     nodeClasses: sourceNodes.map((node) => ({
       nodeId: node.id,
-      className: treeNodeClass(node.id),
+      className: treeNodeClass(node),
     })),
   });
   const foundNodes = inspectedNodes.filter((node) => node.found && node.styles).length;
@@ -975,8 +975,18 @@ function flattenExportTree(nodes: ExportTreeNode[]): ExportTreeNode[] {
   return nodes.flatMap((node) => [node, ...flattenExportTree(node.children)]);
 }
 
-function treeNodeClass(nodeId: string) {
-  return `node${toSafeIdentifier(nodeId)}`;
+function treeNodeClass(node: ExportTreeNode) {
+  return `node${toSafeIdentifier(stableTreeNodeKey(node))}`;
+}
+
+function stableTreeNodeKey(node: ExportTreeNode) {
+  if (typeof node.source.pluginNodeId === "string" && node.source.pluginNodeId.length > 0) {
+    return node.source.pluginNodeId;
+  }
+  if (typeof node.source.domPath === "string" && node.source.domPath.length > 0) {
+    return node.source.domPath;
+  }
+  return node.id;
 }
 
 function toSafeIdentifier(value: string) {

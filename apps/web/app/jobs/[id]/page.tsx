@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { readJob } from "../../../lib/jobs-store";
@@ -20,8 +21,48 @@ export default async function JobPage({
   const hasZip = Boolean(job.artifacts?.zipPath);
   const hasReport = Boolean(job.artifacts?.reportPath);
   const hasPreview = Boolean(job.artifacts?.previewPath);
+  const hasRevisionManifest = Boolean(job.artifacts?.revisionManifestPath);
+  const hasValidation = Boolean(job.artifacts?.validationPath);
+  const hasInvalidationPlan = Boolean(job.artifacts?.invalidationPlanPath);
+  const hasArtifactIndex = Boolean(job.artifacts?.artifactIndexPath);
   const isPending = job.status === "queued" || job.status === "running";
   const refreshSignature = `${job.id}:${job.status}:${job.updatedAt}`;
+  const report =
+    (await readJsonIfExists(job.artifacts?.reportPath)) as
+      | Record<string, unknown>
+      | undefined;
+  const revisionManifest =
+    (await readJsonIfExists(job.artifacts?.revisionManifestPath)) as
+      | Record<string, unknown>
+      | undefined;
+  const validation =
+    (await readJsonIfExists(job.artifacts?.validationPath)) as
+      | Record<string, unknown>
+      | undefined;
+  const invalidationPlan =
+    (await readJsonIfExists(job.artifacts?.invalidationPlanPath)) as
+      | Record<string, unknown>
+      | undefined;
+  const artifactIndex =
+    (await readJsonIfExists(job.artifacts?.artifactIndexPath)) as
+      | Record<string, unknown>
+      | undefined;
+  const capabilityReport = readCapabilityReport(job.pluginCapture);
+  const routeTemplates = Array.isArray(report?.routeTemplates)
+    ? report.routeTemplates
+    : [];
+  const generatedValidation =
+    validation && typeof validation === "object"
+      ? validation
+      : report?.generatedValidation && typeof report.generatedValidation === "object"
+        ? (report.generatedValidation as Record<string, unknown>)
+        : undefined;
+  const validationRoutes = Array.isArray(generatedValidation?.routes)
+    ? generatedValidation.routes
+    : [];
+  const canCreateImprovement =
+    job.status === "completed" &&
+    Boolean(job.sourceUrl || job.pluginCapture);
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-8">
@@ -66,6 +107,16 @@ export default async function JobPage({
           <div className="mt-4 grid gap-3">
             <Row label="Source URL" value={job.sourceUrl ?? "-"} />
             <Row label="Export mode" value={job.exportMode ?? "selection"} />
+            <Row
+              label="Revision"
+              value={
+                typeof revisionManifest?.revisionId === "string"
+                  ? revisionManifest.revisionId
+                  : typeof report?.revisionId === "string"
+                    ? report.revisionId
+                    : "-"
+              }
+            />
             <Row label="Selector" value={job.selector ?? "-"} />
             <Row
               label="Progress"
@@ -93,8 +144,38 @@ export default async function JobPage({
               value={new Date(job.createdAt).toLocaleString()}
             />
             <Row
+              label="Revision kind"
+              value={job.revision?.kind ?? "initial"}
+            />
+            <Row
+              label="Parent job"
+              value={job.revision?.parentJobId ?? "-"}
+            />
+            <Row
+              label="Requested focus"
+              value={job.revision?.requestedFocus ?? "-"}
+            />
+            <Row
               label="Updated"
               value={new Date(job.updatedAt).toLocaleString()}
+            />
+            <Row
+              label="Templates"
+              value={
+                typeof report?.routeTemplateCount === "number"
+                  ? String(report.routeTemplateCount)
+                  : `${routeTemplates.length}`
+              }
+            />
+            <Row
+              label="Code files"
+              value={
+                typeof report?.codeFileCount === "number"
+                  ? String(report.codeFileCount)
+                  : Array.isArray((job.pluginCapture as any)?.context?.codeFiles)
+                    ? String((job.pluginCapture as any).context.codeFiles.length)
+                    : "-"
+              }
             />
             <Row label="Error" value={job.errorMessage ?? "-"} />
           </div>
@@ -146,6 +227,46 @@ export default async function JobPage({
                 Report unavailable
               </div>
             )}
+            {hasRevisionManifest ? (
+              <Link
+                className="inline-flex h-10 items-center justify-center rounded-lg border border-black/10 bg-white px-3 text-sm font-bold text-zinc-950 hover:bg-zinc-50"
+                href={`/api/jobs/${job.id}/artifact?type=revision`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open Revision JSON
+              </Link>
+            ) : null}
+            {hasValidation ? (
+              <Link
+                className="inline-flex h-10 items-center justify-center rounded-lg border border-black/10 bg-white px-3 text-sm font-bold text-zinc-950 hover:bg-zinc-50"
+                href={`/api/jobs/${job.id}/artifact?type=validation`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open Validation JSON
+              </Link>
+            ) : null}
+            {hasInvalidationPlan ? (
+              <Link
+                className="inline-flex h-10 items-center justify-center rounded-lg border border-black/10 bg-white px-3 text-sm font-bold text-zinc-950 hover:bg-zinc-50"
+                href={`/api/jobs/${job.id}/artifact?type=invalidation`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open Invalidation JSON
+              </Link>
+            ) : null}
+            {hasArtifactIndex ? (
+              <Link
+                className="inline-flex h-10 items-center justify-center rounded-lg border border-black/10 bg-white px-3 text-sm font-bold text-zinc-950 hover:bg-zinc-50"
+                href={`/api/jobs/${job.id}/artifact?type=artifact-index`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open Artifact Index
+              </Link>
+            ) : null}
           </div>
 
           <div className="mt-4 rounded-lg border border-black/10 bg-zinc-50 p-3 text-xs text-zinc-700">
@@ -163,6 +284,273 @@ export default async function JobPage({
               </span>
             )}
           </div>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3">
+        <div className="text-sm font-extrabold text-zinc-700">
+          Improve Revision
+        </div>
+        <div className="rounded-xl border border-black/10 bg-white p-5 text-sm shadow-sm">
+          {canCreateImprovement ? (
+            <form action="/api/jobs" method="post" className="grid gap-3">
+              <input type="hidden" name="parentJobId" value={job.id} />
+              <div className="text-zinc-700">
+                Create a new queued job that reuses this export as the parent context.
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                {(
+                  [
+                    ["responsiveness", "Improve responsiveness"],
+                    ["components", "Improve components"],
+                    ["both", "Improve both"],
+                    ["revalidate", "Revalidate only"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="submit"
+                    name="requestedFocus"
+                    value={value}
+                    className="inline-flex h-10 items-center justify-center rounded-lg border border-black/10 bg-white px-3 text-sm font-bold text-zinc-950 hover:bg-zinc-50"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="rounded-lg border border-black/10 bg-zinc-50 p-3 text-xs text-zinc-600">
+                Expected reuse: source URL, export mode, plugin capture, route manifests,
+                revision artifacts, and generated baseline where compatible.
+              </div>
+            </form>
+          ) : (
+            <div className="text-zinc-500">
+              Improvement revisions are available after the current job completes.
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3">
+        <div className="text-sm font-extrabold text-zinc-700">Revision</div>
+        <div className="rounded-xl border border-black/10 bg-white p-5 text-sm shadow-sm">
+          <div className="grid gap-2">
+            <ArtifactRow
+              label="Manifest"
+              value={job.artifacts?.revisionManifestPath}
+              pending={!hasRevisionManifest}
+            />
+            <ArtifactRow
+              label="Validation"
+              value={job.artifacts?.validationPath}
+              pending={!hasValidation}
+            />
+            <ArtifactRow
+              label="Invalidation"
+              value={job.artifacts?.invalidationPlanPath}
+              pending={!hasInvalidationPlan}
+            />
+            <ArtifactRow
+              label="Artifact index"
+              value={job.artifacts?.artifactIndexPath}
+              pending={!hasArtifactIndex}
+            />
+            <ArtifactRow
+              label="Cache hit"
+              value={
+                typeof report?.revisionCacheHit === "boolean"
+                  ? String(report.revisionCacheHit)
+                  : undefined
+              }
+              pending={typeof report?.revisionCacheHit !== "boolean"}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <div>
+          <div className="text-sm font-extrabold text-zinc-700">
+            Invalidation Plan
+          </div>
+          <div className="mt-3 rounded-xl border border-black/10 bg-white p-5 text-sm shadow-sm">
+            {invalidationPlan ? (
+              <div className="grid gap-3">
+                <Row
+                  label="Kind"
+                  value={String(invalidationPlan.kind ?? "-")}
+                />
+                <Row
+                  label="Focus"
+                  value={String(invalidationPlan.requestedFocus ?? "-")}
+                />
+                <Row
+                  label="Parent revision"
+                  value={String(invalidationPlan.parentRevisionId ?? "-")}
+                />
+                <Row
+                  label="Reused"
+                  value={String(
+                    Array.isArray(invalidationPlan.reused)
+                      ? invalidationPlan.reused.length
+                      : 0,
+                  )}
+                />
+                <Row
+                  label="Invalidated"
+                  value={String(
+                    Array.isArray(invalidationPlan.invalidated)
+                      ? invalidationPlan.invalidated.length
+                      : 0,
+                  )}
+                />
+              </div>
+            ) : (
+              <div className="text-zinc-500">
+                No invalidation plan recorded yet.
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <div className="text-sm font-extrabold text-zinc-700">
+            Artifact Index
+          </div>
+          <div className="mt-3 rounded-xl border border-black/10 bg-white p-5 text-sm shadow-sm">
+            {artifactIndex ? (
+              <div className="grid gap-3">
+                <Row
+                  label="Files"
+                  value={String(artifactIndex.fileCount ?? "-")}
+                />
+                <Row
+                  label="Generated"
+                  value={String(artifactIndex.generatedAt ?? "-")}
+                />
+              </div>
+            ) : (
+              <div className="text-zinc-500">No artifact index recorded yet.</div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <div>
+          <div className="text-sm font-extrabold text-zinc-700">
+            Capability Report
+          </div>
+          <div className="mt-3 rounded-xl border border-black/10 bg-white p-5 text-sm shadow-sm">
+            {capabilityReport ? (
+              <div className="grid gap-3">
+                <Row
+                  label="Code file API"
+                  value={capabilityReport.codeFiles?.readable ? "readable" : "unavailable"}
+                />
+                <Row
+                  label="Code file source"
+                  value={`${capabilityReport.codeFiles?.contentReadableCount ?? 0}/${capabilityReport.codeFiles?.count ?? 0} readable`}
+                />
+                <Row
+                  label="Overrides"
+                  value={`${capabilityReport.codeFiles?.overrideExportCount ?? 0}`}
+                />
+                <Row
+                  label="CMS access"
+                  value={capabilityReport.cms?.collectionsReadable ? "readable" : "unavailable"}
+                />
+                <Row
+                  label="Styles access"
+                  value={
+                    capabilityReport.styles?.colorStylesReadable ||
+                    capabilityReport.styles?.textStylesReadable
+                      ? "readable"
+                      : "unavailable"
+                  }
+                />
+                <Row
+                  label="Permission errors"
+                  value={readCapabilityErrors(capabilityReport) || "-"}
+                />
+              </div>
+            ) : (
+              <div className="text-zinc-500">No capability report captured yet.</div>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <div className="text-sm font-extrabold text-zinc-700">
+            Export Summary
+          </div>
+          <div className="mt-3 rounded-xl border border-black/10 bg-white p-5 text-sm shadow-sm">
+            <div className="grid gap-3">
+              <Row
+                label="Best overall"
+                value={
+                  typeof (report?.visualFidelity as any)?.overall === "number"
+                    ? `${Math.round((report?.visualFidelity as any).overall)}`
+                    : "-"
+                }
+              />
+              <Row
+                label="Rendered routes"
+                value={`${validationRoutes.length}`}
+              />
+              <Row
+                label="Elements rendered"
+                value={
+                  typeof generatedValidation?.renderedElementCount === "number"
+                    ? String(generatedValidation.renderedElementCount)
+                    : "-"
+                }
+              />
+              <Row
+                label="Templates"
+                value={`${routeTemplates.length}`}
+              />
+              <Row
+                label="Build status"
+                value={
+                  typeof generatedValidation?.status === "string"
+                    ? generatedValidation.status
+                    : "-"
+                }
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3">
+        <div className="text-sm font-extrabold text-zinc-700">Route Templates</div>
+        <div className="rounded-xl border border-black/10 bg-white p-5 text-sm shadow-sm">
+          {routeTemplates.length > 0 ? (
+            <div className="grid gap-3">
+              {routeTemplates.slice(0, 12).map((template, index) => {
+                const record =
+                  template && typeof template === "object"
+                    ? (template as Record<string, unknown>)
+                    : {};
+                return (
+                  <div
+                    key={`${record.templateId ?? "template"}-${index}`}
+                    className="rounded-lg border border-black/10 bg-zinc-50 p-3"
+                  >
+                    <div className="font-mono text-xs text-zinc-700">
+                      {String(record.templateId ?? "-")}
+                    </div>
+                    <div className="mt-1 text-xs text-zinc-500">
+                      {String(record.templateKind ?? "template")} • {String(record.routeCount ?? 0)} routes • rep {String(record.representativeRoutePath ?? "-")}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-zinc-500">No route templates recorded.</div>
+          )}
         </div>
       </div>
 
@@ -185,6 +573,26 @@ export default async function JobPage({
               value={job.artifacts?.previewPath}
               pending={!hasPreview}
             />
+            <ArtifactRow
+              label="Revision"
+              value={job.artifacts?.revisionManifestPath}
+              pending={!hasRevisionManifest}
+            />
+            <ArtifactRow
+              label="Validation"
+              value={job.artifacts?.validationPath}
+              pending={!hasValidation}
+            />
+            <ArtifactRow
+              label="Invalidation"
+              value={job.artifacts?.invalidationPlanPath}
+              pending={!hasInvalidationPlan}
+            />
+            <ArtifactRow
+              label="Artifact index"
+              value={job.artifacts?.artifactIndexPath}
+              pending={!hasArtifactIndex}
+            />
           </div>
         </div>
       </div>
@@ -199,6 +607,40 @@ export default async function JobPage({
       </details>
     </main>
   );
+}
+
+async function readJsonIfExists(filePath?: string) {
+  if (!filePath) return undefined;
+  try {
+    return JSON.parse(await fs.readFile(filePath, "utf8")) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function readCapabilityReport(pluginCapture: unknown) {
+  if (!pluginCapture || typeof pluginCapture !== "object") return undefined;
+  const context = (pluginCapture as Record<string, unknown>).context;
+  if (!context || typeof context !== "object") return undefined;
+  const capabilities = (context as Record<string, unknown>).capabilities;
+  if (!capabilities || typeof capabilities !== "object") return undefined;
+  const report = (capabilities as Record<string, unknown>).capabilityReport;
+  return report && typeof report === "object"
+    ? (report as Record<string, any>)
+    : undefined;
+}
+
+function readCapabilityErrors(report: Record<string, any>) {
+  const candidates = [
+    report.codeFiles?.error,
+    report.cms?.managedCollectionsError,
+    report.cms?.collectionsError,
+    report.styles?.colorStylesError,
+    report.styles?.textStylesError,
+    report.styles?.fontsError,
+    report.permissions?.syncPermissionError,
+  ].filter((entry) => typeof entry === "string" && entry.length > 0);
+  return candidates.join(" | ");
 }
 
 function Row({

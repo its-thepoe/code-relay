@@ -127,6 +127,53 @@ test("normalized IR artifact summarizes materialized full-site route trees", () 
   assert.ok(serialized.length < 10_000);
 });
 
+test("normalized IR artifact includes route template summaries", () => {
+  const ir = {
+    pluginCapture: {
+      mode: "framer-plugin",
+      capturedAt: "2026-07-01T00:00:00.000Z",
+      selectedNodes: [],
+    },
+    runtimeCapture: {
+      url: "https://example.com",
+      title: "Template site",
+      mode: "page",
+      routeCaptures: [],
+    },
+    component: { semanticType: "page", nodes: [], sections: [] },
+    routeTemplates: [
+      {
+        templateId: "/blog/:slug",
+        templatePath: "/blog/:slug",
+        templateKind: "cms",
+        representativeRoutePath: "/blog/alpha",
+        routePaths: ["/blog/alpha", "/blog/beta"],
+        routeCount: 2,
+        sourceTextLength: 240,
+        nodeCount: 18,
+      },
+    ],
+    sitePages: [
+      {
+        componentName: "Blog",
+        routePath: "/blog/alpha",
+        title: "Blog alpha",
+        nodes: [],
+        exportTree: [],
+        templateId: "/blog/:slug",
+        templatePath: "/blog/:slug",
+        templateKind: "cms",
+      },
+    ],
+  } as unknown as ExportIR;
+
+  const artifact = createNormalizedIrArtifact(ir);
+
+  assert.equal(artifact.routeTemplates?.[0]?.routeCount, 2);
+  assert.equal(artifact.routeTemplates?.[0]?.templateKind, "cms");
+  assert.equal(artifact.sitePages[0]?.templateId, "/blog/:slug");
+});
+
 test("runLocalExport rejects a missing exportMode before generating files", async () => {
   const outDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "coderelay-missing-export-mode-"),
@@ -166,6 +213,9 @@ test("CMS route expansion requires an exact page collection id", () => {
       path: "/blog/:slug",
       title: "Post",
       collectionId: undefined,
+      templateId: "/blog/:slug",
+      templatePath: "/blog/:slug",
+      templateKind: "cms",
     },
   ]);
 
@@ -181,6 +231,9 @@ test("CMS route expansion requires an exact page collection id", () => {
       path: "/blog/first-post",
       title: "Post - first-post",
       collectionId: "posts",
+      templateId: "/blog/:slug",
+      templatePath: "/blog/:slug",
+      templateKind: "cms",
     },
   ]);
 });
@@ -195,8 +248,22 @@ test("full-site route manifest excludes drafts and the explicit 404 page", () =>
   ];
 
   assert.deepEqual(readFullSiteRouteManifest(capture), [
-    { path: "/", title: "Home", collectionId: undefined },
-    { path: "/about", title: "Public", collectionId: undefined },
+    {
+      path: "/",
+      title: "Home",
+      collectionId: undefined,
+      templateId: "/",
+      templatePath: "/",
+      templateKind: "static",
+    },
+    {
+      path: "/about",
+      title: "Public",
+      collectionId: undefined,
+      templateId: "/about",
+      templatePath: "/about",
+      templateKind: "static",
+    },
   ]);
 });
 
@@ -280,6 +347,12 @@ test("runLocalExport writes raw runtime capture artifact for plugin-only exports
   const patchHistory = JSON.parse(await fs.readFile(patchHistoryPath, "utf8"));
   const debugManifest = JSON.parse(await fs.readFile(debugManifestPath, "utf8"));
   const debugSummary = JSON.parse(await fs.readFile(debugSummaryPath, "utf8"));
+  const invalidationPlan = JSON.parse(
+    await fs.readFile(result.invalidationPlanPath!, "utf8"),
+  );
+  const artifactIndex = JSON.parse(
+    await fs.readFile(result.artifactIndexPath!, "utf8"),
+  );
 
   assert.equal(Array.isArray(runtimeCapture.nodes), true);
   assert.equal(runtimeCapture.nodes.length > 0, true);
@@ -330,6 +403,577 @@ test("runLocalExport writes raw runtime capture artifact for plugin-only exports
   );
   assert.equal(debugSummary.attempt, 1);
   assert.equal(debugSummary.selectedAsBest, true);
+  assert.equal(invalidationPlan.kind, "initial");
+  assert.equal(Array.isArray(invalidationPlan.invalidated), true);
+  assert.equal(typeof artifactIndex.fileCount, "number");
+  assert.equal(
+    Array.isArray(artifactIndex.entries) &&
+      artifactIndex.entries.some(
+        (entry: Record<string, unknown>) =>
+          entry.path === "revision-manifest.json",
+      ),
+    true,
+  );
+  assert.equal(
+    Array.isArray(artifactIndex.entries) &&
+      artifactIndex.entries.some(
+        (entry: Record<string, unknown>) =>
+          entry.id === "generated/project" &&
+          Array.isArray(entry.dependsOn) &&
+          entry.dependsOn.includes("ir/normalized"),
+      ),
+    true,
+  );
+});
+
+test("runLocalExport persists readable code files as source artifacts", async () => {
+  const outDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-source-artifacts-"),
+  );
+  const pluginCapture = createPluginCapture();
+  pluginCapture.context = {
+    ...(pluginCapture.context ?? {}),
+    codeFiles: [
+      {
+        id: "code-file-button",
+        name: "Button.tsx",
+        path: "code/Button.tsx",
+        versionId: "v1",
+        source: "framer",
+        content:
+          'export function Button(){ return <button type="button">Press</button> }',
+        contentHash: "buttonhash",
+        contentByteLength: 72,
+        hasContent: true,
+        exportDetails: [
+          {
+            name: "Button",
+            type: "component",
+            insertURL: "https://framer.com/m/Button.js",
+            isDefaultExport: false,
+            componentIdentifier: "Button",
+            componentName: "Button",
+            isPrimaryVariant: true,
+          },
+        ],
+        exports: ["Button"],
+      },
+    ],
+  };
+
+  const result = await runLocalExport({
+    outDir,
+    pluginCapture,
+    name: "IntegrationSmoke",
+    exportMode: "selection",
+    maxAttempts: 1,
+    targetFidelity: 0.92,
+  });
+
+  const sourceManifest = JSON.parse(
+    await fs.readFile(
+      path.join(result.exportDir, "source-artifacts", "manifest.json"),
+      "utf8",
+    ),
+  ) as Record<string, unknown>;
+  const codeFileEntry = Array.isArray(sourceManifest.codeFiles)
+    ? (sourceManifest.codeFiles[0] as Record<string, unknown>)
+    : undefined;
+  const metadata = JSON.parse(
+    await fs.readFile(
+      path.join(result.exportDir, String(codeFileEntry?.metadataPath ?? "")),
+      "utf8",
+    ),
+  ) as Record<string, unknown>;
+  const report = JSON.parse(await fs.readFile(result.reportPath, "utf8")) as Record<
+    string,
+    unknown
+  >;
+  const artifactIndex = JSON.parse(
+    await fs.readFile(result.artifactIndexPath!, "utf8"),
+  ) as Record<string, unknown>;
+
+  assert.equal(Array.isArray(sourceManifest.codeFiles), true);
+  assert.equal(codeFileEntry?.name, "Button.tsx");
+  assert.equal(codeFileEntry?.hasContent, true);
+  assert.equal(
+    typeof codeFileEntry?.artifactId === "string" &&
+      String(codeFileEntry.artifactId).startsWith("source/code-file/"),
+    true,
+  );
+  assert.equal(typeof codeFileEntry?.sourcePath, "string");
+  assert.equal(metadata.contentHash, "buttonhash");
+  assert.equal(
+    Array.isArray((report.sourceArtifacts as Record<string, unknown>)?.codeFiles),
+    true,
+  );
+  assert.equal(
+    Array.isArray(report.codeFiles) &&
+      typeof (report.codeFiles[0] as Record<string, unknown>)?.artifact === "object",
+    true,
+  );
+  assert.equal(
+    Array.isArray(artifactIndex.entries) &&
+      artifactIndex.entries.some(
+        (entry: Record<string, unknown>) =>
+          entry.id === codeFileEntry?.artifactId &&
+          Array.isArray(entry.dependsOn) &&
+          entry.dependsOn.includes("plugin/raw-payload"),
+      ),
+    true,
+  );
+});
+
+test("component-focused improvement revisions write dependency-scoped invalidation entries", async () => {
+  const outDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-component-invalidation-"),
+  );
+  const pluginCapture = createPluginCapture();
+  pluginCapture.context = {
+    ...(pluginCapture.context ?? {}),
+    codeFiles: [
+      {
+        id: "code-file-tabs",
+        name: "Tabs.tsx",
+        path: "code/Tabs.tsx",
+        versionId: "v1",
+        source: "framer",
+        content: 'export function Tabs(){ return <div>Tabs</div> }',
+        contentHash: "tabshash",
+        contentByteLength: 48,
+        hasContent: true,
+        exportDetails: [
+          {
+            name: "Tabs",
+            type: "component",
+            insertURL: "https://framer.com/m/Tabs.js",
+            componentIdentifier: "Tabs",
+            componentName: "Tabs",
+            isPrimaryVariant: true,
+          },
+        ],
+        exports: ["Tabs"],
+      },
+    ],
+  };
+
+  const result = await runLocalExport({
+    outDir,
+    pluginCapture,
+    name: "IntegrationSmoke",
+    exportMode: "selection",
+    maxAttempts: 1,
+    targetFidelity: 0.92,
+    revisionRequest: {
+      kind: "improvement",
+      requestedFocus: "components",
+      parentRevisionId: "revision_parent",
+    },
+  });
+
+  const invalidationPlan = JSON.parse(
+    await fs.readFile(result.invalidationPlanPath!, "utf8"),
+  ) as Record<string, unknown>;
+  const invalidated = Array.isArray(invalidationPlan.invalidated)
+    ? (invalidationPlan.invalidated as Array<Record<string, unknown>>)
+    : [];
+
+  assert.equal(invalidationPlan.requestedFocus, "components");
+  assert.equal(
+    invalidated.some(
+      (entry) =>
+        entry.artifact === "source/component-families" &&
+        entry.reason === "component-source-refresh" &&
+        Array.isArray(entry.dependsOn) &&
+        entry.dependsOn.some((value) => String(value).startsWith("source/code-file/")),
+    ),
+    true,
+  );
+  assert.equal(
+    invalidated.some(
+      (entry) =>
+        entry.artifact === "generated/project" &&
+        entry.reason === "depends-on-component-model" &&
+        Array.isArray(entry.dependsOn) &&
+        entry.dependsOn.includes("ir/normalized"),
+    ),
+    true,
+  );
+});
+
+test("component-focused improvements record changed and unchanged source artifacts against the parent revision", async () => {
+  const rootDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-source-diff-"),
+  );
+  const outDirA = path.join(rootDir, "artifacts", "job-a");
+  const outDirB = path.join(rootDir, "artifacts", "job-b");
+  await fs.mkdir(outDirA, { recursive: true });
+  await fs.mkdir(outDirB, { recursive: true });
+
+  const initialCapture = createPluginCapture();
+  initialCapture.context = {
+    ...(initialCapture.context ?? {}),
+    codeFiles: [
+      {
+        id: "code-file-tabs",
+        name: "Tabs.tsx",
+        path: "code/Tabs.tsx",
+        versionId: "v1",
+        source: "framer",
+        content: 'export function Tabs(){ return <div>v1</div> }',
+        contentHash: "tabs-v1",
+        contentByteLength: 46,
+        hasContent: true,
+        exportDetails: [{ name: "Tabs", type: "component" }],
+        exports: ["Tabs"],
+      },
+      {
+        id: "code-file-card",
+        name: "Card.tsx",
+        path: "code/Card.tsx",
+        versionId: "v1",
+        source: "framer",
+        content: 'export function Card(){ return <div>same</div> }',
+        contentHash: "card-same",
+        contentByteLength: 49,
+        hasContent: true,
+        exportDetails: [{ name: "Card", type: "component" }],
+        exports: ["Card"],
+      },
+    ],
+  };
+
+  const initial = await runLocalExport({
+    outDir: outDirA,
+    pluginCapture: initialCapture,
+    name: "IntegrationSmoke",
+    exportMode: "selection",
+    maxAttempts: 1,
+    targetFidelity: 0.92,
+  });
+  const initialManifest = JSON.parse(
+    await fs.readFile(initial.revisionManifestPath!, "utf8"),
+  ) as { revisionId: string };
+
+  const nextCapture = createPluginCapture();
+  nextCapture.context = {
+    ...(nextCapture.context ?? {}),
+    codeFiles: [
+      {
+        id: "code-file-tabs",
+        name: "Tabs.tsx",
+        path: "code/Tabs.tsx",
+        versionId: "v2",
+        source: "framer",
+        content: 'export function Tabs(){ return <div>v2</div> }',
+        contentHash: "tabs-v2",
+        contentByteLength: 46,
+        hasContent: true,
+        exportDetails: [{ name: "Tabs", type: "component" }],
+        exports: ["Tabs"],
+      },
+      {
+        id: "code-file-card",
+        name: "Card.tsx",
+        path: "code/Card.tsx",
+        versionId: "v1",
+        source: "framer",
+        content: 'export function Card(){ return <div>same</div> }',
+        contentHash: "card-same",
+        contentByteLength: 49,
+        hasContent: true,
+        exportDetails: [{ name: "Card", type: "component" }],
+        exports: ["Card"],
+      },
+    ],
+  };
+
+  const next = await runLocalExport({
+    outDir: outDirB,
+    pluginCapture: nextCapture,
+    name: "IntegrationSmoke",
+    exportMode: "selection",
+    maxAttempts: 1,
+    targetFidelity: 0.92,
+    revisionRequest: {
+      kind: "improvement",
+      requestedFocus: "components",
+      parentRevisionId: initialManifest.revisionId,
+    },
+  });
+
+  const invalidationPlan = JSON.parse(
+    await fs.readFile(next.invalidationPlanPath!, "utf8"),
+  ) as Record<string, unknown>;
+  const sourceDiff = invalidationPlan.sourceDiff as Record<string, unknown>;
+
+  assert.equal(Array.isArray(sourceDiff.changedCodeFileArtifactIds), true);
+  assert.equal(
+    (sourceDiff.changedCodeFileArtifactIds as Array<unknown>).length,
+    1,
+  );
+  assert.equal(
+    (sourceDiff.unchangedCodeFileArtifactIds as Array<unknown>).length,
+    1,
+  );
+  assert.equal(
+    Array.isArray(invalidationPlan.reused) &&
+      (invalidationPlan.reused as Array<unknown>).some((entry) =>
+        String(entry).startsWith("source/code-file/"),
+      ),
+    true,
+  );
+});
+
+test("component-focused improvements reuse the parent export when source artifacts are unchanged", async () => {
+  const rootDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-component-noop-"),
+  );
+  const outDirA = path.join(rootDir, "artifacts", "job-a");
+  const outDirB = path.join(rootDir, "artifacts", "job-b");
+  await fs.mkdir(outDirA, { recursive: true });
+  await fs.mkdir(outDirB, { recursive: true });
+
+  const capture = createPluginCapture();
+  capture.context = {
+    ...(capture.context ?? {}),
+    codeFiles: [
+      {
+        id: "code-file-tabs",
+        name: "Tabs.tsx",
+        path: "code/Tabs.tsx",
+        versionId: "v1",
+        source: "framer",
+        content: 'export function Tabs(){ return <div>same</div> }',
+        contentHash: "tabs-same",
+        contentByteLength: 48,
+        hasContent: true,
+        exportDetails: [{ name: "Tabs", type: "component" }],
+        exports: ["Tabs"],
+      },
+    ],
+  };
+
+  const initial = await runLocalExport({
+    outDir: outDirA,
+    pluginCapture: capture,
+    name: "IntegrationSmoke",
+    exportMode: "selection",
+    maxAttempts: 1,
+    targetFidelity: 0.92,
+  });
+  const initialManifest = JSON.parse(
+    await fs.readFile(initial.revisionManifestPath!, "utf8"),
+  ) as { revisionId: string };
+
+  const next = await runLocalExport({
+    outDir: outDirB,
+    pluginCapture: capture,
+    name: "IntegrationSmoke",
+    exportMode: "selection",
+    maxAttempts: 1,
+    targetFidelity: 0.92,
+    revisionRequest: {
+      kind: "improvement",
+      requestedFocus: "components",
+      parentRevisionId: initialManifest.revisionId,
+    },
+  });
+
+  const nextManifest = JSON.parse(
+    await fs.readFile(next.revisionManifestPath!, "utf8"),
+  ) as Record<string, unknown>;
+  const nextReport = JSON.parse(
+    await fs.readFile(next.reportPath, "utf8"),
+  ) as Record<string, unknown>;
+  const invalidationPlan = JSON.parse(
+    await fs.readFile(next.invalidationPlanPath!, "utf8"),
+  ) as Record<string, unknown>;
+  const sourceDiff = invalidationPlan.sourceDiff as Record<string, unknown>;
+
+  assert.equal(next.revisionCacheHit, false);
+  assert.equal(nextManifest.parentRevisionId, initialManifest.revisionId);
+  assert.equal(nextManifest.reusedBecause, "component-source-unchanged");
+  assert.equal(nextReport.reusedBecause, "component-source-unchanged");
+  assert.equal(
+    (sourceDiff.changedCodeFileArtifactIds as Array<unknown>).length,
+    0,
+  );
+  assert.equal(
+    (sourceDiff.unchangedCodeFileArtifactIds as Array<unknown>).length,
+    1,
+  );
+});
+
+test("runLocalExport reuses a completed revision cache on identical exports", async () => {
+  const outDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-revision-cache-"),
+  );
+
+  const input = {
+    outDir,
+    pluginCapture: createPluginCapture(),
+    name: "IntegrationSmoke",
+    exportMode: "selection" as const,
+    maxAttempts: 1,
+    targetFidelity: 0.92,
+  };
+
+  const first = await runLocalExport(input);
+  const second = await runLocalExport(input);
+
+  assert.equal(first.revisionCacheHit, false);
+  assert.equal(second.revisionCacheHit, true);
+  assert.equal(
+    JSON.parse(await fs.readFile(first.revisionManifestPath!, "utf8")).revisionId,
+    JSON.parse(await fs.readFile(second.revisionManifestPath!, "utf8")).revisionId,
+  );
+});
+
+test("runLocalExport reuses revision cache across different job output directories", async () => {
+  const rootDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-shared-revision-cache-"),
+  );
+  const outDirA = path.join(rootDir, "artifacts", "job-a");
+  const outDirB = path.join(rootDir, "artifacts", "job-b");
+  await fs.mkdir(outDirA, { recursive: true });
+  await fs.mkdir(outDirB, { recursive: true });
+
+  const first = await runLocalExport({
+    outDir: outDirA,
+    pluginCapture: createPluginCapture(),
+    name: "IntegrationSmoke",
+    exportMode: "selection",
+    maxAttempts: 1,
+    targetFidelity: 0.92,
+  });
+  const second = await runLocalExport({
+    outDir: outDirB,
+    pluginCapture: createPluginCapture(),
+    name: "IntegrationSmoke",
+    exportMode: "selection",
+    maxAttempts: 1,
+    targetFidelity: 0.92,
+  });
+
+  assert.equal(first.revisionCacheHit, false);
+  assert.equal(second.revisionCacheHit, true);
+  assert.equal(
+    JSON.parse(await fs.readFile(first.revisionManifestPath!, "utf8")).revisionId,
+    JSON.parse(await fs.readFile(second.revisionManifestPath!, "utf8")).revisionId,
+  );
+});
+
+test("runLocalExport can create a revalidate-only revision from a parent revision", async () => {
+  const rootDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-revalidate-revision-"),
+  );
+  const outDirA = path.join(rootDir, "artifacts", "job-a");
+  const outDirB = path.join(rootDir, "artifacts", "job-b");
+  await fs.mkdir(outDirA, { recursive: true });
+  await fs.mkdir(outDirB, { recursive: true });
+
+  const initial = await runLocalExport({
+    outDir: outDirA,
+    pluginCapture: createPluginCapture(),
+    name: "IntegrationSmoke",
+    exportMode: "selection",
+    maxAttempts: 1,
+    targetFidelity: 0.92,
+  });
+  const initialManifest = JSON.parse(
+    await fs.readFile(initial.revisionManifestPath!, "utf8"),
+  ) as {
+    revisionId: string;
+  };
+
+  const revalidated = await runLocalExport({
+    outDir: outDirB,
+    pluginCapture: {
+      ...createPluginCapture(),
+      selectedNodes: [],
+      context: {
+        exportMode: "selection",
+        captureMode: "plugin-only",
+        project: {
+          id: "broken-should-not-be-used",
+          name: "Broken should not be used",
+        },
+      },
+    },
+    name: "IntegrationSmoke",
+    exportMode: "selection",
+    maxAttempts: 1,
+    targetFidelity: 0.92,
+    revisionRequest: {
+      kind: "improvement",
+      requestedFocus: "revalidate",
+      parentRevisionId: initialManifest.revisionId,
+    },
+  });
+
+  const revalidatedManifest = JSON.parse(
+    await fs.readFile(revalidated.revisionManifestPath!, "utf8"),
+  ) as Record<string, unknown>;
+  const revalidatedReport = JSON.parse(
+    await fs.readFile(revalidated.reportPath, "utf8"),
+  ) as Record<string, unknown>;
+  const revalidatedInvalidation = JSON.parse(
+    await fs.readFile(revalidated.invalidationPlanPath!, "utf8"),
+  ) as Record<string, unknown>;
+  const revalidatedArtifactIndex = JSON.parse(
+    await fs.readFile(revalidated.artifactIndexPath!, "utf8"),
+  ) as Record<string, unknown>;
+
+  assert.equal(revalidated.revisionCacheHit, false);
+  assert.notEqual(revalidatedManifest.revisionId, initialManifest.revisionId);
+  assert.equal(
+    revalidatedManifest.parentRevisionId,
+    initialManifest.revisionId,
+  );
+  assert.equal(
+    (revalidatedManifest.revisionRequest as Record<string, unknown>)
+      ?.requestedFocus,
+    "revalidate",
+  );
+  assert.equal(
+    (revalidatedReport.revisionRequest as Record<string, unknown>)
+      ?.requestedFocus,
+    "revalidate",
+  );
+  assert.equal(
+    (revalidatedReport.generatedValidation as Record<string, unknown>)?.status,
+    "passed",
+  );
+  assert.equal(revalidatedInvalidation.requestedFocus, "revalidate");
+  assert.equal(
+    Array.isArray(revalidatedInvalidation.reused) &&
+      revalidatedInvalidation.reused.includes("generated/project"),
+    true,
+  );
+  assert.equal(typeof revalidatedArtifactIndex.fileCount, "number");
+});
+
+test("runLocalExport rejects revalidate-only revisions without a parent revision id", async () => {
+  const outDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-revalidate-missing-parent-"),
+  );
+
+  await assert.rejects(
+    runLocalExport({
+      outDir,
+      pluginCapture: createPluginCapture(),
+      name: "IntegrationSmoke",
+      exportMode: "selection",
+      maxAttempts: 1,
+      targetFidelity: 0.92,
+      revisionRequest: {
+        kind: "improvement",
+        requestedFocus: "revalidate",
+      },
+    }),
+    /Missing parentRevisionId/,
+  );
 });
 
 test("runLocalExport reconstructs plugin-only runtime nodes from framerTree when selected nodes are empty", async () => {
@@ -513,6 +1157,15 @@ test("runLocalExport crawls, builds, and validates every full-site route", async
       ),
     );
     assert.equal(rawRuntime.routeCaptures.length, 2);
+    const revisionManifest = JSON.parse(
+      await fs.readFile(
+        result.revisionManifestPath ??
+          path.join(result.exportDir, "revision-manifest.json"),
+        "utf8",
+      ),
+    );
+    assert.match(revisionManifest.revisionId, /^revision_[0-9a-f]{16}$/);
+    assert.equal(revisionManifest.summary.routeTemplates.length, 2);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

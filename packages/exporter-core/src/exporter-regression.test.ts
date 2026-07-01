@@ -460,6 +460,93 @@ function createRuntimeCaptureWithRuntimeContainerText(): RuntimeCapture {
   };
 }
 
+test("buildIntermediateRepresentation preserves code file source and variant metadata", () => {
+  const ir = buildIntermediateRepresentation({
+    url: "https://example.com",
+    exportMode: "components",
+    runtimeCapture: {
+      url: "https://example.com",
+      title: "Example",
+      mode: "section",
+      viewports: {
+        desktop: { screenshotPath: "", width: 1440, height: 900 },
+        laptop: { screenshotPath: "", width: 1280, height: 900 },
+        tablet: { screenshotPath: "", width: 768, height: 1024 },
+        mobile: { screenshotPath: "", width: 390, height: 844 },
+      },
+      nodes: [],
+    },
+    pluginCapture: {
+      mode: "framer-plugin",
+      capturedAt: "2026-07-01T00:00:00.000Z",
+      selectedNodes: [
+        {
+          id: "button-primary",
+          name: "Primary Button",
+          type: "ComponentNode",
+          metadata: {
+            component: {
+              id: "button-primary",
+              name: "Primary Button",
+              source: "component-node",
+              insertURL: "https://framer.com/m/button.js",
+              componentIdentifier: "Button",
+              componentName: "Button",
+              isVariant: true,
+              isPrimaryVariant: true,
+              gesture: "tap",
+              inheritsFromId: "button-base",
+              breakpoint: "mobile",
+              variantName: "Primary",
+            },
+          },
+        },
+      ],
+      context: {
+        componentModules: [
+          {
+            id: "button-primary",
+            name: "Primary Button",
+            source: "component-node",
+            insertURL: "https://framer.com/m/button.js",
+            componentIdentifier: "Button",
+            componentName: "Button",
+            isVariant: true,
+            isPrimaryVariant: true,
+            gesture: "tap",
+            inheritsFromId: "button-base",
+            breakpoint: "mobile",
+            variantName: "Primary",
+          },
+        ],
+        codeFiles: [
+          {
+            id: "code-file-1",
+            name: "Button.tsx",
+            path: "code/Button.tsx",
+            versionId: "version-1",
+            content: "export const Button = () => <button />",
+            source: "canvas-code-file",
+            exports: ["Button"],
+          },
+        ],
+      },
+    },
+    nodeMatches: [],
+  });
+
+  assert.equal(ir.componentModules?.[0]?.isVariant, true);
+  assert.equal(ir.componentModules?.[0]?.gesture, "tap");
+  assert.equal(ir.componentModules?.[0]?.breakpoint, "mobile");
+  assert.equal(ir.componentModules?.[0]?.variantName, "Primary");
+  assert.equal(ir.componentFamilies?.[0]?.id, "Button");
+  assert.equal(ir.componentFamilies?.[0]?.primaryVariantId, "button-primary");
+  assert.equal(ir.componentFamilies?.[0]?.variants[0]?.gesture, "tap");
+  assert.equal(ir.componentFamilies?.[0]?.provenance, "plugin");
+  assert.equal(ir.codeFiles?.[0]?.versionId, "version-1");
+  assert.equal(ir.codeFiles?.[0]?.content, "export const Button = () => <button />");
+});
+
 test("buildIntermediateRepresentation keeps styled surface nodes", () => {
   const ir = buildIntermediateRepresentation({
     url: "framer://project/styled-smoke",
@@ -561,6 +648,9 @@ test("full-site published URL export creates a page instead of fake component li
   assert.equal(ir.libraryComponents, undefined);
   assert.equal(ir.sitePages?.length, 1);
   assert.equal(ir.sitePages?.[0]?.routePath, "/");
+  assert.equal(ir.sitePages?.[0]?.templateId, "/");
+  assert.equal(ir.routeTemplates?.[0]?.templateId, "/");
+  assert.equal(ir.routeTemplates?.[0]?.routeCount, 1);
   assert.ok((ir.sitePages?.[0]?.nodes.length ?? 0) > 0);
   assert.ok((ir.exportTree ?? []).some((node) => node.children.length > 0));
 
@@ -582,15 +672,30 @@ test("full-site published URL export creates a page instead of fake component li
 
   const app = await fs.readFile(path.join(projectDir, "src", "App.tsx"), "utf8");
   const preview = await fs.readFile(path.join(projectDir, "preview.html"), "utf8");
+  const routeManifest = JSON.parse(
+    await fs.readFile(path.join(projectDir, "route-manifest.json"), "utf8"),
+  ) as Array<Record<string, unknown>>;
+  const routeTemplateManifest = JSON.parse(
+    await fs.readFile(
+      path.join(projectDir, "route-template-manifest.json"),
+      "utf8",
+    ),
+  ) as Array<Record<string, unknown>>;
   const componentFiles = await fs.readdir(path.join(projectDir, "components"));
   const pageFiles = await fs.readdir(path.join(projectDir, "pages"));
 
   assert.match(app, /const pages =/);
   assert.match(app, /import\('\.\.\/pages\/August'\)/);
+  assert.match(app, /window\.history\[method\]/);
+  assert.match(app, /window\.addEventListener\('popstate'/);
+  assert.match(app, /document\.addEventListener\('click'/);
   assert.match(preview, /Full-site preview/);
   assert.doesNotMatch(preview, /Component library preview/);
   assert.equal(componentFiles.length, 0);
   assert.ok(pageFiles.some((file) => file === "August.tsx"));
+  assert.equal(routeManifest[0]?.componentName, "August");
+  assert.equal(routeManifest[0]?.templateId, "/");
+  assert.equal(routeTemplateManifest[0]?.templatePath, "/");
 });
 
 test("full-site export ignores anonymous page roots and component catalog noise", () => {
@@ -1190,6 +1295,127 @@ test("full-site page generation does not reuse the entire export tree for every 
     ),
     pageIr.componentModules ?? [],
   );
+});
+
+test("full-site page generation shares template modules for repeated template groups", async () => {
+  const base = buildIntermediateRepresentation({
+    url: "https://example.com",
+    name: "SharedTemplateSite",
+    exportMode: "full-site",
+    captureMode: "runtime-first",
+    runtimeCapture: createRuntimeCapture(),
+    pluginCapture: createPluginCapture(),
+    nodeMatches: createNodeMatches(),
+  });
+  const projectDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-shared-template-pages-"),
+  );
+  const sharedTree = (text: string): ExportTreeNode[] => [
+    {
+      id: `route-${text}`,
+      childIds: ["shared-heading"],
+      name: "Page",
+      text: undefined,
+      kind: "frame" as const,
+      tag: "section",
+      styles: { display: "grid", gap: "16px" },
+      attributes: {},
+      source: { pluginNodeId: "shared-root" },
+      children: [
+        {
+          id: `heading-${text}`,
+          childIds: [],
+          name: "Heading",
+          text,
+          kind: "text" as const,
+          tag: "h1",
+          styles: { color: "rgb(0, 0, 0)" },
+          attributes: {},
+          source: { pluginNodeId: "shared-heading" },
+          children: [],
+        },
+      ],
+    },
+  ];
+  const pageIr = {
+    ...base,
+    sitePages: [
+      {
+        componentName: "PostAlpha",
+        routePath: "/blog/alpha",
+        title: "Alpha",
+        nodes: [{ ...base.component.nodes[0]!, id: "alpha", text: "Alpha" }],
+        exportTree: sharedTree("Alpha only"),
+        templateId: "/blog/:slug",
+        templatePath: "/blog/:slug",
+        templateKind: "cms" as const,
+      },
+      {
+        componentName: "PostBeta",
+        routePath: "/blog/beta",
+        title: "Beta",
+        nodes: [{ ...base.component.nodes[0]!, id: "beta", text: "Beta" }],
+        exportTree: sharedTree("Beta only"),
+        templateId: "/blog/:slug",
+        templatePath: "/blog/:slug",
+        templateKind: "cms" as const,
+      },
+    ],
+    routeTemplates: [
+      {
+        templateId: "/blog/:slug",
+        templatePath: "/blog/:slug",
+        templateKind: "cms" as const,
+        representativeRoutePath: "/blog/alpha",
+        routePaths: ["/blog/alpha", "/blog/beta"],
+        routeCount: 2,
+        sourceTextLength: 16,
+        nodeCount: 2,
+      },
+    ],
+    exportTree: sharedTree("Alpha only"),
+  };
+
+  await generateNextProject({
+    ir: pageIr,
+    projectDir,
+    strategy: {
+      id: "shared-template",
+      structuredLayout: false,
+      compactSpacing: false,
+      aggressiveMobileStacking: false,
+      preserveImageAspectRatio: true,
+    },
+  });
+
+  const templateFiles = await fs.readdir(path.join(projectDir, "templates"));
+  const templateModule = await fs.readFile(
+    path.join(projectDir, "templates", "PostAlphaTemplate.tsx"),
+    "utf8",
+  );
+  const alphaPage = await fs.readFile(
+    path.join(projectDir, "pages", "PostAlpha.tsx"),
+    "utf8",
+  );
+  const betaPage = await fs.readFile(
+    path.join(projectDir, "pages", "PostBeta.tsx"),
+    "utf8",
+  );
+  const alphaData = await fs.readFile(
+    path.join(projectDir, "src", "framer-data", "routes", "PostAlphaRouteData.ts"),
+    "utf8",
+  );
+  const betaData = await fs.readFile(
+    path.join(projectDir, "src", "framer-data", "routes", "PostBetaRouteData.ts"),
+    "utf8",
+  );
+
+  assert.ok(templateFiles.includes("PostAlphaTemplate.tsx"));
+  assert.match(templateModule, /FramerRouteTemplateRuntime/);
+  assert.match(alphaPage, /PostAlphaTemplate/);
+  assert.match(betaPage, /PostAlphaTemplate/);
+  assert.match(alphaData, /Alpha only/);
+  assert.match(betaData, /Beta only/);
 });
 
 test("generateNextProject writes non-empty css and imports it from the component", async () => {

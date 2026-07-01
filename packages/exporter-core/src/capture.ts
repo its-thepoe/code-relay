@@ -28,7 +28,13 @@ type CaptureInput = {
 
 type RouteCaptureInput = {
   originUrl: string;
-  routes: Array<{ path: string; title?: string }>;
+  routes: Array<{
+    path: string;
+    title?: string;
+    templateId?: string;
+    templatePath?: string;
+    templateKind?: "static" | "cms" | "component";
+  }>;
   workDir: string;
   cacheDir?: string;
   onProgress?: (progress: {
@@ -47,6 +53,7 @@ const viewports: Record<ViewportName, { width: number; height: number }> = {
 };
 
 const ROUTE_CAPTURE_TIMEOUT_MS = 3 * 60_000;
+const ROUTE_CAPTURE_CACHE_SCHEMA_VERSION = 3;
 
 const MOTION_STYLE_PROPERTIES = [
   "transitionProperty",
@@ -160,16 +167,25 @@ export async function captureRuntimeRoutes(
 ): Promise<RuntimeCapture> {
   await mkdirp(input.workDir);
   const routes = unique(
-    input.routes
+      input.routes
       .map((route) => ({
         path: normalizeRoutePath(route.path),
         title: route.title,
+        templateId: route.templateId,
+        templatePath: route.templatePath,
+        templateKind: route.templateKind,
       }))
       .filter((route) => route.path),
     (route) => route.path,
   );
   if (routes.length === 0) {
-    routes.push({ path: "/", title: undefined });
+    routes.push({
+      path: "/",
+      title: undefined,
+      templateId: "/",
+      templatePath: "/",
+      templateKind: "static",
+    });
   }
 
   const browser = await chromium.launch({ headless: true });
@@ -222,6 +238,9 @@ export async function captureRuntimeRoutes(
               ...capture,
               title: route.title?.trim() || capture.title,
               routePath: route.path,
+              templateId: route.templateId,
+              templatePath: route.templatePath,
+              templateKind: route.templateKind,
             };
             consecutiveNetworkFailures = 0;
             if (input.cacheDir) {
@@ -385,10 +404,14 @@ async function readCachedRouteCapture(
   try {
     const raw = await fs.readFile(routeCachePath(cacheDir, routePath), "utf8");
     const cached = JSON.parse(raw) as {
+      schemaVersion?: number;
       sourceUrl?: string;
+      templateId?: string;
       capture?: RuntimeRouteCapture;
     };
-    return cached.sourceUrl === sourceUrl && cached.capture
+    return cached.schemaVersion === ROUTE_CAPTURE_CACHE_SCHEMA_VERSION &&
+      cached.sourceUrl === sourceUrl &&
+      cached.capture
       ? cached.capture
       : null;
   } catch {
@@ -404,7 +427,16 @@ async function writeCachedRouteCapture(
 ) {
   await fs.writeFile(
     routeCachePath(cacheDir, routePath),
-    `${JSON.stringify({ sourceUrl, capture })}\n`,
+    `${JSON.stringify(
+      {
+        schemaVersion: ROUTE_CAPTURE_CACHE_SCHEMA_VERSION,
+        sourceUrl,
+        templateId: capture.templateId,
+        capture,
+      },
+      null,
+      2,
+    )}\n`,
   );
 }
 
