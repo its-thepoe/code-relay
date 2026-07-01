@@ -1707,7 +1707,10 @@ async function captureSelectionMetadata(
       rootId: string;
       rootIndex: number;
       rootCount: number;
+      chunkIndex: number;
+      chunkNodeCount: number;
       capturedNodeCount: number;
+      complete: boolean;
     }) => void;
   } = {},
 ) {
@@ -1740,6 +1743,9 @@ async function captureSelectionMetadata(
     }> = [{ node: root, depth: 0, path: String(rootIndex + 1) }];
     const seenVisit = new Set<string>();
     let capturedForRoot = 0;
+    let capturedInChunk = 0;
+    let chunkIndex = 0;
+    const chunkSize = 250;
 
     while (queue.length > 0) {
       const current = queue.shift()!;
@@ -1871,6 +1877,7 @@ async function captureSelectionMetadata(
       }
 
       capturedForRoot += 1;
+      capturedInChunk += 1;
 
       children.forEach((child, childIndex) => {
         queue.push({
@@ -1891,13 +1898,33 @@ async function captureSelectionMetadata(
           path: `${current.path}.d${descendantIndex + 1}`,
         });
       }
+
+      if (capturedInChunk >= chunkSize) {
+        options.onChunkComplete?.({
+          rootId,
+          rootIndex,
+          rootCount: selection.length,
+          chunkIndex,
+          chunkNodeCount: capturedInChunk,
+          capturedNodeCount: capturedForRoot,
+          complete: queue.length === 0,
+        });
+        chunkIndex += 1;
+        capturedInChunk = 0;
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
     }
-    options.onChunkComplete?.({
-      rootId,
-      rootIndex,
-      rootCount: selection.length,
-      capturedNodeCount: capturedForRoot,
-    });
+    if (capturedInChunk > 0 || capturedForRoot === 0) {
+      options.onChunkComplete?.({
+        rootId,
+        rootIndex,
+        rootCount: selection.length,
+        chunkIndex,
+        chunkNodeCount: capturedInChunk,
+        capturedNodeCount: capturedForRoot,
+        complete: true,
+      });
+    }
   }
 
   return [...richNodes, ...structuralNodes];

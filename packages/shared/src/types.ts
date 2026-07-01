@@ -64,6 +64,10 @@ export type RuntimeCapture = {
   >;
   nodes: RuntimeNode[];
   nodesByViewport?: Partial<Record<ViewportName, RuntimeNode[]>>;
+  rootStyles?: Record<string, string>;
+  rootStylesByViewport?: Partial<
+    Record<ViewportName, Record<string, string>>
+  >;
   captureDiagnostics?: {
     breakpointsCaptured: ViewportName[];
     fontReadiness?: Partial<Record<ViewportName, boolean>>;

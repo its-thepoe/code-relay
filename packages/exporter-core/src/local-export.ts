@@ -45,6 +45,13 @@ type LocalExportInput = {
   exportMode?: ExportMode;
   maxAttempts: number;
   targetFidelity: number;
+  onProgress?: (progress: {
+    stage: string;
+    completed?: number;
+    total?: number;
+    routePath?: string;
+    failed?: number;
+  }) => void | Promise<void>;
 };
 
 type LocalExportResult = {
@@ -129,6 +136,17 @@ export async function runLocalExport(
       "Missing published URL: full-site export requires an http(s) Framer site.",
     );
   }
+  const capturedPluginPayload =
+    input.pluginCapture ??
+    ({
+      mode: "simulated",
+      selectedNodes: [],
+      capturedAt: new Date().toISOString(),
+    } satisfies PluginCanvasCapture);
+  const pluginCapture =
+    input.exportMode === "full-site"
+      ? { ...capturedPluginPayload, selectedNodes: [] }
+      : capturedPluginPayload;
   console.log(
     "[coderelay:core:input]",
     JSON.stringify({
@@ -137,7 +155,7 @@ export async function runLocalExport(
       exportMode: input.exportMode,
       maxAttempts: input.maxAttempts,
       targetFidelity: input.targetFidelity,
-      pluginNodeCount: input.pluginCapture?.selectedNodes.length ?? 0,
+      pluginNodeCount: pluginCapture.selectedNodes.length,
     }),
   );
 
@@ -159,15 +177,18 @@ export async function runLocalExport(
     ? input.exportMode === "full-site"
       ? await captureRuntimeRoutes({
           originUrl: input.url!,
-          routes: readFullSiteRouteManifest(input.pluginCapture),
+          routes: readFullSiteRouteManifest(pluginCapture),
           workDir,
+          cacheDir: path.join(input.outDir, ".capture-cache"),
+          onProgress: (progress) =>
+            input.onProgress?.({ stage: "Capturing routes", ...progress }),
         })
       : await captureRuntime({
           url: input.url!,
           workDir,
           selector: input.selector,
         })
-    : createRuntimeCaptureFromPluginContext(input.pluginCapture);
+    : createRuntimeCaptureFromPluginContext(pluginCapture);
   console.log(
     "[coderelay:core:capture]",
     JSON.stringify({
@@ -180,8 +201,10 @@ export async function runLocalExport(
       ),
     }),
   );
-  const pluginCapture =
-    input.pluginCapture ?? createSimulatedPluginCapture(runtimeCapture.nodes);
+  if (!input.pluginCapture && input.exportMode !== "full-site") {
+    pluginCapture.selectedNodes =
+      createSimulatedPluginCapture(runtimeCapture.nodes).selectedNodes;
+  }
   const sourceUrl = input.url ?? runtimeCapture.url;
   const nodeMatches =
     input.exportMode === "full-site"
@@ -196,6 +219,9 @@ export async function runLocalExport(
     pluginCapture,
     nodeMatches,
   });
+  if (input.exportMode === "full-site") {
+    compactMaterializedRouteCaptures(runtimeCapture);
+  }
   console.log(
     "[coderelay:core:strategy]",
     JSON.stringify({
@@ -256,7 +282,7 @@ export async function runLocalExport(
   );
   await writeFile(
     path.join(exportDir, "normalized-ir.json"),
-    `${JSON.stringify(ir, null, 2)}\n`,
+    `${JSON.stringify(createNormalizedIrArtifact(ir), null, 2)}\n`,
   );
   const reportPath = path.join(exportDir, "export-report.json");
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
@@ -297,7 +323,70 @@ export async function runLocalExport(
   };
 }
 
-function readFullSiteRouteManifest(pluginCapture?: PluginCanvasCapture) {
+function compactMaterializedRouteCaptures(runtimeCapture: RuntimeCapture) {
+  for (const capture of runtimeCapture.routeCaptures ?? []) {
+    capture.nodes = [];
+    capture.nodesByViewport = undefined;
+    capture.framerStyleCss = undefined;
+  }
+}
+
+export function createNormalizedIrArtifact(ir: ExportIR) {
+  return {
+    ...ir,
+    artifactFormat: "summary",
+    artifactNote:
+      "Materialized node trees are stored in export-tree.json and generated page files.",
+    pluginCapture: {
+      mode: ir.pluginCapture.mode,
+      capturedAt: ir.pluginCapture.capturedAt,
+      project: ir.pluginCapture.context?.project,
+      selectedNodeCount: ir.pluginCapture.selectedNodes.length,
+    },
+    runtimeCapture: {
+      url: ir.runtimeCapture.url,
+      title: ir.runtimeCapture.title,
+      mode: ir.runtimeCapture.mode,
+      captureDiagnostics: ir.runtimeCapture.captureDiagnostics,
+      stylesheetUrls: ir.runtimeCapture.stylesheetUrls,
+      routeCaptures: (ir.runtimeCapture.routeCaptures ?? []).map((capture) => ({
+        routePath: capture.routePath,
+        url: capture.url,
+        title: capture.title,
+        captureDiagnostics: capture.captureDiagnostics,
+      })),
+    },
+    component: {
+      semanticType: ir.component.semanticType,
+      nodeCount: ir.component.nodes.length,
+      sections: ir.component.sections.map((section) => ({
+        index: section.index,
+        name: section.name,
+        kind: section.kind,
+        confidence: section.confidence,
+        nodeCount: section.nodes.length,
+      })),
+    },
+    exportTree: undefined,
+    sitePages: (ir.sitePages ?? []).map((page) => ({
+      componentName: page.componentName,
+      routePath: page.routePath,
+      title: page.title,
+      sourceTextLength: page.sourceTextLength,
+      nodeCount: page.nodes.length,
+      exportTreeNodeCount: countExportTreeNodes(page.exportTree ?? []),
+    })),
+  };
+}
+
+function countExportTreeNodes(nodes: ExportTreeNode[]): number {
+  return nodes.reduce(
+    (total, node) => total + 1 + countExportTreeNodes(node.children ?? []),
+    0,
+  );
+}
+
+export function readFullSiteRouteManifest(pluginCapture?: PluginCanvasCapture) {
   type RouteManifestEntry = {
     path: string;
     title?: string;
@@ -351,15 +440,21 @@ function readFullSiteRouteManifest(pluginCapture?: PluginCanvasCapture) {
               : undefined,
       };
     })
-    .filter((route) => route.path)
+    .filter(
+      (route) =>
+        route.path &&
+        !/^\/?drafts(?:\/|$)/i.test(route.path) &&
+        !/^\/?404\/?$/i.test(route.path),
+    )
     .flatMap((route): RouteManifestEntry[] => {
       if (!route.path.includes(":slug")) return [route];
+      if (!route.collectionId) return [route];
       const collection = collections.find((entry) => {
         const record =
           entry && typeof entry === "object"
             ? (entry as Record<string, unknown>)
             : {};
-        return !route.collectionId || record.id === route.collectionId;
+        return record.id === route.collectionId;
       });
       const collectionRecord =
         collection && typeof collection === "object"
@@ -412,9 +507,14 @@ export async function validateGeneratedProject(
 
   const startedAt = Date.now();
   try {
+    const packageManager = await resolvePackageManager(projectDir);
+    const installArgs =
+      packageManager === "pnpm"
+        ? ["install", "--config.dangerouslyAllowAllBuilds=true"]
+        : ["install", "--ignore-scripts", "--no-audit", "--no-fund"];
     const install = await runCommand(
-      "npm",
-      ["install", "--ignore-scripts", "--no-audit", "--no-fund"],
+      packageManager,
+      installArgs,
       projectDir,
       180_000,
     );
@@ -422,6 +522,7 @@ export async function validateGeneratedProject(
       "[coderelay:core:install]",
       JSON.stringify({
         exitCode: install.exitCode,
+        packageManager,
         durationMs: install.durationMs,
         stdout: tail(install.stdout, 2_000),
         stderr: tail(install.stderr, 2_000),
@@ -437,10 +538,10 @@ export async function validateGeneratedProject(
     }
 
     const build = await runCommand(
-      "npm",
+      packageManager,
       ["run", "build"],
       projectDir,
-      180_000,
+      300_000,
     );
     console.log(
       "[coderelay:core:build]",
@@ -467,7 +568,18 @@ export async function validateGeneratedProject(
     );
     console.log(
       "[coderelay:core:runtime]",
-      JSON.stringify(runtime),
+      JSON.stringify({
+        rootChildCount: runtime.rootChildCount,
+        renderedElementCount: runtime.renderedElementCount,
+        renderedTextLength: runtime.renderedTextLength,
+        consoleErrorCount: runtime.consoleErrors.length,
+        pageErrorCount: runtime.pageErrors.length,
+        routeCount: runtime.routes.length,
+        failedRouteCount: runtime.routes.filter(
+          (route) =>
+            route.rootChildCount === 0 || route.renderedElementCount === 0,
+        ).length,
+      }),
     );
     if (runtime.rootChildCount === 0 || runtime.renderedElementCount === 0) {
       throw new Error(
@@ -482,8 +594,14 @@ export async function validateGeneratedProject(
     const emptyRoute = runtime.routes.find(
       (route) =>
         (route.sourceTextLength > 0 && route.renderedTextLength === 0) ||
-        (route.sourceNodeCount >= 5 && route.renderedElementCount < 3) ||
-        (route.sourceNodeCount >= 5 && route.screenshotColorCount < 3),
+        (route.sourceTextLength >= 200 &&
+          route.renderedTextLength / route.sourceTextLength < 0.5) ||
+        (route.sourceTextLength > 0 &&
+          route.sourceNodeCount >= 5 &&
+          route.renderedElementCount < 3) ||
+        (route.sourceTextLength > 0 &&
+          route.sourceNodeCount >= 5 &&
+          route.screenshotColorCount < 3),
     );
     if (emptyRoute) {
       throw new Error(
@@ -511,6 +629,27 @@ export async function validateGeneratedProject(
       force: true,
     });
   }
+}
+
+async function resolvePackageManager(projectDir: string): Promise<"npm" | "pnpm"> {
+  const requested = process.env.CODERELAY_PACKAGE_MANAGER;
+  const candidates =
+    requested === "npm" || requested === "pnpm"
+      ? ([requested] as const)
+      : (["npm", "pnpm"] as const);
+
+  for (const candidate of candidates) {
+    try {
+      const result = await runCommand(candidate, ["--version"], projectDir, 10_000);
+      if (result.exitCode === 0) return candidate;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+
+  throw new Error(
+    "Generated export validation requires npm or pnpm, but neither command is available.",
+  );
 }
 
 async function readGeneratedRouteManifest(projectDir: string) {
@@ -679,10 +818,21 @@ async function inspectBuiltProject(
     let rootChildCount = 0;
     for (const route of routeManifest) {
       await page.goto(`http://127.0.0.1:${address.port}${route.path}`, {
-        waitUntil: "networkidle",
+        waitUntil: "domcontentloaded",
         timeout: 30_000,
       });
-      await page.waitForTimeout(250);
+      await page.waitForFunction(
+        () => {
+          const root = document.getElementById("root");
+          return (
+            (root?.childElementCount ?? 0) > 0 &&
+            !root?.querySelector('[aria-live="polite"]')
+          );
+        },
+        undefined,
+        { timeout: 10_000 },
+      );
+      await page.waitForTimeout(100);
       const inspected = await page.evaluate(() => {
         const root = document.getElementById("root");
         const renderedElements = root

@@ -586,7 +586,7 @@ test("full-site published URL export creates a page instead of fake component li
   const pageFiles = await fs.readdir(path.join(projectDir, "pages"));
 
   assert.match(app, /const pages =/);
-  assert.match(app, /from '\.\.\/pages\/August'/);
+  assert.match(app, /import\('\.\.\/pages\/August'\)/);
   assert.match(preview, /Full-site preview/);
   assert.doesNotMatch(preview, /Component library preview/);
   assert.equal(componentFiles.length, 0);
@@ -701,7 +701,7 @@ test("full-site capture builds each page from its own published runtime tree", a
     response.end(`<!doctype html>
       <html>
         <head><title>${pricing ? "Pricing" : "Home"}</title></head>
-        <body style="margin:0">
+        <body style="margin:0;font-family:${pricing ? "Georgia" : "Courier New"};color:#172554">
           <main style="min-height:100vh;background:${pricing ? "#fff7ed" : "#eff6ff"}">
             <section style="padding:48px">
               <h1 style="font-size:48px;color:#172554">${pricing ? "Choose a plan" : "Runtime home"}</h1>
@@ -747,6 +747,19 @@ test("full-site capture builds each page from its own published runtime tree", a
         node.id.startsWith("/pricing::"),
       ),
       true,
+    );
+    assert.match(
+      capture.routeCaptures?.[0]?.rootStyles?.fontFamily ?? "",
+      /Courier New/,
+    );
+    assert.match(
+      capture.routeCaptures?.[1]?.rootStyles?.fontFamily ?? "",
+      /Georgia/,
+    );
+    assert.match(
+      capture.routeCaptures?.[0]?.nodes.find((node) => node.tag === "main")
+        ?.styles.fontFamily ?? "",
+      /Courier New/,
     );
 
     const ir = buildIntermediateRepresentation({
@@ -803,8 +816,197 @@ test("full-site capture builds each page from its own published runtime tree", a
       await fs.readFile(path.join(projectDir, "pages", "Pricing.tsx"), "utf8"),
       /Choose a plan/,
     );
+    assert.match(
+      await fs.readFile(
+        path.join(projectDir, "pages", "Home.module.css"),
+        "utf8",
+      ),
+      /font-family: "Courier New"/,
+    );
+    assert.match(
+      await fs.readFile(
+        path.join(projectDir, "pages", "Pricing.module.css"),
+        "utf8",
+      ),
+      /font-family: Georgia/,
+    );
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("runtime capture does not fail when a webfont never finishes loading", async () => {
+  const server = createServer((request, response) => {
+    if (request.url === "/blocked.woff2") {
+      // Keep the response pending to reproduce Playwright's screenshot font wait.
+      return;
+    }
+    response.setHeader("content-type", "text/html; charset=utf-8");
+    response.end(`<!doctype html>
+      <style>
+        @font-face { font-family: Blocked; src: url("/blocked.woff2"); }
+        body { font-family: Blocked, sans-serif; }
+      </style>
+      <main><h1>Export survives blocked fonts</h1></main>`);
+  });
+  await new Promise<void>((resolve) =>
+    server.listen(0, "127.0.0.1", resolve),
+  );
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const workDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-blocked-font-capture-"),
+  );
+
+  try {
+    const capture = await captureRuntimeRoutes({
+      originUrl: `http://127.0.0.1:${address.port}/`,
+      routes: [{ path: "/", title: "Blocked font" }],
+      workDir,
+    });
+    assert.equal(
+      capture.nodes.some((node) => node.text === "Export survives blocked fonts"),
+      true,
+    );
+    assert.equal(capture.captureDiagnostics?.fontReadiness?.desktop, false);
+    await fs.access(capture.viewports.desktop.screenshotPath);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await fs.rm(workDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime capture retries an aborted document navigation", async () => {
+  let aborted = false;
+  const server = createServer((request, response) => {
+    if (!aborted) {
+      aborted = true;
+      request.socket.destroy();
+      return;
+    }
+    response.setHeader("content-type", "text/html; charset=utf-8");
+    response.end("<main><h1>Recovered navigation</h1></main>");
+  });
+  await new Promise<void>((resolve) =>
+    server.listen(0, "127.0.0.1", resolve),
+  );
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const workDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-aborted-navigation-"),
+  );
+
+  try {
+    const capture = await captureRuntimeRoutes({
+      originUrl: `http://127.0.0.1:${address.port}/`,
+      routes: [{ path: "/", title: "Retry" }],
+      workDir,
+    });
+    assert.equal(
+      capture.nodes.some((node) => node.text === "Recovered navigation"),
+      true,
+    );
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await fs.rm(workDir, { recursive: true, force: true });
+  }
+});
+
+test("full-site capture resumes completed routes from its durable cache", async () => {
+  let requests = 0;
+  const server = createServer((_request, response) => {
+    requests += 1;
+    response.setHeader("content-type", "text/html; charset=utf-8");
+    response.end("<main><h1>Cached route</h1></main>");
+  });
+  await new Promise<void>((resolve) =>
+    server.listen(0, "127.0.0.1", resolve),
+  );
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const parentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-route-cache-"),
+  );
+  const input = {
+    originUrl: `http://127.0.0.1:${address.port}/`,
+    routes: [{ path: "/", title: "Home" }],
+    cacheDir: path.join(parentDir, "cache"),
+  };
+
+  try {
+    const first = await captureRuntimeRoutes({
+      ...input,
+      workDir: path.join(parentDir, "first"),
+    });
+    const requestsAfterFirstCapture = requests;
+    const second = await captureRuntimeRoutes({
+      ...input,
+      workDir: path.join(parentDir, "second"),
+    });
+
+    assert.ok(requestsAfterFirstCapture > 0);
+    assert.equal(requests, requestsAfterFirstCapture);
+    assert.equal(second.nodes.length, first.nodes.length);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await fs.rm(parentDir, { recursive: true, force: true });
+  }
+});
+
+test("external redirects bypass Trusted Types protected documents", async () => {
+  const target = createServer((_request, response) => {
+    response.setHeader(
+      "content-security-policy",
+      "require-trusted-types-for 'script'",
+    );
+    response.setHeader("content-type", "text/html; charset=utf-8");
+    response.end("<main>Protected external destination</main>");
+  });
+  await new Promise<void>((resolve) =>
+    target.listen(0, "127.0.0.1", resolve),
+  );
+  const targetAddress = target.address();
+  assert.ok(targetAddress && typeof targetAddress !== "string");
+
+  const source = createServer((_request, response) => {
+    response.statusCode = 302;
+    response.setHeader(
+      "location",
+      `http://127.0.0.1:${targetAddress.port}/destination`,
+    );
+    response.end();
+  });
+  await new Promise<void>((resolve) =>
+    source.listen(0, "127.0.0.1", resolve),
+  );
+  const sourceAddress = source.address();
+  assert.ok(sourceAddress && typeof sourceAddress !== "string");
+  const workDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-trusted-types-redirect-"),
+  );
+
+  try {
+    const capture = await captureRuntimeRoutes({
+      originUrl: `http://127.0.0.1:${sourceAddress.port}/`,
+      routes: [{ path: "/", title: "Redirect" }],
+      workDir,
+    });
+    assert.equal(capture.title, "Redirect");
+    assert.equal(
+      capture.nodes.some((node) => node.text?.startsWith("Continue to ")),
+      true,
+    );
+  } finally {
+    source.closeAllConnections();
+    target.closeAllConnections();
+    await Promise.all([
+      new Promise<void>((resolve) => source.close(() => resolve())),
+      new Promise<void>((resolve) => target.close(() => resolve())),
+    ]);
+    await fs.rm(workDir, { recursive: true, force: true });
   }
 });
 
@@ -967,6 +1169,27 @@ test("full-site page generation does not reuse the entire export tree for every 
   assert.doesNotMatch(home, /Pricing only/);
   assert.match(pricing, /Pricing only/);
   assert.doesNotMatch(pricing, /Home only/);
+  const app = await fs.readFile(
+    path.join(projectDir, "src", "App.tsx"),
+    "utf8",
+  );
+  assert.match(app, /lazy\(\(\) =>\s*import\('\.\.\/pages\/Home'\)/);
+  assert.match(app, /lazy\(\(\) =>\s*import\('\.\.\/pages\/Pricing'\)/);
+  assert.match(app, /<Suspense/);
+  assert.doesNotMatch(app, /import \{ Home \} from/);
+  assert.deepEqual(
+    await fs.readdir(path.join(projectDir, "framer-modules")),
+    [],
+  );
+  assert.deepEqual(
+    JSON.parse(
+      await fs.readFile(
+        path.join(projectDir, "framer-component-modules.json"),
+        "utf8",
+      ),
+    ),
+    pageIr.componentModules ?? [],
+  );
 });
 
 test("generateNextProject writes non-empty css and imports it from the component", async () => {
@@ -1148,6 +1371,65 @@ test("generateNextProject writes non-empty css and imports it from the component
   await fs.access(compareDiagnosticsPath).catch(() => {
     // compare diagnostics are only generated in full compare runs, not direct codegen-only regression checks
   });
+});
+
+test("tree codegen preserves nested rich-text children", async () => {
+  const ir = buildIntermediateRepresentation({
+    url: "https://example.com",
+    name: "NestedText",
+    exportMode: "selection",
+    runtimeCapture: createRuntimeCapture(),
+    pluginCapture: createPluginCapture(),
+    nodeMatches: [],
+  });
+  ir.exportTree = [
+    {
+      id: "heading",
+      childIds: ["accent"],
+      kind: "text",
+      tag: "h1",
+      styles: {},
+      attributes: {},
+      source: {},
+      children: [
+        {
+          id: "accent",
+          parentId: "heading",
+          childIds: [],
+          text: "nested Framer text",
+          kind: "text",
+          tag: "span",
+          styles: {},
+          attributes: {},
+          source: {},
+          children: [],
+        },
+      ],
+    },
+  ];
+  const projectDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-nested-text-"),
+  );
+
+  await generateNextProject({
+    ir,
+    projectDir,
+    strategy: {
+      id: "nested-text",
+      structuredLayout: true,
+      compactSpacing: false,
+      aggressiveMobileStacking: false,
+      preserveImageAspectRatio: true,
+    },
+  });
+
+  const component = await fs.readFile(
+    path.join(projectDir, "components", "NestedText.tsx"),
+    "utf8",
+  );
+  assert.match(component, /<h1[^>]*>\s*<span[^>]*>/s);
+  assert.match(component, /nested Framer text/);
+  assert.match(component, /<\/span>\s*<\/h1>/s);
 });
 
 test("generateNextProject drops inherited stylesheet text instead of emitting invalid JSX text", async () => {

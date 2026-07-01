@@ -69,11 +69,25 @@ export async function generateNextProject(
           entry.componentName,
           entry.nodes,
           entry.exportTree,
+          entry.routePath,
         ),
       )
     : [];
   const isFullSite =
     input.ir.exportMode === "full-site" && sitePages.length > 0;
+  const diagnosticSitePage = (() => {
+    if (!isFullSite) return [];
+    const primaryIndex = input.ir.sitePages?.findIndex(
+      (page) => page.routePath === "/",
+    );
+    return [
+      sitePages[
+        typeof primaryIndex === "number" && primaryIndex >= 0
+          ? primaryIndex
+          : 0
+      ]!,
+    ];
+  })();
 
   const entries = isLibrary
     ? input.ir.libraryComponents!.map((entry) =>
@@ -85,6 +99,7 @@ export async function generateNextProject(
   const componentModules = Array.isArray(input.ir.componentModules)
     ? input.ir.componentModules
     : [];
+  const runtimeComponentModules = isFullSite ? [] : componentModules;
 
   await writeFile(
     path.join(input.projectDir, "framer-component-modules.json"),
@@ -134,7 +149,7 @@ export async function generateNextProject(
     )}\n`,
   );
 
-  for (const module of componentModules) {
+  for (const module of runtimeComponentModules) {
     const modulePath = path.join(
       moduleDir,
       `${toSafeIdentifier(module.name)}Remote.tsx`,
@@ -212,14 +227,14 @@ export async function generateNextProject(
   await writeFile(
     path.join(framerDataDir, "component-registry.ts"),
     await formatTsx(
-      createComponentRegistryModule(componentModules),
+      createComponentRegistryModule(runtimeComponentModules),
       "typescript",
     ),
   );
   await writeFile(
     path.join(framerDataDir, "component-runtime.tsx"),
     await formatTsx(
-      createComponentRuntimeModule(componentModules),
+      createComponentRuntimeModule(runtimeComponentModules),
       "typescript",
     ),
   );
@@ -270,7 +285,12 @@ export async function generateNextProject(
   await writeFile(
     previewHtmlPath,
     isFullSite
-      ? createMultiEntryPreviewHtml(input.ir, sitePages, input.strategy, "Page")
+      ? createMultiEntryPreviewHtml(
+          input.ir,
+          diagnosticSitePage,
+          input.strategy,
+          "Page",
+        )
       : isLibrary
         ? createMultiEntryPreviewHtml(
             input.ir,
@@ -302,6 +322,7 @@ function deriveIrForComponent(
   componentName: string,
   nodes: RuntimeNode[],
   runtimeExportTree?: ExportTreeNode[],
+  routePath?: string,
 ): ExportIR {
   const exportTree =
     runtimeExportTree ??
@@ -312,6 +333,12 @@ function deriveIrForComponent(
   return {
     ...base,
     componentName,
+    runtimeCapture:
+      routePath
+        ? base.runtimeCapture.routeCaptures?.find(
+            (capture) => capture.routePath === routePath,
+          ) ?? base.runtimeCapture
+        : base.runtimeCapture,
     exportTree,
     component: {
       semanticType: base.component.semanticType,
@@ -686,12 +713,16 @@ export default function App() {
 }
 
 function createViteSiteApp(base: ExportIR, pages: ExportIR[]) {
-  const imports = pages
+  const lazyComponents = pages
     .map(
       (entry) =>
-        `import { ${entry.componentName} } from '../pages/${entry.componentName}'`,
+        `const ${entry.componentName} = lazy(() =>
+  import('../pages/${entry.componentName}').then((module) => ({
+    default: module.${entry.componentName},
+  })),
+)`,
     )
-    .join("\n");
+    .join("\n\n");
   const pageMetadata = (
     base.sitePages ??
     pages.map((entry) => ({
@@ -715,8 +746,9 @@ function createViteSiteApp(base: ExportIR, pages: ExportIR[]) {
     )
     .join(",\n");
 
-	  return `import { useMemo } from 'react'
-		${imports}
+	  return `import { lazy, Suspense, useMemo } from 'react'
+
+    ${lazyComponents}
 
 		const pages = [
 		  ${pageObjects}
@@ -738,7 +770,11 @@ function createViteSiteApp(base: ExportIR, pages: ExportIR[]) {
 		  )
 		  const Page = currentPage.Component
 
-		  return <Page />
+		  return (
+        <Suspense fallback={<div aria-live="polite">Loading page...</div>}>
+          <Page />
+        </Suspense>
+      )
 	}
 	`;
 }
@@ -1245,6 +1281,19 @@ function createTreeCss(ir: ExportIR) {
     mobile: ir.runtimeCapture.viewports.mobile?.width ?? 390,
   };
   const treeNodes = flattenExportTree(ir.exportTree ?? []);
+  const rootBaseRules = styleRuleEntries(ir.runtimeCapture.rootStyles ?? {});
+  const rootLaptopRules = styleRuleEntries(
+    ir.runtimeCapture.rootStylesByViewport?.laptop ?? {},
+    ir.runtimeCapture.rootStyles ?? {},
+  );
+  const rootTabletRules = styleRuleEntries(
+    ir.runtimeCapture.rootStylesByViewport?.tablet ?? {},
+    ir.runtimeCapture.rootStyles ?? {},
+  );
+  const rootMobileRules = styleRuleEntries(
+    ir.runtimeCapture.rootStylesByViewport?.mobile ?? {},
+    ir.runtimeCapture.rootStyles ?? {},
+  );
   const baseRules = treeNodes
     .map((node) => {
       const entries = treeCssEntries(node);
@@ -1293,6 +1342,7 @@ function createTreeCss(ir: ExportIR) {
 
   return `.page {
   min-height: 100vh;
+${rootBaseRules.map(([key, value]) => `  ${toKebabCase(key)}: ${value};`).join("\n")}
   background: ${pageBackground};
   color: ${pageTextColor};
 }
@@ -1309,10 +1359,6 @@ function createTreeCss(ir: ExportIR) {
 .button,
 .image {
   box-sizing: border-box;
-}
-
-.surface {
-  width: 100%;
 }
 
 .heading,
@@ -1334,9 +1380,9 @@ function createTreeCss(ir: ExportIR) {
 ${baseRules}
 ${hoverRules ? `\n\n@media (hover: hover) and (pointer: fine) {\n${indentCss(hoverRules, 2)}\n}` : ""}
 ${focusRules ? `\n\n${focusRules}` : ""}
-${laptopRules ? `\n\n@media ${viewportMediaQuery("laptop", viewportWidths)} {\n${indentCss(laptopRules, 2)}\n}` : ""}
-${tabletRules ? `\n\n@media ${viewportMediaQuery("tablet", viewportWidths)} {\n${indentCss(tabletRules, 2)}\n}` : ""}
-${mobileRules ? `\n\n@media ${viewportMediaQuery("mobile", viewportWidths)} {\n${indentCss(mobileRules, 2)}\n}` : ""}
+${laptopRules || rootLaptopRules.length ? `\n\n@media ${viewportMediaQuery("laptop", viewportWidths)} {\n${rootLaptopRules.length ? `  .page {\n${rootLaptopRules.map(([key, value]) => `    ${toKebabCase(key)}: ${value};`).join("\n")}\n  }\n` : ""}${laptopRules ? indentCss(laptopRules, 2) : ""}\n}` : ""}
+${tabletRules || rootTabletRules.length ? `\n\n@media ${viewportMediaQuery("tablet", viewportWidths)} {\n${rootTabletRules.length ? `  .page {\n${rootTabletRules.map(([key, value]) => `    ${toKebabCase(key)}: ${value};`).join("\n")}\n  }\n` : ""}${tabletRules ? indentCss(tabletRules, 2) : ""}\n}` : ""}
+${mobileRules || rootMobileRules.length ? `\n\n@media ${viewportMediaQuery("mobile", viewportWidths)} {\n${rootMobileRules.length ? `  .page {\n${rootMobileRules.map(([key, value]) => `    ${toKebabCase(key)}: ${value};`).join("\n")}\n  }\n` : ""}${mobileRules ? indentCss(mobileRules, 2) : ""}\n}` : ""}
 ${laptopHoverRules ? `\n\n@media (hover: hover) and (pointer: fine) and ${viewportMediaQuery("laptop", viewportWidths)} {\n${indentCss(laptopHoverRules, 2)}\n}` : ""}
 ${tabletHoverRules ? `\n\n@media (hover: hover) and (pointer: fine) and ${viewportMediaQuery("tablet", viewportWidths)} {\n${indentCss(tabletHoverRules, 2)}\n}` : ""}
 ${mobileHoverRules ? `\n\n@media (hover: hover) and (pointer: fine) and ${viewportMediaQuery("mobile", viewportWidths)} {\n${indentCss(mobileHoverRules, 2)}\n}` : ""}
@@ -1629,10 +1675,10 @@ function renderExportTreeNodeReact(
         ? `{props.${titleKey} ?? ${JSON.stringify(rawText)}}`
         : text;
     if (titleKey && !ctx.titleUsed) ctx.titleUsed = true;
-    return `<h1 className=${className}${style}>${content}</h1>`;
+    return `<h1 className=${className}${style}>${content}${childContent}</h1>`;
   }
 
-  if (node.tag === "h2" || node.tag === "h3") {
+  if (/^h[2-6]$/.test(node.tag)) {
     const props = ir.exportProps;
     const subtitleKey = props?.heroSubtitle;
     const content =
@@ -1640,7 +1686,7 @@ function renderExportTreeNodeReact(
         ? `{props.${subtitleKey} ?? ${JSON.stringify(rawText)}}`
         : text;
     if (subtitleKey && !ctx.subtitleUsed) ctx.subtitleUsed = true;
-    return `<${node.tag} className=${className}${style}>${content}</${node.tag}>`;
+    return `<${node.tag} className=${className}${style}>${content}${childContent}</${node.tag}>`;
   }
 
   if (node.tag === "a") {
@@ -1658,7 +1704,7 @@ function renderExportTreeNodeReact(
         ? `{props.${hrefKey} ?? ${JSON.stringify(href)}}`
         : `"${escapeAttribute(href)}"`;
     if (hrefKey && !ctx.ctaHrefUsed) ctx.ctaHrefUsed = true;
-    return `<a className=${className} href=${hrefExpr}${style}>${label}</a>`;
+    return `<a className=${className} href=${hrefExpr}${style}>${label}${childContent}</a>`;
   }
 
   if (node.tag === "button") {
@@ -1669,11 +1715,12 @@ function renderExportTreeNodeReact(
         ? `{props.${labelKey} ?? ${JSON.stringify(rawText)}}`
         : text;
     if (labelKey && !ctx.ctaLabelUsed) ctx.ctaLabelUsed = true;
-    return `<button className=${className} type="button"${style}>${label}</button>`;
+    return `<button className=${className} type="button"${style}>${label}${childContent}</button>`;
   }
 
-  if (isTreeTextNode(node) && text) {
-    return `<p className=${className}${style}>${text}</p>`;
+  if (isTreeTextNode(node)) {
+    const tag = reactTextTag(node.tag);
+    return `<${tag} className=${className}${style}>${text}${childContent}</${tag}>`;
   }
 
   const tag = reactContainerTag(node, depth);
@@ -1695,21 +1742,22 @@ function renderExportTreeNodeHtml(node: ExportTreeNode, depth: number): string {
     return `<img class="${className}" src="${escapeAttribute(node.attributes.src)}" alt="${escapeAttribute(String(node.attributes.alt ?? ""))}"${style}>`;
   }
 
-  if (node.tag === "h1" || node.tag === "h2" || node.tag === "h3") {
-    return `<${node.tag} class="${className}"${style}>${text}</${node.tag}>`;
+  if (/^h[1-6]$/.test(node.tag)) {
+    return `<${node.tag} class="${className}"${style}>${text}${childContent}</${node.tag}>`;
   }
 
   if (node.tag === "a") {
     const href = typeof node.attributes.href === "string" ? node.attributes.href : "#";
-    return `<a class="${className}" href="${escapeAttribute(href)}"${style}>${text}</a>`;
+    return `<a class="${className}" href="${escapeAttribute(href)}"${style}>${text}${childContent}</a>`;
   }
 
   if (node.tag === "button") {
-    return `<button class="${className}" type="button"${style}>${text}</button>`;
+    return `<button class="${className}" type="button"${style}>${text}${childContent}</button>`;
   }
 
-  if (isTreeTextNode(node) && text) {
-    return `<p class="${className}"${style}>${text}</p>`;
+  if (isTreeTextNode(node)) {
+    const tag = reactTextTag(node.tag);
+    return `<${tag} class="${className}"${style}>${text}${childContent}</${tag}>`;
   }
 
   const tag = htmlContainerTag(node, depth);
@@ -3138,6 +3186,19 @@ function treeCssEntries(node: ExportTreeNode, viewport?: ViewportName) {
     );
 }
 
+function styleRuleEntries(
+  styles: Record<string, string>,
+  baseline: Record<string, string> = {},
+) {
+  const allowed = treeCssAllowedProperties();
+  return Object.entries(styles)
+    .filter(([key, value]) => allowed.has(key) && Boolean(value))
+    .filter(([key, value]) => baseline[key] !== value)
+    .filter(
+      ([, value]) => value !== "transparent" && value !== "rgba(0, 0, 0, 0)",
+    );
+}
+
 function interactionStateEntries(
   node: ExportTreeNode,
   state: "hover" | "focus",
@@ -3282,6 +3343,21 @@ function isTreeTextNode(node: ExportTreeNode) {
     node.tag === "span" ||
     node.tag === "li"
   );
+}
+
+function reactTextTag(tag: string) {
+  return new Set([
+    "p",
+    "span",
+    "li",
+    "label",
+    "strong",
+    "em",
+    "small",
+    "blockquote",
+  ]).has(tag)
+    ? tag
+    : "span";
 }
 
 function reactContainerTag(node: ExportTreeNode, depth: number) {
