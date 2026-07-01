@@ -81,6 +81,12 @@ type ComponentModuleManifest = {
   codeFileId?: string;
   codeFileName?: string;
   isDefaultExport?: boolean;
+  isVariant?: boolean;
+  isPrimaryVariant?: boolean;
+  gesture?: string;
+  inheritsFromId?: string;
+  breakpoint?: string;
+  variantName?: string;
   controls?: Record<string, unknown>;
   typedControls?: Record<string, unknown>;
 };
@@ -730,6 +736,37 @@ export function App() {
                     >
                       {node.name ?? "(unnamed)"}
                     </span>
+                    {(node as any).isVariant ||
+                    (node as any).gesture ||
+                    (node as any).breakpoint ? (
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4,
+                          flexWrap: "wrap",
+                          fontSize: 10,
+                          color: "rgba(255,255,255,0.72)",
+                        }}
+                      >
+                        {(node as any).isVariant ? (
+                          <span className="plugin-chip">variant</span>
+                        ) : null}
+                        {(node as any).isPrimaryVariant ? (
+                          <span className="plugin-chip">primary</span>
+                        ) : null}
+                        {typeof (node as any).breakpoint === "string" ? (
+                          <span className="plugin-chip">
+                            {(node as any).breakpoint}
+                          </span>
+                        ) : null}
+                        {typeof (node as any).gesture === "string" ? (
+                          <span className="plugin-chip">
+                            {(node as any).gesture}
+                          </span>
+                        ) : null}
+                      </span>
+                    ) : null}
                     <span style={{ flex: 1 }} />
                     <span
                       role="button"
@@ -1053,10 +1090,13 @@ async function collectPluginContext(input: {
     safeCall(() => framer.getFonts()),
   ]);
 
+  const sanitizedCodeFiles = codeFiles.ok
+    ? await Promise.all(codeFiles.value.map((entry) => sanitizeCodeFile(entry)))
+    : [];
   const componentModules = collectComponentModules({
     components: selectedOrAllComponents,
     selection: input.selection,
-    codeFiles: codeFiles.ok ? codeFiles.value : [],
+    codeFiles: sanitizedCodeFiles,
   });
   const hasPublishedUrl = Boolean(
     input.sourceUrl?.match(/^https?:\/\//) ||
@@ -1086,7 +1126,7 @@ async function collectPluginContext(input: {
     publishedUrl: publishInfo.ok ? getPublishUrl(publishInfo.value) : null,
     selectedComponents,
     componentModules,
-    codeFiles: codeFiles.ok ? codeFiles.value.map(sanitizeCodeFile) : [],
+    codeFiles: sanitizedCodeFiles,
     colorStyles: colorStyles.ok
       ? colorStyles.value.map((style) => sanitizeObject(style))
       : [],
@@ -1127,6 +1167,20 @@ async function collectPluginContext(input: {
       hasTextStyles: textStyles.ok,
       hasFonts: fonts.ok,
       hasCmsCollections: cmsCollections.length > 0,
+      capabilityReport: createCapabilityReport({
+        projectInfo,
+        publishInfo,
+        managedCollections,
+        collections,
+        canSync,
+        codeFiles,
+        sanitizedCodeFiles,
+        colorStyles,
+        textStyles,
+        fonts,
+        selectedComponentCount: selectedOrAllComponents.length,
+        cmsCollectionCount: cmsCollections.length,
+      }),
     },
   };
 }
@@ -1391,16 +1445,142 @@ function getPublishUrl(value: unknown) {
   return "";
 }
 
-function sanitizeCodeFile(codeFile: unknown) {
+async function sanitizeCodeFile(codeFile: unknown) {
   if (!codeFile || typeof codeFile !== "object") return {};
   const raw = codeFile as Record<string, unknown>;
+  const content = typeof raw.content === "string" ? raw.content : undefined;
+  const exportDetails = Array.isArray(raw.exports)
+    ? raw.exports
+        .map((entry) => {
+          if (!entry || typeof entry !== "object") return null;
+          const exportRecord = entry as Record<string, unknown>;
+          return sanitizeObject({
+            name: exportRecord.name,
+            type: exportRecord.type,
+            insertURL: exportRecord.insertURL,
+            isDefaultExport: exportRecord.isDefaultExport,
+            componentIdentifier: exportRecord.componentIdentifier,
+            componentName: exportRecord.componentName,
+            isVariant: exportRecord.isVariant,
+            isPrimaryVariant: exportRecord.isPrimaryVariant,
+            gesture: exportRecord.gesture,
+            inheritsFromId: exportRecord.inheritsFromId,
+            breakpoint: exportRecord.breakpoint,
+            variantName: exportRecord.variantName,
+          });
+        })
+        .filter((entry): entry is Record<string, unknown> => Boolean(entry))
+    : [];
   return sanitizeObject({
     id: raw.id,
     name: raw.name,
     path: raw.path,
     versionId: raw.versionId,
-    exports: raw.exports,
+    exports: exportDetails
+      .map((entry) => (typeof entry.name === "string" ? entry.name : null))
+      .filter((entry): entry is string => Boolean(entry)),
+    exportDetails,
+    content,
+    contentHash: content ? await sha256(content) : undefined,
+    contentByteLength: content ? new TextEncoder().encode(content).byteLength : 0,
+    hasContent: Boolean(content && content.length > 0),
+    isDefaultExport:
+      typeof raw.isDefaultExport === "boolean" ? raw.isDefaultExport : undefined,
+    insertURL: typeof raw.insertURL === "string" ? raw.insertURL : undefined,
+    source: raw.source,
   });
+}
+
+async function sha256(value: string) {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((entry) => entry.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function createCapabilityReport(input: {
+  projectInfo: Awaited<ReturnType<typeof safeCall>>;
+  publishInfo: Awaited<ReturnType<typeof safeCall>>;
+  managedCollections: Awaited<ReturnType<typeof safeCall>>;
+  collections: Awaited<ReturnType<typeof safeCall>>;
+  canSync: Awaited<ReturnType<typeof safeCall>>;
+  codeFiles: Awaited<ReturnType<typeof safeCall>>;
+  sanitizedCodeFiles: Array<Record<string, unknown>>;
+  colorStyles: Awaited<ReturnType<typeof safeCall>>;
+  textStyles: Awaited<ReturnType<typeof safeCall>>;
+  fonts: Awaited<ReturnType<typeof safeCall>>;
+  selectedComponentCount: number;
+  cmsCollectionCount: number;
+}) {
+  const codeFileContentCount = input.sanitizedCodeFiles.filter(
+    (entry) => entry.hasContent === true,
+  ).length;
+  const overrideExportCount = input.sanitizedCodeFiles.reduce((total, entry) => {
+    const exportDetails = Array.isArray(entry.exportDetails)
+      ? entry.exportDetails
+      : [];
+    return (
+      total +
+      exportDetails.filter(
+        (detail) =>
+          detail &&
+          typeof detail === "object" &&
+          (detail as Record<string, unknown>).type === "override",
+      ).length
+    );
+  }, 0);
+  const codeFileCount = input.sanitizedCodeFiles.length;
+  return {
+    projectInfo: {
+      readable: input.projectInfo.ok,
+      error: input.projectInfo.ok ? undefined : input.projectInfo.error,
+    },
+    publishInfo: {
+      readable: input.publishInfo.ok,
+      error: input.publishInfo.ok ? undefined : input.publishInfo.error,
+    },
+    components: {
+      readable: true,
+      selectedCount: input.selectedComponentCount,
+    },
+    codeFiles: {
+      readable: input.codeFiles.ok,
+      error: input.codeFiles.ok ? undefined : input.codeFiles.error,
+      count: codeFileCount,
+      contentReadable: codeFileContentCount > 0,
+      contentReadableCount: codeFileContentCount,
+      contentMissingCount: Math.max(0, codeFileCount - codeFileContentCount),
+      overrideExportCount,
+      truncatedArtifacts: 0,
+    },
+    cms: {
+      managedCollectionsReadable: input.managedCollections.ok,
+      managedCollectionsError: input.managedCollections.ok
+        ? undefined
+        : input.managedCollections.error,
+      collectionsReadable: input.collections.ok,
+      collectionsError: input.collections.ok ? undefined : input.collections.error,
+      collectionCount: input.cmsCollectionCount,
+    },
+    styles: {
+      colorStylesReadable: input.colorStyles.ok,
+      colorStylesError: input.colorStyles.ok ? undefined : input.colorStyles.error,
+      textStylesReadable: input.textStyles.ok,
+      textStylesError: input.textStyles.ok ? undefined : input.textStyles.error,
+      fontsReadable: input.fonts.ok,
+      fontsError: input.fonts.ok ? undefined : input.fonts.error,
+    },
+    permissions: {
+      syncPermissionReadable: input.canSync.ok,
+      syncPermissionError: input.canSync.ok ? undefined : input.canSync.error,
+      canSync: input.canSync.ok ? input.canSync.value : false,
+    },
+    evidence: {
+      missingCodeFileSourceIsExplicit:
+        input.codeFiles.ok && codeFileCount > codeFileContentCount,
+    },
+  };
 }
 
 function chooseExportEngine(input: {
@@ -1453,6 +1633,21 @@ function collectComponentModules(input: {
           : undefined,
       componentName:
         typeof raw.componentName === "string" ? raw.componentName : undefined,
+      isVariant:
+        typeof raw.isVariant === "boolean" ? raw.isVariant : undefined,
+      isPrimaryVariant:
+        typeof raw.isPrimaryVariant === "boolean"
+          ? raw.isPrimaryVariant
+          : undefined,
+      gesture: typeof raw.gesture === "string" ? raw.gesture : undefined,
+      inheritsFromId:
+        typeof raw.inheritsFromId === "string"
+          ? raw.inheritsFromId
+          : undefined,
+      breakpoint:
+        typeof raw.breakpoint === "string" ? raw.breakpoint : undefined,
+      variantName:
+        typeof raw.variantName === "string" ? raw.variantName : undefined,
       controls: sanitizeRecord(raw.controls),
       typedControls: sanitizeRecord(raw.typedControls),
     });
@@ -1479,6 +1674,21 @@ function collectComponentModules(input: {
           : undefined,
       componentName:
         typeof raw.componentName === "string" ? raw.componentName : undefined,
+      isVariant:
+        typeof raw.isVariant === "boolean" ? raw.isVariant : undefined,
+      isPrimaryVariant:
+        typeof raw.isPrimaryVariant === "boolean"
+          ? raw.isPrimaryVariant
+          : undefined,
+      gesture: typeof raw.gesture === "string" ? raw.gesture : undefined,
+      inheritsFromId:
+        typeof raw.inheritsFromId === "string"
+          ? raw.inheritsFromId
+          : undefined,
+      breakpoint:
+        typeof raw.breakpoint === "string" ? raw.breakpoint : undefined,
+      variantName:
+        typeof raw.variantName === "string" ? raw.variantName : undefined,
       controls: sanitizeRecord(raw.controls),
       typedControls: sanitizeRecord(raw.typedControls),
     });
@@ -1508,6 +1718,21 @@ function collectComponentModules(input: {
           typeof item.isDefaultExport === "boolean"
             ? item.isDefaultExport
             : undefined,
+        isVariant:
+          typeof item.isVariant === "boolean" ? item.isVariant : undefined,
+        isPrimaryVariant:
+          typeof item.isPrimaryVariant === "boolean"
+            ? item.isPrimaryVariant
+            : undefined,
+        gesture: typeof item.gesture === "string" ? item.gesture : undefined,
+        inheritsFromId:
+          typeof item.inheritsFromId === "string"
+            ? item.inheritsFromId
+            : undefined,
+        breakpoint:
+          typeof item.breakpoint === "string" ? item.breakpoint : undefined,
+        variantName:
+          typeof item.variantName === "string" ? item.variantName : undefined,
       });
     }
   }
@@ -2021,6 +2246,12 @@ function getNodeComponentModule(node: CapturableNode) {
     componentName: raw.componentName,
     controls: raw.controls,
     typedControls: raw.typedControls,
+    isVariant: raw.isVariant,
+    isPrimaryVariant: raw.isPrimaryVariant,
+    gesture: raw.gesture,
+    inheritsFromId: raw.inheritsFromId,
+    breakpoint: raw.breakpoint,
+    variantName: raw.variantName,
   });
 }
 
@@ -2042,6 +2273,8 @@ function getNodeTraits(node: CapturableNode, childIds: string[]) {
     isPrimaryVariant: raw.isPrimaryVariant,
     gesture: raw.gesture,
     inheritsFromId: raw.inheritsFromId,
+    breakpoint: raw.breakpoint,
+    variantName: raw.variantName,
     layout: raw.layout,
     gap: raw.gap,
     padding: raw.padding,

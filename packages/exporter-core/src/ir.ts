@@ -6,6 +6,7 @@ import type {
   FramerCmsCollection,
   FramerCmsCollectionItem,
   FramerCodeFile,
+  FramerComponentFamily,
   FramerComponentModule,
   FramerFont,
   FramerTreeNode,
@@ -74,6 +75,7 @@ export function buildIntermediateRepresentation(input: BuildIrInput): ExportIR {
   const libraryComponents = buildLibraryComponents(input, componentName);
   const exportMode = readExportMode(input);
   const componentModules = readComponentModules(input.pluginCapture);
+  const componentFamilies = buildComponentFamilies(componentModules);
   const codeFiles = readCodeFiles(input.pluginCapture);
   const fonts = readFonts(input);
   const cmsCollections = readCmsCollections(input.pluginCapture);
@@ -96,6 +98,7 @@ export function buildIntermediateRepresentation(input: BuildIrInput): ExportIR {
     exportMode === "full-site"
       ? buildRuntimeSitePages(input, componentName)
       : undefined;
+  const routeTemplates = sitePages ? summarizeRouteTemplates(sitePages) : undefined;
 
   return {
     jobId: `local-${Date.now()}`,
@@ -117,14 +120,85 @@ export function buildIntermediateRepresentation(input: BuildIrInput): ExportIR {
     framerTree,
     exportTree,
     componentModules,
+    componentFamilies,
     codeFiles,
     fonts,
     cmsCollections,
     libraryComponents,
     sitePages,
+    routeTemplates,
     exportTreeDiagnostics: summarizeExportTree(exportTree, input.runtimeCapture),
     warnings,
   };
+}
+
+function buildComponentFamilies(
+  componentModules: FramerComponentModule[],
+): FramerComponentFamily[] {
+  const groups = new Map<string, FramerComponentModule[]>();
+
+  for (const module of componentModules) {
+    const familyId =
+      module.componentIdentifier ??
+      module.componentName ??
+      module.name;
+    groups.set(familyId, [...(groups.get(familyId) ?? []), module]);
+  }
+
+  return [...groups.entries()].map(([familyId, modules]) => {
+    const primaryVariant =
+      modules.find((module) => module.isPrimaryVariant) ??
+      modules.find((module) => module.isVariant) ??
+      modules[0]!;
+
+    const variantModules = modules.filter(
+      (module) =>
+        module.isVariant ||
+        Boolean(module.variantName) ||
+        Boolean(module.breakpoint) ||
+        Boolean(module.gesture),
+    );
+    const variants =
+      variantModules.length > 0 ? variantModules : [primaryVariant];
+
+    return {
+      id: familyId,
+      name:
+        primaryVariant.componentName ??
+        primaryVariant.componentIdentifier ??
+        primaryVariant.name,
+      primaryVariantId: primaryVariant.id ?? primaryVariant.name,
+      variants: variants.map((module) => ({
+        id: module.id ?? module.name,
+        name: module.name,
+        gesture: module.gesture,
+        inheritsFromId: module.inheritsFromId,
+        breakpoint: module.breakpoint,
+        variantName: module.variantName,
+        codeFileId: module.codeFileId,
+      })),
+      instances: modules
+        .filter(
+          (module) =>
+            module.source === "component-instance" ||
+            module.source === "selected-component",
+        )
+        .map((module) => ({
+          nodeId: module.id ?? module.name,
+          controls: module.controls,
+          initialVariantId: primaryVariant.id ?? primaryVariant.name,
+        })),
+      transitions: variants
+        .filter((module) => typeof module.gesture === "string" && module.gesture.length > 0)
+        .map((module) => ({
+          fromVariantId: module.id ?? module.name,
+          trigger: module.gesture,
+          confidence: 0.7,
+          provenance: "plugin" as const,
+        })),
+      provenance: "plugin",
+    };
+  });
 }
 
 function buildRuntimeSitePages(input: BuildIrInput, fallbackName: string) {
@@ -159,6 +233,13 @@ function buildRuntimeSitePages(input: BuildIrInput, fallbackName: string) {
       componentName: count === 0 ? baseName : `${baseName}${count + 1}`,
       routePath: capture.routePath,
       title,
+      templateId:
+        capture.templateId ??
+        capture.templatePath ??
+        capture.routePath ??
+        `template-${index + 1}`,
+      templatePath: capture.templatePath ?? capture.routePath,
+      templateKind: capture.templateKind ?? inferTemplateKind(capture.routePath),
       nodes:
         nodes.length > 0
           ? nodes
@@ -173,6 +254,66 @@ function buildRuntimeSitePages(input: BuildIrInput, fallbackName: string) {
       sourceTextLength: runtimeTextLength(capture.nodes),
     };
   });
+}
+
+function inferTemplateKind(routePath: string) {
+  return routePath.includes(":slug") ? "cms" : "static";
+}
+
+function summarizeRouteTemplates(
+  sitePages: NonNullable<ExportIR["sitePages"]>,
+): NonNullable<ExportIR["routeTemplates"]> {
+  const groups = new Map<
+    string,
+    {
+      templateId: string;
+      templatePath: string;
+      templateKind: "static" | "cms" | "component";
+      routePaths: string[];
+      sourceTextLength: number;
+      nodeCount: number;
+      representativeRoutePath: string;
+    }
+  >();
+
+  for (const page of sitePages) {
+    const templateId = page.templateId ?? page.templatePath ?? page.routePath;
+    const templatePath = page.templatePath ?? page.routePath;
+    const templateKind = page.templateKind ?? "static";
+    const existing = groups.get(templateId);
+    const nodeCount = page.exportTree ? countExportTreeNodes(page.exportTree) : page.nodes.length;
+    if (!existing) {
+      groups.set(templateId, {
+        templateId,
+        templatePath,
+        templateKind,
+        routePaths: [page.routePath],
+        sourceTextLength: page.sourceTextLength ?? 0,
+        nodeCount,
+        representativeRoutePath: page.routePath,
+      });
+      continue;
+    }
+
+    existing.routePaths.push(page.routePath);
+    existing.sourceTextLength = Math.max(
+      existing.sourceTextLength,
+      page.sourceTextLength ?? 0,
+    );
+    existing.nodeCount = Math.max(existing.nodeCount, nodeCount);
+  }
+
+  return Array.from(groups.values()).map((group) => ({
+    ...group,
+    routeCount: group.routePaths.length,
+  }));
+}
+
+function countExportTreeNodes(nodes: ExportTreeNode[]): number {
+  return nodes.reduce(
+    (total, node) => total + 1 + countExportTreeNodes(node.children ?? []),
+    0,
+  );
 }
 
 function readPluginPageForRoute(
@@ -365,6 +506,9 @@ function buildRuntimeFallbackPage(input: BuildIrInput, fallbackName: string) {
     componentName: fallbackName,
     routePath: "/",
     title,
+    templateId: "/",
+    templatePath: "/",
+    templateKind: "static" as const,
     nodes:
       nodes.length > 0
         ? nodes
@@ -677,6 +821,28 @@ function readComponentModules(
           typeof component.componentName === "string"
             ? component.componentName
             : undefined,
+        isVariant:
+          typeof component.isVariant === "boolean"
+            ? component.isVariant
+            : undefined,
+        isPrimaryVariant:
+          typeof component.isPrimaryVariant === "boolean"
+            ? component.isPrimaryVariant
+            : undefined,
+        gesture:
+          typeof component.gesture === "string" ? component.gesture : undefined,
+        inheritsFromId:
+          typeof component.inheritsFromId === "string"
+            ? component.inheritsFromId
+            : undefined,
+        breakpoint:
+          typeof component.breakpoint === "string"
+            ? component.breakpoint
+            : undefined,
+        variantName:
+          typeof component.variantName === "string"
+            ? component.variantName
+            : undefined,
         controls: asRecord(component.controls),
         typedControls: asRecord(component.typedControls),
       } satisfies FramerComponentModule;
@@ -725,7 +891,67 @@ function readCodeFiles(pluginCapture: PluginCanvasCapture): FramerCodeFile[] {
         id: typeof record.id === "string" ? record.id : undefined,
         name,
         path: typeof record.path === "string" ? record.path : undefined,
+        versionId:
+          typeof record.versionId === "string" ? record.versionId : undefined,
         exports: exports.length > 0 ? exports : undefined,
+        exportDetails: Array.isArray(record.exportDetails)
+          ? record.exportDetails
+              .map((detail) => {
+                if (!detail || typeof detail !== "object") return null;
+                const exportRecord = detail as Record<string, unknown>;
+                return {
+                  name:
+                    typeof exportRecord.name === "string"
+                      ? exportRecord.name
+                      : undefined,
+                  type:
+                    typeof exportRecord.type === "string"
+                      ? exportRecord.type
+                      : undefined,
+                  insertURL:
+                    typeof exportRecord.insertURL === "string"
+                      ? exportRecord.insertURL
+                      : undefined,
+                  isDefaultExport:
+                    typeof exportRecord.isDefaultExport === "boolean"
+                      ? exportRecord.isDefaultExport
+                      : undefined,
+                  componentIdentifier:
+                    typeof exportRecord.componentIdentifier === "string"
+                      ? exportRecord.componentIdentifier
+                      : undefined,
+                  componentName:
+                    typeof exportRecord.componentName === "string"
+                      ? exportRecord.componentName
+                      : undefined,
+                  isVariant:
+                    typeof exportRecord.isVariant === "boolean"
+                      ? exportRecord.isVariant
+                      : undefined,
+                  isPrimaryVariant:
+                    typeof exportRecord.isPrimaryVariant === "boolean"
+                      ? exportRecord.isPrimaryVariant
+                      : undefined,
+                  gesture:
+                    typeof exportRecord.gesture === "string"
+                      ? exportRecord.gesture
+                      : undefined,
+                  inheritsFromId:
+                    typeof exportRecord.inheritsFromId === "string"
+                      ? exportRecord.inheritsFromId
+                      : undefined,
+                  breakpoint:
+                    typeof exportRecord.breakpoint === "string"
+                      ? exportRecord.breakpoint
+                      : undefined,
+                  variantName:
+                    typeof exportRecord.variantName === "string"
+                      ? exportRecord.variantName
+                      : undefined,
+                };
+              })
+              .filter(Boolean) as FramerCodeFile["exportDetails"]
+          : undefined,
         isDefaultExport:
           typeof record.isDefaultExport === "boolean"
             ? record.isDefaultExport
@@ -733,6 +959,20 @@ function readCodeFiles(pluginCapture: PluginCanvasCapture): FramerCodeFile[] {
         insertURL:
           typeof record.insertURL === "string" ? record.insertURL : undefined,
         source: typeof record.source === "string" ? record.source : undefined,
+        content:
+          typeof record.content === "string" ? record.content : undefined,
+        contentHash:
+          typeof record.contentHash === "string"
+            ? record.contentHash
+            : undefined,
+        contentByteLength:
+          typeof record.contentByteLength === "number"
+            ? record.contentByteLength
+            : undefined,
+        hasContent:
+          typeof record.hasContent === "boolean"
+            ? record.hasContent
+            : undefined,
       } satisfies FramerCodeFile;
     })
     .filter(Boolean) as FramerCodeFile[];

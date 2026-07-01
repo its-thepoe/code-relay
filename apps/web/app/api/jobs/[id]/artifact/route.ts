@@ -73,6 +73,14 @@ export async function GET(
       ? job.artifacts.zipPath
       : type === "report"
         ? job.artifacts.reportPath
+        : type === "revision"
+          ? job.artifacts.revisionManifestPath
+          : type === "validation"
+            ? job.artifacts.validationPath
+        : type === "invalidation"
+          ? job.artifacts.invalidationPlanPath
+        : type === "artifact-index"
+          ? job.artifacts.artifactIndexPath
         : type === "preview"
           ? job.artifacts.previewPath
           : undefined;
@@ -99,12 +107,24 @@ export async function GET(
       ? `${id}.zip`
       : type === "report"
         ? `${id}-report.json`
+        : type === "revision"
+          ? `${id}-revision.json`
+        : type === "validation"
+          ? `${id}-validation.json`
+        : type === "invalidation"
+          ? `${id}-invalidation.json`
+        : type === "artifact-index"
+          ? `${id}-artifact-index.json`
         : `${id}-preview.html`;
 
   const contentType =
     type === "zip"
       ? "application/zip"
-      : type === "report"
+      : type === "report" ||
+          type === "revision" ||
+          type === "validation" ||
+          type === "invalidation" ||
+          type === "artifact-index"
         ? "application/json; charset=utf-8"
         : "text/html; charset=utf-8";
 

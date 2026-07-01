@@ -24,11 +24,25 @@ type LocalExportJob = {
     routePath?: string;
     failed?: number;
   };
+  revision?: {
+    kind: "initial" | "improvement";
+    parentJobId?: string;
+    parentRevisionId?: string;
+    requestedFocus?:
+      | "responsiveness"
+      | "components"
+      | "both"
+      | "revalidate";
+  };
   artifacts?: {
     exportDir?: string;
     zipPath?: string;
     reportPath?: string;
     previewPath?: string;
+    revisionManifestPath?: string;
+    validationPath?: string;
+    invalidationPlanPath?: string;
+    artifactIndexPath?: string;
   };
 };
 
@@ -142,6 +156,7 @@ async function processJob(job: LocalExportJob) {
         )
           ? (job.pluginCapture as any).selectedNodes.length
           : 0,
+        revision: job.revision,
         maxAttempts: 3,
         targetFidelity: 0.95,
       }),
@@ -154,6 +169,7 @@ async function processJob(job: LocalExportJob) {
       exportMode: job.exportMode,
       maxAttempts: 3,
       targetFidelity: 0.95,
+      revisionRequest: job.revision,
       onProgress: async (progress) => {
         job.progress = progress;
         await writeJob(job);
@@ -176,6 +192,10 @@ async function processJob(job: LocalExportJob) {
       zipPath: result.zipPath,
       reportPath: result.reportPath,
       previewPath: result.previewPath,
+      revisionManifestPath: result.revisionManifestPath,
+      validationPath: path.join(result.exportDir, "generated-validation.json"),
+      invalidationPlanPath: result.invalidationPlanPath,
+      artifactIndexPath: result.artifactIndexPath,
     };
     job.errorMessage = undefined;
     job.progress = { stage: "Completed" };

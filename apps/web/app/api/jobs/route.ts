@@ -37,6 +37,8 @@ export async function POST(request: Request) {
         sourceUrl: json?.sourceUrl,
         selector: json?.selector,
         exportMode: json?.exportMode ?? json?.pluginCapture?.context?.exportMode,
+        parentJobId: json?.parentJobId,
+        requestedFocus: json?.requestedFocus,
         pluginNodeCount: Array.isArray(json?.pluginCapture?.selectedNodes)
           ? json.pluginCapture.selectedNodes.length
           : 0,
@@ -53,11 +55,18 @@ export async function POST(request: Request) {
   const sourceUrl = String(form.get("sourceUrl") ?? "").trim();
   const selectorRaw = String(form.get("selector") ?? "").trim();
   const selector = selectorRaw.length > 0 ? selectorRaw : undefined;
+  const parentJobIdRaw = String(form.get("parentJobId") ?? "").trim();
+  const parentJobId = parentJobIdRaw.length > 0 ? parentJobIdRaw : undefined;
+  const requestedFocusRaw = String(form.get("requestedFocus") ?? "").trim();
+  const requestedFocus =
+    requestedFocusRaw.length > 0 ? requestedFocusRaw : undefined;
 
   const job = await createJobFromRequest({
     sourceUrl,
     selector,
     exportMode: "selection",
+    parentJobId,
+    requestedFocus,
   });
   const response = NextResponse.redirect(
     new URL(`/jobs/${job.id}`, request.url),
