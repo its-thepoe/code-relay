@@ -17,6 +17,13 @@ export type LocalExportJob = {
   createdAt: string;
   updatedAt: string;
   errorMessage?: string;
+  progress?: {
+    stage: string;
+    completed?: number;
+    total?: number;
+    routePath?: string;
+    failed?: number;
+  };
   artifacts?: {
     exportDir?: string;
     zipPath?: string;

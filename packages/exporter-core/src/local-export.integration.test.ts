@@ -5,11 +5,16 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { createServer } from "node:http";
 import {
+  createNormalizedIrArtifact,
   runLocalExport,
+  readFullSiteRouteManifest,
   validateGeneratedProject,
 } from "./local-export.js";
 import { CAPTURED_STYLE_PROPERTIES } from "./capture.js";
-import type { PluginCanvasCapture } from "../../shared/src/types.js";
+import type {
+  ExportIR,
+  PluginCanvasCapture,
+} from "../../shared/src/types.js";
 
 function createPluginCapture(): PluginCanvasCapture {
   return {
@@ -84,6 +89,44 @@ test("runtime capture property allowlist includes fidelity-critical fields", () 
   assert.equal(CAPTURED_STYLE_PROPERTIES.includes("placeItems"), true);
 });
 
+test("normalized IR artifact summarizes materialized full-site route trees", () => {
+  const repeatedNodes = Array.from({ length: 10_000 }, (_, index) => ({
+    id: `node-${index}`,
+    children: [],
+  }));
+  const ir = {
+    pluginCapture: {
+      mode: "framer-plugin",
+      capturedAt: "2026-07-01T00:00:00.000Z",
+      selectedNodes: [],
+    },
+    runtimeCapture: {
+      url: "https://example.com",
+      title: "Large site",
+      mode: "page",
+      routeCaptures: [],
+    },
+    component: { semanticType: "page", nodes: [], sections: [] },
+    sitePages: [
+      {
+        componentName: "Large",
+        routePath: "/large",
+        title: "Large",
+        nodes: repeatedNodes,
+        exportTree: repeatedNodes,
+      },
+    ],
+  } as unknown as ExportIR;
+
+  const artifact = createNormalizedIrArtifact(ir);
+  const serialized = JSON.stringify(artifact);
+
+  assert.equal(artifact.artifactFormat, "summary");
+  assert.equal(artifact.sitePages[0]?.nodeCount, 10_000);
+  assert.equal("nodes" in (artifact.sitePages[0] ?? {}), false);
+  assert.ok(serialized.length < 10_000);
+});
+
 test("runLocalExport rejects a missing exportMode before generating files", async () => {
   const outDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "coderelay-missing-export-mode-"),
@@ -99,6 +142,62 @@ test("runLocalExport rejects a missing exportMode before generating files", asyn
     /Missing exportMode/,
   );
   assert.deepEqual(await fs.readdir(outDir), []);
+});
+
+test("CMS route expansion requires an exact page collection id", () => {
+  const base: PluginCanvasCapture = {
+    mode: "framer-plugin",
+    capturedAt: "2026-06-30T00:00:00.000Z",
+    selectedNodes: [],
+    context: {
+      sitePages: [{ name: "Post", path: "/blog/:slug" }],
+      cmsCollections: [
+        {
+          id: "posts",
+          name: "Posts",
+          fields: [],
+          items: [{ id: "one", slug: "first-post", fieldKeys: [] }],
+        },
+      ],
+    },
+  };
+  assert.deepEqual(readFullSiteRouteManifest(base), [
+    {
+      path: "/blog/:slug",
+      title: "Post",
+      collectionId: undefined,
+    },
+  ]);
+
+  base.context!.sitePages = [
+    {
+      name: "Post",
+      path: "/blog/:slug",
+      collectionId: "posts",
+    },
+  ];
+  assert.deepEqual(readFullSiteRouteManifest(base), [
+    {
+      path: "/blog/first-post",
+      title: "Post - first-post",
+      collectionId: "posts",
+    },
+  ]);
+});
+
+test("full-site route manifest excludes drafts and the explicit 404 page", () => {
+  const capture = createPluginCapture();
+  capture.context!.sitePages = [
+    { name: "Home", path: "/" },
+    { name: "Draft", path: "/drafts/landing" },
+    { name: "Not found", path: "/404" },
+    { name: "Public", path: "/about" },
+  ];
+
+  assert.deepEqual(readFullSiteRouteManifest(capture), [
+    { path: "/", title: "Home", collectionId: undefined },
+    { path: "/about", title: "Public", collectionId: undefined },
+  ]);
 });
 
 test("generated validation rejects a mounted but visually empty route", async () => {

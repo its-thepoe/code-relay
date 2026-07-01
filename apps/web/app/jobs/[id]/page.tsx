@@ -68,6 +68,27 @@ export default async function JobPage({
             <Row label="Export mode" value={job.exportMode ?? "selection"} />
             <Row label="Selector" value={job.selector ?? "-"} />
             <Row
+              label="Progress"
+              value={
+                job.progress
+                  ? `${job.progress.stage}${
+                      job.progress.completed !== undefined &&
+                      job.progress.total !== undefined
+                        ? `: ${job.progress.completed}/${job.progress.total}`
+                        : ""
+                    }${
+                      job.progress.failed
+                        ? ` (${job.progress.failed} skipped)`
+                        : ""
+                    }`
+                  : "-"
+              }
+            />
+            <Row
+              label="Current route"
+              value={job.progress?.routePath ?? "-"}
+            />
+            <Row
               label="Created"
               value={new Date(job.createdAt).toLocaleString()}
             />

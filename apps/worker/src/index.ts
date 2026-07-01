@@ -17,6 +17,13 @@ type LocalExportJob = {
   createdAt: string;
   updatedAt: string;
   errorMessage?: string;
+  progress?: {
+    stage: string;
+    completed?: number;
+    total?: number;
+    routePath?: string;
+    failed?: number;
+  };
   artifacts?: {
     exportDir?: string;
     zipPath?: string;
@@ -147,6 +154,10 @@ async function processJob(job: LocalExportJob) {
       exportMode: job.exportMode,
       maxAttempts: 3,
       targetFidelity: 0.95,
+      onProgress: async (progress) => {
+        job.progress = progress;
+        await writeJob(job);
+      },
     });
 
     console.log(
@@ -167,10 +178,15 @@ async function processJob(job: LocalExportJob) {
       previewPath: result.previewPath,
     };
     job.errorMessage = undefined;
+    job.progress = { stage: "Completed" };
     await writeJob(job);
   } catch (error) {
     job.status = "failed";
     job.errorMessage = error instanceof Error ? error.message : String(error);
+    job.progress = {
+      ...(job.progress ?? { stage: "Failed" }),
+      stage: "Failed",
+    };
     await writeJob(job);
   } finally {
     clearInterval(heartbeat);
@@ -195,7 +211,7 @@ async function main() {
     console.log(`[worker] processing ${job.id} (${job.sourceUrl ?? "no-url"})`);
     await processJob(job);
     // eslint-disable-next-line no-console
-    console.log(`[worker] done ${job.id}`);
+    console.log(`[worker] ${job.status} ${job.id}`);
   }
 }
 
