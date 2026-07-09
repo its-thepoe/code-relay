@@ -1,4 +1,5 @@
 import { mkdirp } from "fs-extra";
+import crypto from "node:crypto";
 import {
   chromium,
   type Browser,
@@ -6,6 +7,7 @@ import {
   type ElementHandle,
   type Locator,
   type Page,
+  type Route,
 } from "playwright";
 import path from "node:path";
 import { PNG } from "pngjs";
@@ -14,6 +16,7 @@ import type {
   PluginCanvasCapture,
   Rect,
   RuntimeCapture,
+  RuntimeInteractionReplayRecord,
   RuntimeNode,
   RuntimeRouteCapture,
   ViewportName,
@@ -24,6 +27,8 @@ type CaptureInput = {
   workDir: string;
   selector?: string;
   routePath?: string;
+  viewportNames?: ViewportName[];
+  baseCapture?: RuntimeCapture | RuntimeRouteCapture;
 };
 
 type RouteCaptureInput = {
@@ -33,10 +38,12 @@ type RouteCaptureInput = {
     title?: string;
     templateId?: string;
     templatePath?: string;
-    templateKind?: "static" | "cms" | "component";
+    templateKind?: "static" | "cms" | "component" | "redirect" | "utility";
   }>;
   workDir: string;
   cacheDir?: string;
+  viewportNames?: ViewportName[];
+  baseCapturesByRoute?: Record<string, RuntimeRouteCapture | undefined>;
   onProgress?: (progress: {
     completed: number;
     total: number;
@@ -53,7 +60,7 @@ const viewports: Record<ViewportName, { width: number; height: number }> = {
 };
 
 const ROUTE_CAPTURE_TIMEOUT_MS = 3 * 60_000;
-const ROUTE_CAPTURE_CACHE_SCHEMA_VERSION = 3;
+const ROUTE_CAPTURE_CACHE_SCHEMA_VERSION = 5;
 
 const MOTION_STYLE_PROPERTIES = [
   "transitionProperty",
@@ -203,6 +210,7 @@ export async function captureRuntimeRoutes(
       const captures = await Promise.all(
         batch.map(async (route) => {
           const url = new URL(route.path, input.originUrl).toString();
+          const baseCapture = input.baseCapturesByRoute?.[route.path];
           const cached = input.cacheDir
             ? await readCachedRouteCapture(input.cacheDir, route.path, url)
             : null;
@@ -230,6 +238,8 @@ export async function captureRuntimeRoutes(
                 url,
                 workDir: routeWorkDir,
                 routePath: route.path,
+                viewportNames: input.viewportNames,
+                baseCapture,
               }),
               ROUTE_CAPTURE_TIMEOUT_MS,
               `Route capture exceeded ${ROUTE_CAPTURE_TIMEOUT_MS / 60_000} minutes: ${route.path}`,
@@ -341,8 +351,11 @@ async function captureRuntimeWithBrowser(
 ): Promise<RuntimeCapture> {
   const captureDir = path.join(input.workDir, "original");
   await mkdirp(captureDir);
-  const captures = [];
-  const viewportNames = Object.keys(viewports) as ViewportName[];
+  const captures: Array<Awaited<ReturnType<typeof captureViewport>>> = [];
+  const viewportNames =
+    input.viewportNames && input.viewportNames.length > 0
+      ? input.viewportNames
+      : ((Object.keys(viewports) as ViewportName[]));
   for (let index = 0; index < viewportNames.length; index += 2) {
     captures.push(
       ...(await Promise.all(
@@ -354,44 +367,118 @@ async function captureRuntimeWithBrowser(
       )),
     );
   }
+  const baseCapture = input.baseCapture;
   const desktop =
     captures.find((capture) => capture.viewportName === "desktop") ??
+    readBaseViewportCapture(baseCapture, "desktop") ??
     captures[0]!;
   const stylesheetUrls = unique(
-    captures.flatMap((capture) => capture.stylesheetUrls),
+    [
+      ...(baseCapture?.stylesheetUrls ?? []),
+      ...captures.flatMap((capture) => capture.stylesheetUrls),
+    ],
+  );
+  const viewportEntries = Object.fromEntries(
+    unique(
+      [
+        ...((baseCapture?.captureDiagnostics?.breakpointsCaptured ?? []) as ViewportName[]),
+        ...captures.map((capture) => capture.viewportName),
+      ],
+    ).map((viewportName) => [
+      viewportName,
+      captures.find((capture) => capture.viewportName === viewportName)?.viewport ??
+        baseCapture?.viewports[viewportName],
+    ]),
+  ) as RuntimeCapture["viewports"];
+  const nodesByViewport = Object.fromEntries(
+    unique(
+      [
+        ...((baseCapture?.captureDiagnostics?.breakpointsCaptured ?? []) as ViewportName[]),
+        ...captures.map((capture) => capture.viewportName),
+      ],
+    ).map((viewportName) => [
+      viewportName,
+      captures.find((capture) => capture.viewportName === viewportName)?.nodes ??
+        baseCapture?.nodesByViewport?.[viewportName] ??
+        (viewportName === "desktop" ? baseCapture?.nodes : undefined),
+    ]),
+  );
+  const rootStylesByViewport = Object.fromEntries(
+    unique(
+      [
+        ...((baseCapture?.captureDiagnostics?.breakpointsCaptured ?? []) as ViewportName[]),
+        ...captures.map((capture) => capture.viewportName),
+      ],
+    ).map((viewportName) => [
+      viewportName,
+      captures.find((capture) => capture.viewportName === viewportName)?.rootStyles ??
+        baseCapture?.rootStylesByViewport?.[viewportName] ??
+        (viewportName === "desktop" ? baseCapture?.rootStyles : undefined),
+    ]),
+  );
+  const breakpointsCaptured = unique(
+    [
+      ...((baseCapture?.captureDiagnostics?.breakpointsCaptured ?? []) as ViewportName[]),
+      ...captures.map((capture) => capture.viewportName),
+    ],
   );
 
   return {
     url: input.url,
     title: desktop.title,
     mode: input.selector ? "section" : "page",
-    viewports: Object.fromEntries(
-      captures.map((capture) => [capture.viewportName, capture.viewport]),
-    ) as RuntimeCapture["viewports"],
+    viewports: viewportEntries,
     nodes: desktop.nodes,
-    nodesByViewport: Object.fromEntries(
-      captures.map((capture) => [capture.viewportName, capture.nodes]),
-    ),
+    nodesByViewport,
     rootStyles: desktop.rootStyles,
-    rootStylesByViewport: Object.fromEntries(
-      captures.map((capture) => [capture.viewportName, capture.rootStyles]),
-    ),
+    rootStylesByViewport,
     captureDiagnostics: {
-      breakpointsCaptured: captures.map((capture) => capture.viewportName),
+      breakpointsCaptured,
+      viewportValidation: Object.fromEntries(
+        breakpointsCaptured.map((viewportName) => {
+          const fromCapture = captures.find(
+            (capture) => capture.viewportName === viewportName,
+          )?.viewportValidation;
+          const fromBase =
+            baseCapture?.captureDiagnostics?.viewportValidation?.[viewportName];
+          return [viewportName, fromCapture ?? fromBase];
+        }),
+      ),
       fontReadiness: Object.fromEntries(
-        captures.map((capture) => [capture.viewportName, capture.fontsReady]),
+        breakpointsCaptured.map((viewportName) => [
+          viewportName,
+          captures.find((capture) => capture.viewportName === viewportName)
+            ?.fontsReady ??
+            baseCapture?.captureDiagnostics?.fontReadiness?.[viewportName],
+        ]),
       ),
       stylesheetCount: Object.fromEntries(
-        captures.map((capture) => [
-          capture.viewportName,
-          capture.stylesheetUrls.length,
+        breakpointsCaptured.map((viewportName) => [
+          viewportName,
+          captures.find((capture) => capture.viewportName === viewportName)
+            ?.stylesheetUrls.length ??
+            baseCapture?.captureDiagnostics?.stylesheetCount?.[viewportName] ??
+            0,
         ]),
       ),
       nodeCount: Object.fromEntries(
-        captures.map((capture) => [capture.viewportName, capture.nodes.length]),
+        breakpointsCaptured.map((viewportName) => [
+          viewportName,
+          captures.find((capture) => capture.viewportName === viewportName)
+            ?.nodes.length ??
+            baseCapture?.captureDiagnostics?.nodeCount?.[viewportName] ??
+            (viewportName === "desktop" ? baseCapture?.nodes.length : 0) ??
+            0,
+        ]),
       ),
     },
-    framerStyleCss: desktop.framerStyleCss,
+    interactionReplay:
+      ("interactionReplay" in desktop
+        ? desktop.interactionReplay
+        : undefined) ??
+      baseCapture?.interactionReplay ??
+      [],
+    framerStyleCss: desktop.framerStyleCss || baseCapture?.framerStyleCss,
     stylesheetUrls,
   };
 }
@@ -411,6 +498,7 @@ async function readCachedRouteCapture(
     };
     return cached.schemaVersion === ROUTE_CAPTURE_CACHE_SCHEMA_VERSION &&
       cached.sourceUrl === sourceUrl &&
+      hasValidCachedResponsiveEvidence(cached.capture) &&
       cached.capture
       ? cached.capture
       : null;
@@ -520,7 +608,7 @@ async function captureViewport(
   captureDir: string,
 ) {
   const viewport = viewports[viewportName];
-  const page = await browser.newPage({ viewport });
+  const page = await createPageWithViewport(browser, viewport);
 
   await navigateForCapture(page, input.url);
   const finalUrl = page.url();
@@ -568,9 +656,25 @@ async function captureViewport(
     viewportName === "desktop"
       ? await downloadStylesheets(stylesheets, input.url)
       : "";
+  const interactionReplay =
+    viewportName === "desktop"
+      ? await collectSafeInteractionReplay(
+          page,
+          input.selector,
+          captureDir,
+          input.routePath ?? "/",
+          viewportName,
+        )
+      : undefined;
   const title = await page.title();
   const imageSize = await getPngSize(screenshotPath).catch(() => viewport);
+  const observedViewport = await readObservedViewport(page);
   await page.close();
+  const viewportValidation = createViewportValidation(
+    viewport,
+    observedViewport,
+    imageSize,
+  );
 
   return {
     viewportName,
@@ -581,10 +685,113 @@ async function captureViewport(
       screenshotPath,
       width: imageSize.width,
       height: imageSize.height,
+      requested: viewport,
+      observed: observedViewport,
+      valid: viewportValidation.valid,
     },
+    viewportValidation,
     fontsReady,
     framerStyleCss,
     stylesheetUrls: stylesheets,
+    interactionReplay,
+  };
+}
+
+async function createPageWithViewport(
+  browser: Browser | BrowserContext,
+  viewport: { width: number; height: number },
+) {
+  if ("newContext" in browser) {
+    const context = await browser.newContext({ viewport });
+    const page = await context.newPage();
+    return page;
+  }
+  const page = await browser.newPage();
+  await page.setViewportSize(viewport);
+  return page;
+}
+
+async function readObservedViewport(page: Page) {
+  return page.evaluate(() => ({
+    innerWidth: window.innerWidth,
+    innerHeight: window.innerHeight,
+    clientWidth: document.documentElement.clientWidth,
+    devicePixelRatio: window.devicePixelRatio,
+  }));
+}
+
+function createViewportValidation(
+  requested: { width: number; height: number },
+  observed: {
+    innerWidth: number;
+    innerHeight: number;
+    clientWidth: number;
+    devicePixelRatio: number;
+  },
+  screenshot: { width: number; height: number },
+) {
+  const reasons: string[] = [];
+  if (observed.innerWidth !== requested.width) {
+    reasons.push("innerWidth-mismatch");
+  }
+  if (Math.abs(observed.clientWidth - requested.width) > 1) {
+    reasons.push("clientWidth-mismatch");
+  }
+  if (Math.abs(screenshot.width - requested.width) > 1) {
+    reasons.push("screenshotWidth-mismatch");
+  }
+  return {
+    requestedWidth: requested.width,
+    requestedHeight: requested.height,
+    observedInnerWidth: observed.innerWidth,
+    observedInnerHeight: observed.innerHeight,
+    observedClientWidth: observed.clientWidth,
+    screenshotWidth: screenshot.width,
+    screenshotHeight: screenshot.height,
+    valid: reasons.length === 0,
+    reason: reasons.length > 0 ? reasons.join(",") : undefined,
+  };
+}
+
+function hasValidCachedResponsiveEvidence(capture?: RuntimeRouteCapture) {
+  if (!capture?.captureDiagnostics?.viewportValidation) return false;
+  const breakpoints = capture.captureDiagnostics.breakpointsCaptured ?? [];
+  const observedWidths = new Set<number>();
+  for (const viewportName of breakpoints) {
+    const entry = capture.captureDiagnostics.viewportValidation[viewportName];
+    if (!entry?.valid) return false;
+    if (observedWidths.has(entry.observedInnerWidth)) return false;
+    observedWidths.add(entry.observedInnerWidth);
+  }
+  return observedWidths.size > 0;
+}
+
+function readBaseViewportCapture(
+  baseCapture: RuntimeCapture | RuntimeRouteCapture | undefined,
+  viewportName: ViewportName,
+) {
+  if (!baseCapture) return undefined;
+  const viewport = baseCapture.viewports[viewportName];
+  if (!viewport) return undefined;
+  return {
+    viewportName,
+    title: baseCapture.title,
+    nodes:
+      baseCapture.nodesByViewport?.[viewportName] ??
+      (viewportName === "desktop" ? baseCapture.nodes : []),
+    rootStyles:
+      baseCapture.rootStylesByViewport?.[viewportName] ??
+      (viewportName === "desktop" ? baseCapture.rootStyles ?? {} : {}),
+    viewport,
+    viewportValidation:
+      baseCapture.captureDiagnostics?.viewportValidation?.[viewportName],
+    fontsReady:
+      baseCapture.captureDiagnostics?.fontReadiness?.[viewportName] ?? true,
+    framerStyleCss:
+      viewportName === "desktop" ? baseCapture.framerStyleCss ?? "" : "",
+    stylesheetUrls: baseCapture.stylesheetUrls ?? [],
+    interactionReplay:
+      viewportName === "desktop" ? baseCapture.interactionReplay : undefined,
   };
 }
 
@@ -834,6 +1041,446 @@ async function collectInteractionStyles(page: Page, nodes: RuntimeNode[]) {
   }
 
   return nodes;
+}
+
+async function collectSafeInteractionReplay(
+  page: Page,
+  selector: string | undefined,
+  captureDir: string,
+  routePath: string,
+  viewport: ViewportName,
+): Promise<RuntimeInteractionReplayRecord[]> {
+  const replayDir = path.join(captureDir, "replay");
+  await mkdirp(replayDir);
+  const baseUrl = page.url();
+  const candidates = await annotateReplayCandidates(page, selector);
+  if (candidates.length === 0) return [];
+
+  const requestStats = {
+    totalRequests: 0,
+    fetchRequests: 0,
+    xhrRequests: 0,
+    documentRequests: 0,
+    blockedRequests: 0,
+    blockedNavigationRequests: 0,
+    blockedMutationRequests: 0,
+  };
+  const routeHandler = async (route: Route) => {
+    const request = route.request();
+    requestStats.totalRequests += 1;
+    if (request.resourceType() === "fetch") requestStats.fetchRequests += 1;
+    if (request.resourceType() === "xhr") requestStats.xhrRequests += 1;
+    if (request.isNavigationRequest()) requestStats.documentRequests += 1;
+
+    const method = request.method().toUpperCase();
+    const isMutation = ["POST", "PUT", "PATCH", "DELETE"].includes(method);
+    const isMainFrameNavigation =
+      request.isNavigationRequest() &&
+      request.frame() === page.mainFrame() &&
+      request.url() !== baseUrl;
+
+    if (isMainFrameNavigation) {
+      requestStats.blockedRequests += 1;
+      requestStats.blockedNavigationRequests += 1;
+      await route.abort();
+      return;
+    }
+    if (isMutation) {
+      requestStats.blockedRequests += 1;
+      requestStats.blockedMutationRequests += 1;
+      await route.abort();
+      return;
+    }
+    await route.continue();
+  };
+  await page.route("**/*", routeHandler);
+
+  const records: RuntimeInteractionReplayRecord[] = [];
+  try {
+    for (let index = 0; index < Math.min(candidates.length, 4); index += 1) {
+      const candidate = candidates[index]!;
+      const beforeDomSnapshot = await readReplayDomSnapshot(page, selector);
+      const beforeStyles = await readReplayCandidateStyles(page, candidate.id);
+      const beforeAnimation = await readReplayAnimationSnapshot(page, candidate.id);
+      const beforeScreenshotPath = path.join(
+        replayDir,
+        `${viewport}-${index + 1}-before.png`,
+      );
+      await page.screenshot({
+        path: beforeScreenshotPath,
+        animations: "disabled",
+      });
+
+      if (!candidate.allowed) {
+        records.push({
+          id: `${routePath}:${viewport}:${candidate.id}:blocked-click`,
+          routePath,
+          viewport,
+          action: "blocked-click",
+          target: candidate.target,
+          allowed: false,
+          blockedReason: candidate.blockedReason,
+          beforeDomSignature: hashReplaySnapshot(beforeDomSnapshot),
+          beforeComputedStyles: beforeStyles,
+          beforeScreenshotPath,
+          urlChanged: false,
+          networkActivity: diffReplayStats(
+            { ...requestStats },
+            requestStats,
+          ),
+          consoleErrors: [],
+          animationSamples: { before: beforeAnimation },
+          stateChanged: false,
+          provenance: "runtime",
+        });
+        continue;
+      }
+
+      records.push(
+        await executeReplayAction({
+          page,
+          selector,
+          routePath,
+          viewport,
+          replayDir,
+          index,
+          candidate,
+          action: "click",
+          keyPress: undefined,
+          beforeDomSnapshot,
+          beforeStyles,
+          beforeAnimation,
+          beforeScreenshotPath,
+          beforeUrl: page.url(),
+          statsBeforeAction: { ...requestStats },
+          requestStats,
+        }),
+      );
+
+      await page.goto(baseUrl, { waitUntil: "domcontentloaded", timeout: 15_000 });
+      await waitForRenderableContent(page, selector);
+      await annotateReplayCandidates(page, selector);
+
+      records.push(
+        await executeReplayAction({
+          page,
+          selector,
+          routePath,
+          viewport,
+          replayDir,
+          index,
+          candidate,
+          action: "keyboard-enter",
+          keyPress: "Enter",
+          beforeDomSnapshot: await readReplayDomSnapshot(page, selector),
+          beforeStyles: await readReplayCandidateStyles(page, candidate.id),
+          beforeAnimation: await readReplayAnimationSnapshot(page, candidate.id),
+          beforeScreenshotPath: await writeReplayScreenshot(
+            page,
+            path.join(replayDir, `${viewport}-${index + 1}-keyboard-before.png`),
+          ),
+          beforeUrl: page.url(),
+          statsBeforeAction: { ...requestStats },
+          requestStats,
+        }),
+      );
+
+      await page.goto(baseUrl, { waitUntil: "domcontentloaded", timeout: 15_000 });
+      await waitForRenderableContent(page, selector);
+      await annotateReplayCandidates(page, selector);
+    }
+  } finally {
+    await page.unroute("**/*", routeHandler).catch(() => undefined);
+  }
+
+  return records;
+}
+
+async function executeReplayAction(input: {
+  page: Page;
+  selector: string | undefined;
+  routePath: string;
+  viewport: ViewportName;
+  replayDir: string;
+  index: number;
+  candidate: Awaited<ReturnType<typeof annotateReplayCandidates>>[number];
+  action: "click" | "keyboard-enter";
+  keyPress?: string;
+  beforeDomSnapshot: string;
+  beforeStyles: Record<string, string>;
+  beforeAnimation: Record<string, string>;
+  beforeScreenshotPath: string;
+  beforeUrl: string;
+  statsBeforeAction: RuntimeInteractionReplayRecord["networkActivity"];
+  requestStats: RuntimeInteractionReplayRecord["networkActivity"];
+}) {
+  const consoleErrors: string[] = [];
+  const onConsole = (message: { type(): string; text(): string }) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  };
+  input.page.on("console", onConsole);
+  try {
+    const locator = input.page.locator(
+      `[data-coderelay-replay-id="${input.candidate.id}"]`,
+    );
+    if ((await locator.count()) === 0) {
+      return {
+        id: `${input.routePath}:${input.viewport}:${input.candidate.id}:${input.action}`,
+        routePath: input.routePath,
+        viewport: input.viewport,
+        action: input.action,
+        target: input.candidate.target,
+        allowed: false,
+        blockedReason: "candidate-missing-after-reset",
+        beforeDomSignature: hashReplaySnapshot(input.beforeDomSnapshot),
+        beforeComputedStyles: input.beforeStyles,
+        beforeScreenshotPath: input.beforeScreenshotPath,
+        urlChanged: false,
+        networkActivity: diffReplayStats(
+          input.statsBeforeAction,
+          input.requestStats,
+        ),
+        consoleErrors,
+        animationSamples: { before: input.beforeAnimation },
+        stateChanged: false,
+        provenance: "runtime" as const,
+      };
+    }
+
+    try {
+      if (input.keyPress) {
+        await locator.focus();
+        await input.page.keyboard.press(input.keyPress);
+      } else {
+        await locator.click({ timeout: 2_000 });
+      }
+    } catch (error) {
+      return {
+        id: `${input.routePath}:${input.viewport}:${input.candidate.id}:${input.action}`,
+        routePath: input.routePath,
+        viewport: input.viewport,
+        action: input.action,
+        target: input.candidate.target,
+        allowed: false,
+        blockedReason: formatError(error),
+        beforeDomSignature: hashReplaySnapshot(input.beforeDomSnapshot),
+        beforeComputedStyles: input.beforeStyles,
+        beforeScreenshotPath: input.beforeScreenshotPath,
+        urlChanged: false,
+        networkActivity: diffReplayStats(
+          input.statsBeforeAction,
+          input.requestStats,
+        ),
+        consoleErrors,
+        animationSamples: { before: input.beforeAnimation },
+        stateChanged: false,
+        provenance: "runtime" as const,
+      };
+    }
+
+    await input.page.waitForTimeout(250);
+    const afterDomSnapshot = await readReplayDomSnapshot(input.page, input.selector);
+    const afterStyles = await readReplayCandidateStyles(
+      input.page,
+      input.candidate.id,
+    );
+    const afterAnimation = await readReplayAnimationSnapshot(
+      input.page,
+      input.candidate.id,
+    );
+    const afterScreenshotPath = await writeReplayScreenshot(
+      input.page,
+      path.join(
+        input.replayDir,
+        `${input.viewport}-${input.index + 1}-${input.action}-after.png`,
+      ),
+    );
+    return {
+      id: `${input.routePath}:${input.viewport}:${input.candidate.id}:${input.action}`,
+      routePath: input.routePath,
+      viewport: input.viewport,
+      action: input.action,
+      target: input.candidate.target,
+      allowed: true,
+      beforeDomSignature: hashReplaySnapshot(input.beforeDomSnapshot),
+      afterDomSignature: hashReplaySnapshot(afterDomSnapshot),
+      beforeComputedStyles: input.beforeStyles,
+      afterComputedStyles: afterStyles,
+      beforeScreenshotPath: input.beforeScreenshotPath,
+      afterScreenshotPath,
+      urlChanged: input.page.url() !== input.beforeUrl,
+      networkActivity: diffReplayStats(
+        input.statsBeforeAction,
+        input.requestStats,
+      ),
+      consoleErrors,
+      animationSamples: {
+        before: input.beforeAnimation,
+        after: afterAnimation,
+      },
+      stateChanged:
+        hashReplaySnapshot(input.beforeDomSnapshot) !==
+          hashReplaySnapshot(afterDomSnapshot) ||
+        JSON.stringify(input.beforeStyles) !== JSON.stringify(afterStyles),
+      provenance: "runtime" as const,
+    };
+  } finally {
+    input.page.off("console", onConsole);
+  }
+}
+
+function diffReplayStats(
+  before: RuntimeInteractionReplayRecord["networkActivity"],
+  after: RuntimeInteractionReplayRecord["networkActivity"],
+) {
+  return {
+    totalRequests: after.totalRequests - before.totalRequests,
+    fetchRequests: after.fetchRequests - before.fetchRequests,
+    xhrRequests: after.xhrRequests - before.xhrRequests,
+    documentRequests: after.documentRequests - before.documentRequests,
+    blockedRequests: after.blockedRequests - before.blockedRequests,
+    blockedNavigationRequests:
+      after.blockedNavigationRequests - before.blockedNavigationRequests,
+    blockedMutationRequests:
+      after.blockedMutationRequests - before.blockedMutationRequests,
+  };
+}
+
+async function annotateReplayCandidates(page: Page, selector?: string) {
+  return page.evaluate((activeSelector) => {
+    const root = activeSelector
+      ? document.querySelector(activeSelector)
+      : document.body;
+    if (!(root instanceof HTMLElement)) return [];
+
+    root.querySelectorAll("[data-coderelay-replay-id]").forEach((element) => {
+      element.removeAttribute("data-coderelay-replay-id");
+    });
+
+    return Array.from(
+      root.querySelectorAll<HTMLElement>(
+        'button, [role="button"], [role="tab"], [aria-controls], [aria-expanded]',
+      ),
+    )
+      .filter((element) => {
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          Number(style.opacity || "1") > 0 &&
+          rect.width > 0 &&
+          rect.height > 0
+        );
+      })
+      .slice(0, 6)
+      .map((element, index) => {
+        const blockedReason =
+          element.closest("form")
+            ? "inside-form"
+            : element instanceof HTMLButtonElement &&
+                ["submit", "reset"].includes(element.type)
+              ? `button-type-${element.type}`
+              : element.closest('a[href]')
+                ? "inside-anchor"
+                : element.hasAttribute("disabled") ||
+                    element.getAttribute("aria-disabled") === "true"
+                  ? "disabled"
+                  : undefined;
+        const id = `candidate-${index + 1}`;
+        element.setAttribute("data-coderelay-replay-id", id);
+        return {
+          id,
+          allowed: !blockedReason,
+          blockedReason,
+          target: {
+            tag: element.tagName.toLowerCase(),
+            text: element.textContent?.trim().slice(0, 120),
+            role: element.getAttribute("role") ?? undefined,
+            name:
+              element.getAttribute("aria-label") ??
+              element.getAttribute("name") ??
+              undefined,
+          },
+        };
+      });
+  }, selector);
+}
+
+async function readReplayDomSnapshot(page: Page, selector?: string) {
+  return page.evaluate((activeSelector) => {
+    const root = activeSelector
+      ? document.querySelector(activeSelector)
+      : document.body;
+    if (!(root instanceof HTMLElement)) return "";
+    return JSON.stringify({
+      html: root.innerHTML.slice(0, 20_000),
+      text: root.textContent?.trim().slice(0, 4_000) ?? "",
+      nodeCount: root.querySelectorAll("*").length,
+      ariaExpanded: Array.from(root.querySelectorAll("[aria-expanded]")).map(
+        (element) => ({
+          tag: element.tagName.toLowerCase(),
+          value: element.getAttribute("aria-expanded"),
+          text: element.textContent?.trim().slice(0, 60) ?? "",
+        }),
+      ),
+    });
+  }, selector);
+}
+
+async function readReplayCandidateStyles(
+  page: Page,
+  id: string,
+): Promise<Record<string, string>> {
+  return page.evaluate((replayId) => {
+    const element = document.querySelector<HTMLElement>(
+      `[data-coderelay-replay-id="${replayId}"]`,
+    );
+    if (!element) return {} as Record<string, string>;
+    const style = window.getComputedStyle(element);
+    return {
+      display: style.display ?? "",
+      visibility: style.visibility ?? "",
+      opacity: style.opacity ?? "",
+      color: style.color ?? "",
+      backgroundColor: style.backgroundColor ?? "",
+      transform: style.transform ?? "",
+      width: style.width ?? "",
+      height: style.height ?? "",
+      ariaExpanded: element.getAttribute("aria-expanded") ?? "",
+      ariaSelected: element.getAttribute("aria-selected") ?? "",
+    };
+  }, id);
+}
+
+async function readReplayAnimationSnapshot(
+  page: Page,
+  id: string,
+): Promise<Record<string, string>> {
+  return page.evaluate((replayId) => {
+    const element = document.querySelector<HTMLElement>(
+      `[data-coderelay-replay-id="${replayId}"]`,
+    );
+    if (!element) return {} as Record<string, string>;
+    const style = window.getComputedStyle(element);
+    return {
+      transitionProperty: style.transitionProperty ?? "",
+      transitionDuration: style.transitionDuration ?? "",
+      transitionTimingFunction: style.transitionTimingFunction ?? "",
+      animationName: style.animationName ?? "",
+      animationDuration: style.animationDuration ?? "",
+      animationTimingFunction: style.animationTimingFunction ?? "",
+    };
+  }, id);
+}
+
+async function writeReplayScreenshot(page: Page, targetPath: string) {
+  await page.screenshot({ path: targetPath, animations: "disabled" });
+  return targetPath;
+}
+
+function hashReplaySnapshot(value: string) {
+  return crypto.createHash("sha1").update(value).digest("hex");
 }
 
 async function captureInteractionStatesForNode(page: Page, domPath: string) {

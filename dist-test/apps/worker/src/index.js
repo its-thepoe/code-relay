@@ -1,0 +1,184 @@
+import path from "node:path";
+import fs from "node:fs/promises";
+import fssync from "node:fs";
+import { runLocalExport } from "../../../packages/exporter-core/src/local-export.js";
+import { createPredictedArtifacts } from "./artifacts.js";
+function resolveRepoRoot() {
+    let current = process.cwd();
+    for (let depth = 0; depth < 8; depth += 1) {
+        const marker = path.join(current, "apps", "web");
+        if (fssync.existsSync(marker)) {
+            return current;
+        }
+        const parent = path.dirname(current);
+        if (parent === current)
+            break;
+        current = parent;
+    }
+    return process.cwd();
+}
+const repoRoot = resolveRepoRoot();
+const jobsDir = path.join(repoRoot, ".coderelay", "jobs");
+const artifactsDir = path.join(repoRoot, ".coderelay", "artifacts");
+const legacyJobsDir = path.join(process.cwd(), ".coderelay", "jobs");
+const staleRunningJobMs = 2 * 60 * 1000;
+const runningHeartbeatMs = 5_000;
+async function sleep(ms) {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+}
+async function ensureDirs() {
+    await fs.mkdir(jobsDir, { recursive: true });
+    await fs.mkdir(artifactsDir, { recursive: true });
+}
+function jobPath(id) {
+    return path.join(jobsDir, `${id}.json`);
+}
+async function readJobFile(filePath) {
+    try {
+        const raw = await fs.readFile(filePath, "utf8");
+        return JSON.parse(raw);
+    }
+    catch {
+        return null;
+    }
+}
+async function writeJob(job) {
+    const now = new Date().toISOString();
+    job.updatedAt = now;
+    await fs.writeFile(jobPath(job.id), `${JSON.stringify(job, null, 2)}\n`);
+}
+async function claimNextJob() {
+    const dirs = legacyJobsDir === jobsDir ? [jobsDir] : [jobsDir, legacyJobsDir];
+    for (const dir of dirs) {
+        const files = await fs.readdir(dir).catch(() => []);
+        for (const file of files) {
+            if (!file.endsWith(".json"))
+                continue;
+            const full = path.join(dir, file);
+            const job = await readJobFile(full);
+            if (!job)
+                continue;
+            const isStaleRunning = job.status === "running" &&
+                Date.now() - new Date(job.updatedAt).getTime() > staleRunningJobMs;
+            if (job.status !== "queued" && !isStaleRunning)
+                continue;
+            job.status = "running";
+            if (isStaleRunning) {
+                job.errorMessage = undefined;
+            }
+            await writeJob(job);
+            // If this job lived in a legacy directory, delete the stale copy after
+            // writing the authoritative version under repoRoot.
+            if (dir !== jobsDir) {
+                await fs.unlink(full).catch(() => undefined);
+            }
+            return job;
+        }
+    }
+    return null;
+}
+async function processJob(job) {
+    const outDir = path.join(artifactsDir, job.id);
+    await fs.mkdir(outDir, { recursive: true });
+    job.artifacts = {
+        ...job.artifacts,
+        ...createPredictedArtifacts(outDir),
+    };
+    await writeJob(job);
+    const heartbeat = setInterval(() => {
+        if (job.status === "running") {
+            void writeJob(job).catch(() => undefined);
+        }
+    }, runningHeartbeatMs);
+    try {
+        if (!job.exportMode) {
+            throw new Error("Missing exportMode: queued job cannot be passed to runLocalExport.");
+        }
+        console.log("[coderelay:worker:runLocalExport]", JSON.stringify({
+            jobId: job.id,
+            url: job.sourceUrl,
+            selector: job.selector,
+            exportMode: job.exportMode,
+            pluginNodeCount: Array.isArray(job.pluginCapture?.selectedNodes)
+                ? job.pluginCapture.selectedNodes.length
+                : 0,
+            revision: job.revision,
+            maxAttempts: 3,
+            targetFidelity: 0.95,
+        }));
+        const result = await runLocalExport({
+            url: job.sourceUrl,
+            pluginCapture: job.pluginCapture,
+            outDir,
+            selector: job.selector,
+            exportMode: job.exportMode,
+            maxAttempts: 3,
+            targetFidelity: 0.95,
+            revisionRequest: job.revision,
+            onProgress: async (progress) => {
+                job.progress = progress;
+                await writeJob(job);
+            },
+        });
+        console.log("[coderelay:worker:export-result]", JSON.stringify({
+            jobId: job.id,
+            exportMode: job.exportMode,
+            exportDir: result.exportDir,
+            zipPath: result.zipPath,
+            validation: result.validation,
+        }));
+        job.status = "completed";
+        job.artifacts = {
+            exportDir: result.exportDir,
+            zipPath: result.zipPath,
+            reportPath: result.reportPath,
+            previewPath: result.previewPath,
+            resolvedRequestPath: result.resolvedRequestPath,
+            statusPath: result.statusPath,
+            capabilityReportPath: result.capabilityReportPath,
+            codeCompatibilityReportPath: result.codeCompatibilityReportPath,
+            beforeAfterReportPath: result.beforeAfterReportPath,
+            parentInfoPath: result.parentInfoPath,
+            revisionManifestPath: result.revisionManifestPath,
+            validationPath: path.join(result.exportDir, "generated-validation.json"),
+            invalidationPlanPath: result.invalidationPlanPath,
+            artifactIndexPath: result.artifactIndexPath,
+            responsiveRecapturePlanPath: result.responsiveRecapturePlanPath,
+        };
+        job.errorMessage = undefined;
+        job.progress = { stage: "Completed" };
+        await writeJob(job);
+    }
+    catch (error) {
+        job.status = "failed";
+        job.errorMessage = error instanceof Error ? error.message : String(error);
+        job.progress = {
+            ...(job.progress ?? { stage: "Failed" }),
+            stage: "Failed",
+        };
+        await writeJob(job);
+    }
+    finally {
+        clearInterval(heartbeat);
+    }
+}
+async function main() {
+    await ensureDirs();
+    // eslint-disable-next-line no-console
+    console.log("[worker] coderelay local worker started");
+    // simple forever loop
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+        const job = await claimNextJob();
+        if (!job) {
+            await sleep(750);
+            continue;
+        }
+        // eslint-disable-next-line no-console
+        console.log(`[worker] processing ${job.id} (${job.sourceUrl ?? "no-url"})`);
+        await processJob(job);
+        // eslint-disable-next-line no-console
+        console.log(`[worker] ${job.status} ${job.id}`);
+    }
+}
+await main();

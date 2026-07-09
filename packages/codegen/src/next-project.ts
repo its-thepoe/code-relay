@@ -15,6 +15,32 @@ type GenerateInput = {
   ir: ExportIR;
   projectDir: string;
   strategy: ExportStrategyConfig;
+  codeCompatibilityReport?: {
+    files: Array<{
+      codeFileId?: string;
+      name: string;
+      path?: string;
+      compatibility:
+        | "portable"
+        | "portable-with-adapter"
+        | "portable-with-dependencies"
+        | "runtime-fallback-required"
+        | "unsupported";
+      reasons: string[];
+      dependencyNames: string[];
+      exportedComponents?: string[];
+      localComponentImports?: string[];
+      cssImports?: string[];
+    }>;
+  };
+  unadaptedCodeFiles?: Array<{
+    codeFileId?: string;
+    name: string;
+    compatibility: "runtime-fallback-required" | "unsupported";
+    reasons: string[];
+    sourcePath?: string;
+    metadataPath: string;
+  }>;
 };
 
 export type ExportStrategyConfig = {
@@ -32,6 +58,206 @@ export type GeneratedProject = {
   dtsPath: string;
   previewHtmlPath: string;
 };
+
+const SUPPORTED_CODE_FILE_DEPENDENCIES = {
+  clsx: {
+    version: "2.1.1",
+    license: "MIT",
+  },
+  "framer-motion": {
+    version: "12.42.0",
+    license: "MIT",
+  },
+} as const;
+
+type CodeCompatibilityMeta =
+  NonNullable<GenerateInput["codeCompatibilityReport"]>["files"][number];
+
+type ExecutableCodeFile = {
+  file: NonNullable<ExportIR["codeFiles"]>[number];
+  report: CodeCompatibilityMeta;
+  exportName: string;
+  generatedSourcePath: string;
+  importPathFromFramerData: string;
+  compatibility:
+    | "portable"
+    | "portable-with-adapter"
+    | "portable-with-dependencies";
+};
+
+function isExecutableCodeCompatibility(
+  value: CodeCompatibilityMeta["compatibility"],
+): value is ExecutableCodeFile["compatibility"] {
+  return (
+    value === "portable" ||
+    value === "portable-with-adapter" ||
+    value === "portable-with-dependencies"
+  );
+}
+
+function normalizeCodeFileCandidatePath(file: { path?: string; name: string }) {
+  const raw = file.path?.trim() || file.name.trim();
+  const normalized = raw.replace(/\\/g, "/").replace(/^\.?\//, "");
+  return normalized || file.name.trim();
+}
+
+function stripKnownCodeExtension(value: string) {
+  return value.replace(/\.(tsx?|jsx?)$/i, "");
+}
+
+function defaultGeneratedCodeFilePath(file: { path?: string; name: string }) {
+  const normalized = normalizeCodeFileCandidatePath(file);
+  if (/\.(tsx?|jsx?)$/i.test(normalized)) {
+    return normalized;
+  }
+  return `${normalized}.tsx`;
+}
+
+function resolveLocalCodeImportPath(
+  importer: { path?: string; name: string },
+  specifier: string,
+) {
+  if (!specifier.startsWith("./") && !specifier.startsWith("../")) {
+    return "";
+  }
+  const importerPath = defaultGeneratedCodeFilePath(importer);
+  const resolved = path.posix.normalize(
+    path.posix.join(path.posix.dirname(importerPath), specifier),
+  );
+  return stripKnownCodeExtension(resolved);
+}
+
+function pickExecutableCodeFileExport(
+  file: NonNullable<ExportIR["codeFiles"]>[number],
+  report: CodeCompatibilityMeta,
+) {
+  const componentDetails = (file.exportDetails ?? []).filter(
+    (detail) => detail?.type === "component" && typeof detail.name === "string",
+  );
+  if (componentDetails.length > 0) {
+    return componentDetails[0]?.name ?? "";
+  }
+  const reported = report.exportedComponents?.find((entry) => /^[A-Z]/.test(entry));
+  if (reported) return reported;
+  return (file.exports ?? []).find((entry) => /^[A-Z]/.test(entry)) ?? "";
+}
+
+function isSupportedCodeFileDependency(name: string) {
+  return Object.prototype.hasOwnProperty.call(
+    SUPPORTED_CODE_FILE_DEPENDENCIES,
+    name,
+  );
+}
+
+function resolveExecutableCodeFiles(input: {
+  ir: ExportIR;
+  codeCompatibilityReport?: GenerateInput["codeCompatibilityReport"];
+}) {
+  const compatibilityFiles = input.codeCompatibilityReport?.files ?? [];
+  const files = input.ir.codeFiles ?? [];
+  const baseCandidates = files
+    .map((file) => {
+      const report =
+        compatibilityFiles.find(
+          (entry) =>
+            entry.codeFileId === file.id ||
+            entry.path === file.path ||
+            entry.name === file.name,
+        ) ?? null;
+      if (!report || !file.content) return null;
+      if (!isExecutableCodeCompatibility(report.compatibility)) {
+        return null;
+      }
+      if ((report.cssImports?.length ?? 0) > 0) return null;
+      if (
+        (report.dependencyNames ?? []).some(
+          (dependency) => !isSupportedCodeFileDependency(dependency),
+        )
+      ) {
+        return null;
+      }
+      const exportName = pickExecutableCodeFileExport(file, report);
+      if (!exportName) return null;
+      const compatibility: ExecutableCodeFile["compatibility"] =
+        report.compatibility;
+      return {
+        file,
+        report,
+        exportName,
+        compatibility,
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+
+  const byNormalizedPath = new Map(
+    baseCandidates.map((entry) => [
+      stripKnownCodeExtension(defaultGeneratedCodeFilePath(entry.file)),
+      entry,
+    ]),
+  );
+
+  let filtered = baseCandidates;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const next = filtered.filter((entry) => {
+      const imports = entry.report.localComponentImports ?? [];
+      if (imports.length === 0) return true;
+      if (!entry.file.path) return false;
+      return imports.every((specifier) => {
+        const resolved = resolveLocalCodeImportPath(entry.file, specifier);
+        return resolved.length > 0 && filtered.some((candidate) => {
+          const candidatePath = stripKnownCodeExtension(
+            defaultGeneratedCodeFilePath(candidate.file),
+          );
+          return candidatePath === resolved;
+        });
+      });
+    });
+    if (next.length !== filtered.length) {
+      filtered = next;
+      changed = true;
+    }
+  }
+
+  return filtered.map<ExecutableCodeFile>((entry) => {
+    const generatedSourcePath = path.posix.join(
+      "src",
+      "framer-generated-code",
+      defaultGeneratedCodeFilePath(entry.file),
+    );
+    return {
+      ...entry,
+      generatedSourcePath,
+      importPathFromFramerData: toPosixModulePath(
+        path.posix.relative(
+          path.posix.join("src", "framer-data"),
+          stripKnownCodeExtension(generatedSourcePath),
+        ),
+      ),
+    };
+  });
+}
+
+function toPosixModulePath(value: string) {
+  const normalized = value.replace(/\\/g, "/");
+  return normalized.startsWith(".") ? normalized : `./${normalized}`;
+}
+
+function rewriteCodeFileSource(
+  source: string,
+  adapterImportPath: string,
+) {
+  return source
+    .replace(
+      /\bfrom\s+(['"])framer\1/g,
+      `from '${adapterImportPath}'`,
+    )
+    .replace(
+      /\bimport\s*\(\s*(['"])framer\1\s*\)/g,
+      `import('${adapterImportPath}')`,
+    );
+}
 
 export async function generateNextProject(
   input: GenerateInput,
@@ -107,6 +333,9 @@ export async function generateNextProject(
     ? input.ir.componentModules
     : [];
   const runtimeComponentModules = isFullSite ? [] : componentModules;
+  const routeTemplateHasComponentFamilies = sitePages.some((entry) =>
+    hasInlineComponentFamilyMount(entry),
+  );
 
   await writeFile(
     path.join(input.projectDir, "framer-component-modules.json"),
@@ -150,6 +379,8 @@ export async function generateNextProject(
         templateId: page.templateId ?? page.routePath,
         templatePath: page.templatePath ?? page.routePath,
         templateKind: page.templateKind ?? "static",
+        redirectTo: page.redirectTo ?? null,
+        redirectStatus: page.redirectStatus ?? null,
         sourceTextLength: page.sourceTextLength ?? 0,
         sourceNodeCount: page.exportTree
           ? countExportTreeNodes(page.exportTree)
@@ -279,6 +510,7 @@ export async function generateNextProject(
           entries,
           input.ir.exportMode === "selection" ? "selection" : "components",
           componentModules,
+          (input.ir.codeFiles?.length ?? 0) > 0,
         ),
     "typescript",
   );
@@ -288,7 +520,11 @@ export async function generateNextProject(
     "typescript",
   );
   const globalCss = createGlobalCss();
-  const packageJson = `${JSON.stringify(createPackageJson(input.ir), null, 2)}\n`;
+  const executableCodeFiles = resolveExecutableCodeFiles({
+    ir: input.ir,
+    codeCompatibilityReport: input.codeCompatibilityReport,
+  });
+  const packageJson = `${JSON.stringify(createPackageJson(input.ir, executableCodeFiles), null, 2)}\n`;
   const tsconfig = `${JSON.stringify(createTsConfig(), null, 2)}\n`;
 
   await writeFile(path.join(srcDir, "App.tsx"), app);
@@ -311,12 +547,41 @@ export async function generateNextProject(
     ),
   );
   await writeFile(
+    path.join(framerDataDir, "component-families.ts"),
+    await formatTsx(createComponentFamiliesDataModule(input.ir), "typescript"),
+  );
+  await writeFile(
+    path.join(framerDataDir, "component-families-runtime.tsx"),
+    await formatTsx(createComponentFamiliesRuntimeModule(input.ir), "typescript"),
+  );
+  await writeFile(
+    path.join(framerDataDir, "framer-adapter.tsx"),
+    await formatTsx(createFramerAdapterModule(), "typescript"),
+  );
+  await writeFile(
     path.join(framerDataDir, "code-files.ts"),
-    await formatTsx(createCodeFilesDataModule(input.ir), "typescript"),
+    await formatTsx(
+      createCodeFilesDataModule(
+        input.ir,
+        input.codeCompatibilityReport,
+        input.unadaptedCodeFiles,
+      ),
+      "typescript",
+    ),
+  );
+  await writeFile(
+    path.join(framerDataDir, "code-file-executables.tsx"),
+    await formatTsx(
+      createCodeFileExecutablesModule(executableCodeFiles),
+      "typescript",
+    ),
   );
   await writeFile(
     path.join(framerDataDir, "code-files-runtime.tsx"),
-    await formatTsx(createCodeFilesRuntimeModule(input.ir), "typescript"),
+    await formatTsx(
+      createCodeFilesRuntimeModule(input.ir, executableCodeFiles),
+      "typescript",
+    ),
   );
   await writeFile(
     path.join(framerDataDir, "fonts.ts"),
@@ -340,10 +605,38 @@ export async function generateNextProject(
   );
   await writeFile(
     path.join(framerDataDir, "route-template-runtime.tsx"),
-    await formatTsx(createRouteTemplateRuntimeModule(), "typescript"),
+    await formatTsx(
+      createRouteTemplateRuntimeModule(routeTemplateHasComponentFamilies),
+      "typescript",
+    ),
   );
   await writeFile(path.join(srcDir, "main.tsx"), main);
   await writeFile(path.join(srcDir, "styles.css"), globalCss);
+  for (const executable of executableCodeFiles) {
+    const targetPath = path.join(
+      input.projectDir,
+      executable.generatedSourcePath.replace(/^src\//, "src/"),
+    );
+    await mkdirp(path.dirname(targetPath));
+    const adapterImportPath = toPosixModulePath(
+      path.posix.relative(
+        path.posix.dirname(executable.generatedSourcePath),
+        path.posix.join("src", "framer-data", "framer-adapter"),
+      ),
+    );
+    await writeFile(
+      targetPath,
+      await formatTsx(
+        rewriteCodeFileSource(executable.file.content ?? "", adapterImportPath),
+        "typescript",
+      ),
+    );
+  }
+  const dependencyLicenseReport = createDependencyLicenseReport(executableCodeFiles);
+  await writeFile(
+    path.join(input.projectDir, "dependency-license-report.json"),
+    `${JSON.stringify(dependencyLicenseReport, null, 2)}\n`,
+  );
   if (framerStyleCss) {
     await writeFile(path.join(srcDir, "framer-styles.css"), framerStyleCss);
   }
@@ -483,7 +776,7 @@ function deriveIrForComponent(
 }
 
 function createRouteDataModule(routeDataName: string, entry: ExportIR) {
-  const exportTree = sanitizeRouteTemplateTree(entry.exportTree ?? []);
+  const exportTree = sanitizeRouteTemplateTree(entry.exportTree ?? [], entry);
   return `export const ${routeDataName} = ${JSON.stringify(
     {
       sourceUrl: entry.sourceUrl,
@@ -495,30 +788,129 @@ function createRouteDataModule(routeDataName: string, entry: ExportIR) {
 `;
 }
 
-function sanitizeRouteTemplateTree(nodes: ExportTreeNode[]): Array<Record<string, unknown>> {
-  return nodes.map((node) => ({
-    id: node.id,
-    classKey: treeNodeClass(node),
-    tag: node.tag,
-    text: node.text,
-    kind: node.kind,
-    attributes: {
-      src: node.attributes.src,
-      href: node.attributes.href,
-      alt: node.attributes.alt,
-      role: node.attributes.role,
-      className:
-        typeof node.attributes.className === "string"
-          ? node.attributes.className
-          : undefined,
-      dataFramerName:
-        typeof node.attributes.dataFramerName === "string"
-          ? node.attributes.dataFramerName
-          : undefined,
-    },
-    inlineStyle: Object.fromEntries(treeInlineStyleEntries(node)),
-    children: sanitizeRouteTemplateTree(node.children),
-  }));
+type ComponentFamilyMount = {
+  familyId: string;
+  familyName: string;
+  initialVariantId?: string;
+};
+
+function normalizeFamilyLookupKey(value: string | undefined) {
+  return typeof value === "string" && value.trim()
+    ? value.trim().toLowerCase()
+    : "";
+}
+
+function resolveComponentFamilyMount(
+  node: ExportTreeNode,
+  ir: ExportIR,
+): ComponentFamilyMount | undefined {
+  const families = ir.componentFamilies ?? [];
+  if (families.length === 0) return undefined;
+
+  const pluginNodeId = node.source.pluginNodeId;
+  const runtimeNodeId = node.source.runtimeNodeId;
+  const directFamily = families.find((family) =>
+    family.instances.some(
+      (instance) =>
+        instance.nodeId === pluginNodeId ||
+        instance.nodeId === runtimeNodeId ||
+        instance.nodeId === node.id,
+    ),
+  );
+  if (directFamily) {
+    const instance = directFamily.instances.find(
+      (entry) =>
+        entry.nodeId === pluginNodeId ||
+        entry.nodeId === runtimeNodeId ||
+        entry.nodeId === node.id,
+    );
+    return {
+      familyId: directFamily.id,
+      familyName: directFamily.name,
+      initialVariantId:
+        instance?.initialVariantId ?? directFamily.primaryVariantId,
+    };
+  }
+
+  const lookup = new Set(
+    [
+      node.name,
+      typeof node.attributes.dataFramerName === "string"
+        ? node.attributes.dataFramerName
+        : undefined,
+    ]
+      .map(normalizeFamilyLookupKey)
+      .filter(Boolean),
+  );
+  if (lookup.size === 0) return undefined;
+
+  const matchedFamily = families.find((family) => {
+    const candidates = [
+      family.id,
+      family.name,
+      ...family.variants.map((variant) => variant.name),
+      ...family.variants
+        .map((variant) => variant.variantName)
+        .filter((value): value is string => typeof value === "string"),
+    ]
+      .map(normalizeFamilyLookupKey)
+      .filter(Boolean);
+    return candidates.some((candidate) => lookup.has(candidate));
+  });
+  if (!matchedFamily) return undefined;
+
+  return {
+    familyId: matchedFamily.id,
+    familyName: matchedFamily.name,
+    initialVariantId: matchedFamily.primaryVariantId,
+  };
+}
+
+function treeNodeHasComponentFamilyMount(
+  node: ExportTreeNode,
+  ir: ExportIR,
+): boolean {
+  if (resolveComponentFamilyMount(node, ir)) return true;
+  return node.children.some((child) => treeNodeHasComponentFamilyMount(child, ir));
+}
+
+function hasInlineComponentFamilyMount(ir: ExportIR) {
+  return (ir.exportTree ?? []).some((node) => treeNodeHasComponentFamilyMount(node, ir));
+}
+
+function sanitizeRouteTemplateTree(
+  nodes: ExportTreeNode[],
+  ir?: ExportIR,
+): Array<Record<string, unknown>> {
+  return nodes.map((node) => {
+    const familyMount = ir ? resolveComponentFamilyMount(node, ir) : undefined;
+    return {
+      id: node.id,
+      classKey: treeNodeClass(node),
+      tag: node.tag,
+      text: node.text,
+      kind: node.kind,
+      componentFamilyId: familyMount?.familyId,
+      componentFamilyName: familyMount?.familyName,
+      componentFamilyInitialVariantId: familyMount?.initialVariantId,
+      attributes: {
+        src: node.attributes.src,
+        href: node.attributes.href,
+        alt: node.attributes.alt,
+        role: node.attributes.role,
+        className:
+          typeof node.attributes.className === "string"
+            ? node.attributes.className
+            : undefined,
+        dataFramerName:
+          typeof node.attributes.dataFramerName === "string"
+            ? node.attributes.dataFramerName
+            : undefined,
+      },
+      inlineStyle: Object.fromEntries(treeInlineStyleEntries(node)),
+      children: sanitizeRouteTemplateTree(node.children, ir),
+    };
+  });
 }
 
 function createSharedTemplateRoutePage(input: {
@@ -542,7 +934,7 @@ import { FramerRouteTemplateRuntime } from '../src/framer-data/route-template-ru
 export type ${templateComponentName}Props = {
   pageData: {
     sourceUrl: string
-    exportTree: Array<Record<string, unknown>>
+    exportTree: ReadonlyArray<Record<string, unknown>>
   }
 }
 
@@ -560,7 +952,7 @@ function createSharedTemplateDts(templateComponentName: string) {
   return `export type ${templateComponentName}Props = {
   pageData: {
     sourceUrl: string
-    exportTree: Array<Record<string, unknown>>
+    exportTree: ReadonlyArray<Record<string, unknown>>
   }
 }
 
@@ -568,8 +960,9 @@ export declare function ${templateComponentName}(props: ${templateComponentName}
 `;
 }
 
-function createRouteTemplateRuntimeModule() {
+function createRouteTemplateRuntimeModule(_hasComponentFamilies: boolean) {
   return `import * as React from 'react'
+import { FramerComponentFamilyStateMachine } from './component-families-runtime'
 
 type RouteTemplateNode = {
   id?: string
@@ -577,13 +970,16 @@ type RouteTemplateNode = {
   tag?: string
   text?: string
   kind?: string
+  componentFamilyId?: string
+  componentFamilyName?: string
+  componentFamilyInitialVariantId?: string
   attributes?: Record<string, unknown>
   inlineStyle?: Record<string, unknown>
   children?: RouteTemplateNode[]
 }
 
 type RuntimeProps = {
-  tree: Array<Record<string, unknown>>
+  tree: ReadonlyArray<Record<string, unknown>>
   styles: Record<string, string>
 }
 
@@ -600,6 +996,14 @@ function asNode(value: Record<string, unknown>): RouteTemplateNode {
     tag: typeof value.tag === 'string' ? value.tag : 'div',
     text: typeof value.text === 'string' ? value.text : undefined,
     kind: typeof value.kind === 'string' ? value.kind : undefined,
+    componentFamilyId:
+      typeof value.componentFamilyId === 'string' ? value.componentFamilyId : undefined,
+    componentFamilyName:
+      typeof value.componentFamilyName === 'string' ? value.componentFamilyName : undefined,
+    componentFamilyInitialVariantId:
+      typeof value.componentFamilyInitialVariantId === 'string'
+        ? value.componentFamilyInitialVariantId
+        : undefined,
     attributes: isRecord(value.attributes) ? value.attributes : {},
     inlineStyle: isRecord(value.inlineStyle) ? value.inlineStyle : {},
     children: Array.isArray(value.children)
@@ -644,6 +1048,18 @@ function classNameForNode(node: RouteTemplateNode, styles: Record<string, string
 }
 
 function renderNode(node: RouteTemplateNode, styles: Record<string, string>, depth: number): React.ReactNode {
+  if (node.componentFamilyId) {
+    return (
+      <FramerComponentFamilyStateMachine
+        key={node.id ?? node.componentFamilyId}
+        familyId={node.componentFamilyId}
+        initialVariantId={node.componentFamilyInitialVariantId}
+        placement="route"
+        familyName={node.componentFamilyName}
+      />
+    )
+  }
+
   const tag = tagForNode(node, depth)
   const children = (node.children ?? []).map((child, index) =>
     renderNode(child, styles, depth + 1) ?? <React.Fragment key={index} />,
@@ -861,6 +1277,9 @@ function createDts(ir: ExportIR, includeDataPreviews = true) {
   if (includeDataPreviews && (ir.componentModules?.length ?? 0) > 0) {
     lines.push(`  includeFramerRegistry?: boolean`);
   }
+  if (includeDataPreviews && (ir.componentFamilies?.length ?? 0) > 0) {
+    lines.push(`  includeFramerComponentFamilies?: boolean`);
+  }
   if (includeDataPreviews && (ir.codeFiles?.length ?? 0) > 0) {
     lines.push(`  includeFramerCodeFiles?: boolean`);
   }
@@ -894,6 +1313,10 @@ function createComponent(
     includeDataPreviews && (ir.cmsCollections?.length ?? 0) > 0;
   const hasComponentModules =
     includeDataPreviews && (ir.componentModules?.length ?? 0) > 0;
+  const hasComponentFamilies =
+    includeDataPreviews && (ir.componentFamilies?.length ?? 0) > 0;
+  const hasInlineComponentFamilies =
+    hasComponentFamilies && hasInlineComponentFamilyMount(ir);
   const hasCodeFiles = includeDataPreviews && (ir.codeFiles?.length ?? 0) > 0;
   const content = hasUsableExportTree(ir)
     ? renderExportTreeForReact(ir)
@@ -921,9 +1344,11 @@ function createComponent(
 	import styles from '${cssImportPath}'
   ${hasCmsCollections ? `import { FramerCmsAutoSections } from '${cmsImportPath}'` : ""}
   ${
-    hasComponentModules || hasCodeFiles
+    hasComponentModules || hasComponentFamilies || hasInlineComponentFamilies || hasCodeFiles
       ? `import { ${[
           hasComponentModules ? "FramerComponentRegistryPreview" : null,
+          hasInlineComponentFamilies ? "FramerComponentFamilyStateMachine" : null,
+          hasComponentFamilies ? "FramerComponentFamilyGallery" : null,
           hasCodeFiles ? "FramerCodeFileList" : null,
         ]
           .filter(Boolean)
@@ -965,6 +1390,7 @@ export type ${ir.componentName}Props = {
   ${formatPropTypeLines(ir)}
   ${hasCmsCollections ? "includeCmsSections?: boolean" : ""}
   ${hasComponentModules ? "includeFramerRegistry?: boolean" : ""}
+  ${hasComponentFamilies ? "includeFramerComponentFamilies?: boolean" : ""}
   ${hasCodeFiles ? "includeFramerCodeFiles?: boolean" : ""}
 }
 
@@ -976,6 +1402,11 @@ export function ${ir.componentName}(props: ${ir.componentName}Props) {
       ${
         hasComponentModules
           ? `{props.includeFramerRegistry !== false ? <FramerComponentRegistryPreview /> : null}`
+          : ""
+      }
+      ${
+        hasComponentFamilies
+          ? `{props.includeFramerComponentFamilies !== false ? <FramerComponentFamilyGallery /> : null}`
           : ""
       }
       ${
@@ -993,7 +1424,11 @@ function createViteApp(
   entries: ExportIR[],
   label: "components" | "selection",
   _componentModules: FramerComponentModule[] = [],
+  hasGlobalCodeFiles = false,
 ) {
+  const hasComponentFamilies = entries.some(
+    (entry) => (entry.componentFamilies?.length ?? 0) > 0,
+  );
   const imports = entries
     .map(
       (entry) =>
@@ -1023,6 +1458,8 @@ function createViteApp(
     .join("\n");
   return `import { motion } from 'framer-motion'
 ${imports}
+${hasComponentFamilies ? `import { FramerComponentFamilyGallery } from './framer-data/component-families-runtime'` : ""}
+${hasGlobalCodeFiles ? `import { FramerCodeFileList } from './framer-data/code-files-runtime'` : ""}
 
 export default function App() {
   return (
@@ -1035,6 +1472,38 @@ export default function App() {
         <span>${entries.length} component${entries.length === 1 ? "" : "s"}</span>
       </header>
       ${render}
+      ${
+        hasComponentFamilies
+          ? `<section className="previewItem">
+        <div className="previewHeader">
+          <div>
+            <div className="previewEyebrow">Component families</div>
+            <h2>Framer variant state</h2>
+          </div>
+          <code>src/framer-data/component-families-runtime.tsx</code>
+        </div>
+        <div className="previewCanvas">
+          <FramerComponentFamilyGallery />
+        </div>
+      </section>`
+          : ""
+      }
+      ${
+        hasGlobalCodeFiles
+          ? `<section className="previewItem">
+        <div className="previewHeader">
+          <div>
+            <div className="previewEyebrow">Code files</div>
+            <h2>Framer executable previews</h2>
+          </div>
+          <code>src/framer-data/code-files-runtime.tsx</code>
+        </div>
+        <div className="previewCanvas">
+          <FramerCodeFileList />
+        </div>
+      </section>`
+          : ""
+      }
     </main>
   )
 }
@@ -1042,6 +1511,7 @@ export default function App() {
 }
 
 function createViteSiteApp(base: ExportIR, pages: ExportIR[]) {
+  const hasGlobalCodeFiles = (base.codeFiles?.length ?? 0) > 0;
   const sitePages =
     base.sitePages ??
     pages.map((entry) => ({
@@ -1052,6 +1522,8 @@ function createViteSiteApp(base: ExportIR, pages: ExportIR[]) {
       templateId: "/",
       templatePath: "/",
       templateKind: "static" as const,
+      redirectTo: undefined,
+      redirectStatus: undefined,
     }));
   const pageMetadata = sitePages.map((page, index) => ({
     componentName: pages[index]?.componentName ?? page.componentName,
@@ -1060,6 +1532,8 @@ function createViteSiteApp(base: ExportIR, pages: ExportIR[]) {
     templateId: page.templateId ?? page.routePath,
     templatePath: page.templatePath ?? page.routePath,
     templateKind: page.templateKind ?? "static",
+    redirectTo: page.redirectTo ?? null,
+    redirectStatus: page.redirectStatus ?? null,
   }));
   const lazyComponents = pages
     .map(
@@ -1088,12 +1562,15 @@ function createViteSiteApp(base: ExportIR, pages: ExportIR[]) {
       templateId: ${JSON.stringify(page.templateId)},
       templatePath: ${JSON.stringify(page.templatePath)},
       templateKind: ${JSON.stringify(page.templateKind)},
+      redirectTo: ${JSON.stringify(page.redirectTo ?? null)},
+      redirectStatus: ${JSON.stringify(page.redirectStatus ?? null)},
       Component: ${page.componentName},
     }`,
     )
     .join(",\n");
 
   return `import { Component, lazy, Suspense, startTransition, useEffect, useState, type ReactNode } from 'react'
+${hasGlobalCodeFiles ? `import { FramerCodeFileList } from './framer-data/code-files-runtime'` : ""}
 
 ${lazyComponents}
 
@@ -1136,6 +1613,10 @@ function navigateTo(path: string, options: { replace?: boolean } = {}) {
   const method = options.replace ? 'replaceState' : 'pushState'
   window.history[method](null, '', nextPath)
   window.dispatchEvent(new PopStateEvent('popstate'))
+}
+
+function isExternalUrl(path: string) {
+  return /^https?:\\/\\//.test(path)
 }
 
 function isModifiedEvent(event: MouseEvent) {
@@ -1254,6 +1735,15 @@ export default function App() {
     preloadRoute(pages[currentIndex + 1]?.path ?? '')
   }, [currentPage])
 
+  useEffect(() => {
+    if (!currentPage?.redirectTo || typeof window === 'undefined') return
+    if (isExternalUrl(currentPage.redirectTo)) {
+      window.location.replace(currentPage.redirectTo)
+      return
+    }
+    navigateTo(currentPage.redirectTo, { replace: true })
+  }, [currentPage])
+
   if (!currentPage) {
     return (
       <main className="previewShell">
@@ -1280,6 +1770,15 @@ export default function App() {
         </div>
         <span>{pages.length} page{pages.length === 1 ? '' : 's'}</span>
       </header>
+      {currentPage.redirectTo ? (
+        <div className="routeStateCard" role="status">
+          <div className="routeStateEyebrow">Redirect</div>
+          <h2>Redirecting…</h2>
+          <p>
+            <code>{currentPage.path}</code> → <code>{currentPage.redirectTo}</code>
+          </p>
+        </div>
+      ) : null}
       <RouteErrorBoundary path={currentPage.path}>
         <Suspense
           fallback={
@@ -1290,9 +1789,25 @@ export default function App() {
             </div>
           }
         >
-          <Page />
+          {currentPage.redirectTo ? null : <Page />}
         </Suspense>
       </RouteErrorBoundary>
+      ${
+        hasGlobalCodeFiles
+          ? `<section className="previewItem">
+        <div className="previewHeader">
+          <div>
+            <div className="previewEyebrow">Code files</div>
+            <h2>Framer executable previews</h2>
+          </div>
+          <code>src/framer-data/code-files-runtime.tsx</code>
+        </div>
+        <div className="previewCanvas">
+          <FramerCodeFileList />
+        </div>
+      </section>`
+          : ""
+      }
     </main>
   )
 }
@@ -2203,7 +2718,7 @@ function renderExportTreeForReact(ir: ExportIR) {
 
 function renderExportTreeForHtml(ir: ExportIR) {
   return (ir.exportTree ?? [])
-    .map((node) => renderExportTreeNodeHtml(node, 0))
+    .map((node) => renderExportTreeNodeHtml(node, ir, 0))
     .filter(Boolean)
     .join("\n");
 }
@@ -2214,6 +2729,11 @@ function renderExportTreeNodeReact(
   ctx: RenderContext,
   depth: number,
 ): string {
+  const familyMount = resolveComponentFamilyMount(node, ir);
+  if (familyMount) {
+    return `<FramerComponentFamilyStateMachine familyId="${escapeAttribute(familyMount.familyId)}"${familyMount.initialVariantId ? ` initialVariantId="${escapeAttribute(familyMount.initialVariantId)}"` : ""} placement="route" familyName="${escapeAttribute(familyMount.familyName)}" />`;
+  }
+
   const style = reactTreeStyleAttribute(node);
   const className = reactTreeClassName(node);
   const childContent = node.children
@@ -2289,11 +2809,23 @@ function renderExportTreeNodeReact(
   </${tag}>`;
 }
 
-function renderExportTreeNodeHtml(node: ExportTreeNode, depth: number): string {
+function renderExportTreeNodeHtml(
+  node: ExportTreeNode,
+  ir: ExportIR,
+  depth: number,
+): string {
+  const familyMount = resolveComponentFamilyMount(node, ir);
+  if (familyMount) {
+    return `<article class="surface" data-framer-component-family-placeholder="${escapeAttribute(familyMount.familyName)}">
+  <strong>${escapeText(familyMount.familyName)}</strong>
+  <p>Interactive Framer component family mounted in the React preview.</p>
+</article>`;
+  }
+
   const style = htmlTreeStyleAttribute(node);
   const className = htmlTreeClassName(node);
   const childContent = node.children
-    .map((child) => renderExportTreeNodeHtml(child, depth + 1))
+    .map((child) => renderExportTreeNodeHtml(child, ir, depth + 1))
     .filter(Boolean)
     .join("\n");
   const text = escapeText(node.text ?? "");
@@ -2556,11 +3088,11 @@ img {
   min-height: 100vh;
   background: #f4f4f5;
   color: #18181b;
-  padding: 28px;
+  padding: 28px 0;
 }
 
 .previewTopbar {
-  max-width: 1180px;
+  width: min(1180px, calc(100% - 32px));
   margin: 0 auto 18px;
   display: flex;
   align-items: end;
@@ -2595,7 +3127,7 @@ img {
 }
 
 .routeStateCard {
-  max-width: 1180px;
+  width: min(1180px, calc(100% - 32px));
   margin: 0 auto;
   padding: 24px;
   border: 1px solid rgb(24 24 27 / 10%);
@@ -2635,7 +3167,7 @@ img {
 }
 
 .previewItem {
-  max-width: 1180px;
+  width: min(1180px, calc(100% - 32px));
   margin: 0 auto 16px;
   overflow: hidden;
   border: 1px solid rgb(24 24 27 / 10%);
@@ -2729,7 +3261,43 @@ img {
 `;
 }
 
-function createPackageJson(ir: ExportIR) {
+function createDependencyLicenseReport(executableCodeFiles: ExecutableCodeFile[]) {
+  const used = new Set<string>();
+  for (const executable of executableCodeFiles) {
+    for (const dependency of executable.report.dependencyNames ?? []) {
+      if (isSupportedCodeFileDependency(dependency)) used.add(dependency);
+    }
+  }
+
+  return {
+    generatedAt: new Date().toISOString(),
+    dependencies: Array.from(used)
+      .sort()
+      .map((name) => ({
+        name,
+        version: SUPPORTED_CODE_FILE_DEPENDENCIES[name as keyof typeof SUPPORTED_CODE_FILE_DEPENDENCIES].version,
+        license: SUPPORTED_CODE_FILE_DEPENDENCIES[name as keyof typeof SUPPORTED_CODE_FILE_DEPENDENCIES].license,
+      })),
+  };
+}
+
+function createPackageJson(ir: ExportIR, executableCodeFiles: ExecutableCodeFile[]) {
+  const dependencyEntries = Object.fromEntries(
+    Array.from(
+      new Set(
+        executableCodeFiles.flatMap((entry) =>
+          (entry.report.dependencyNames ?? []).filter(isSupportedCodeFileDependency),
+        ),
+      ),
+    )
+      .sort()
+      .map((name) => [
+        name,
+        SUPPORTED_CODE_FILE_DEPENDENCIES[
+          name as keyof typeof SUPPORTED_CODE_FILE_DEPENDENCIES
+        ].version,
+      ]),
+  );
   return {
     name: ir.componentName.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase(),
     version: "0.1.0",
@@ -2743,6 +3311,7 @@ function createPackageJson(ir: ExportIR) {
       "framer-motion": "12.42.0",
       react: "19.2.7",
       "react-dom": "19.2.7",
+      ...dependencyEntries,
     },
     devDependencies: {
       "@types/react": "19.2.17",
@@ -2935,10 +3504,67 @@ export const hasFramerRegisteredComponents = ${hasModules ? "true" : "false"} as
 `;
 }
 
-function createCodeFilesDataModule(ir: ExportIR) {
-  return `export const framerCodeFiles = ${JSON.stringify(ir.codeFiles ?? [], null, 2)} as const
+function createCodeFilesDataModule(
+  ir: ExportIR,
+  codeCompatibilityReport?: GenerateInput["codeCompatibilityReport"],
+  unadaptedCodeFiles?: GenerateInput["unadaptedCodeFiles"],
+) {
+  const compatibilityFiles = codeCompatibilityReport?.files ?? [];
+  const unadaptedFiles = unadaptedCodeFiles ?? [];
+  const enriched = (ir.codeFiles ?? []).map((file) => {
+    const compatibility =
+      compatibilityFiles.find(
+        (entry) =>
+          entry.codeFileId === file.id ||
+          entry.path === file.path ||
+          entry.name === file.name,
+      ) ?? null;
+    const unadapted =
+      unadaptedFiles.find(
+        (entry) => entry.codeFileId === file.id || entry.name === file.name,
+      ) ?? null;
+    return {
+      ...file,
+      compatibility: compatibility?.compatibility,
+      compatibilityReasons: compatibility?.reasons ?? [],
+      dependencyNames: compatibility?.dependencyNames ?? [],
+      unadaptedComponentPath: unadapted?.sourcePath,
+      unadaptedMetadataPath: unadapted?.metadataPath,
+    };
+  });
 
-export type FramerCodeFileMeta = (typeof framerCodeFiles)[number]
+  return `export type FramerCodeFileCompatibility =
+  | 'portable'
+  | 'portable-with-adapter'
+  | 'portable-with-dependencies'
+  | 'runtime-fallback-required'
+  | 'unsupported'
+
+export type FramerCodeFileMeta = {
+  id?: string
+  name: string
+  path?: string
+  versionId?: string
+  exports?: string[]
+  exportDetails?: ReadonlyArray<Record<string, unknown>>
+  insertURL?: string
+  source?: string
+  content?: string
+  contentHash?: string
+  contentByteLength?: number
+  hasContent?: boolean
+  compatibility?: FramerCodeFileCompatibility
+  compatibilityReasons?: string[]
+  dependencyNames?: string[]
+  unadaptedComponentPath?: string
+  unadaptedMetadataPath?: string
+}
+
+export const framerCodeFiles: ReadonlyArray<FramerCodeFileMeta> = ${JSON.stringify(
+    enriched,
+    null,
+    2,
+  )}
 
 export function getFramerCodeFileByName(name: string) {
   return framerCodeFiles.find((entry) => entry.name === name)
@@ -2946,10 +3572,419 @@ export function getFramerCodeFileByName(name: string) {
 `;
 }
 
-function createCodeFilesRuntimeModule(ir: ExportIR) {
+function createFramerAdapterModule() {
+  return `import * as React from 'react'
+export * from 'framer-motion'
+export { motion } from 'framer-motion'
+
+type RenderTargetValue = 'canvas' | 'preview' | 'export'
+
+const renderTargetState: {
+  current: RenderTargetValue
+} = {
+  current: typeof window === 'undefined' ? 'export' : 'preview',
+}
+
+export const RenderTarget = {
+  canvas: 'canvas' as const,
+  preview: 'preview' as const,
+  export: 'export' as const,
+  current() {
+    return renderTargetState.current
+  },
+}
+
+export function FramerAdapterProvider(props: {
+  target?: RenderTargetValue
+  children: React.ReactNode
+}) {
+  const target = props.target ?? (typeof window === 'undefined' ? 'export' : 'preview')
+  renderTargetState.current = target
+
+  React.useEffect(() => {
+    renderTargetState.current = target
+    return () => {
+      renderTargetState.current = typeof window === 'undefined' ? 'export' : 'preview'
+    }
+  }, [target])
+
+  return <>{props.children}</>
+}
+
+export function addPropertyControls<T = unknown>(
+  _component: unknown,
+  _controls: PropertyControls<T>,
+) {
+  return undefined
+}
+
+export const ControlType = {
+  String: 'String',
+  Boolean: 'Boolean',
+  Number: 'Number',
+  Color: 'Color',
+  Enum: 'Enum',
+  Array: 'Array',
+  Object: 'Object',
+  File: 'File',
+  Image: 'Image',
+  ResponsiveImage: 'ResponsiveImage',
+  Transition: 'Transition',
+  Font: 'Font',
+  BorderRadius: 'BorderRadius',
+  Padding: 'Padding',
+  FusedNumber: 'FusedNumber',
+  SegmentedEnum: 'SegmentedEnum',
+  EventHandler: 'EventHandler',
+  ComponentInstance: 'ComponentInstance',
+} as const
+
+export type PropertyControls<T = unknown> = Record<string, unknown>
+export type ControlDescription = Record<string, unknown>
+
+export const Frame = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  function Frame(props, ref) {
+    return <div ref={ref} {...props} />
+  },
+)
+
+export function Stack(props: React.HTMLAttributes<HTMLDivElement>) {
+  return <div {...props} />
+}
+
+export function useIsStaticRenderer() {
+  return false
+}
+`;
+}
+
+function createCodeFileExecutablesModule(executableCodeFiles: ExecutableCodeFile[]) {
+  const imports = executableCodeFiles
+    .map((entry, index) => {
+      const importName = `CodeFileExecutable${index + 1}`;
+      return `import { ${entry.exportName} as ${importName} } from '${entry.importPathFromFramerData}'`;
+    })
+    .join("\n");
+  const entries = executableCodeFiles
+    .map((entry, index) => {
+      const importName = `CodeFileExecutable${index + 1}`;
+      return `  ${JSON.stringify(entry.file.name)}: {
+    Component: ${importName},
+    exportName: ${JSON.stringify(entry.exportName)},
+    compatibility: ${JSON.stringify(entry.compatibility)},
+  },`;
+    })
+    .join("\n");
+
+  return `import * as React from 'react'
+import { FramerAdapterProvider } from './framer-adapter'
+${imports}
+
+type ExecutableEntry = {
+  Component: React.ComponentType<any>
+  exportName: string
+  compatibility: 'portable' | 'portable-with-adapter' | 'portable-with-dependencies'
+}
+
+class FramerExecutableCodeFileErrorBoundary extends React.Component<
+  { children: React.ReactNode; fallback: React.ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false }
+
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+
+  render() {
+    if (this.state.failed) return this.props.fallback
+    return this.props.children
+  }
+}
+
+export const framerCodeFileExecutables: Record<string, ExecutableEntry> = {
+${entries}
+}
+
+export function getFramerExecutableCodeFileByName(name: string) {
+  return framerCodeFileExecutables[name]
+}
+
+export function FramerExecutableCodeFilePreview(props: {
+  name: string
+  fallback?: React.ReactNode
+}) {
+  const entry = getFramerExecutableCodeFileByName(props.name)
+  if (!entry) return <>{props.fallback ?? null}</>
+  const Component = entry.Component
+  const fallback = (
+    <div data-framer-code-file-executable-fallback={props.name}>
+      {props.fallback ?? (
+        <div style={{ opacity: 0.72 }}>
+          Executable preview failed for <code>{props.name}</code>.
+        </div>
+      )}
+    </div>
+  )
+
+  return (
+    <FramerExecutableCodeFileErrorBoundary
+      fallback={fallback}
+    >
+      <FramerAdapterProvider target="preview">
+        <div data-framer-code-file-executable={props.name} data-framer-code-file-export={entry.exportName}>
+          <Component />
+        </div>
+      </FramerAdapterProvider>
+    </FramerExecutableCodeFileErrorBoundary>
+  )
+}
+
+export const hasFramerExecutableCodeFiles = ${executableCodeFiles.length > 0 ? "true" : "false"} as const
+`;
+}
+
+function createComponentFamiliesDataModule(ir: ExportIR) {
+  return `export type FramerComponentFamilyVariantMeta = {
+  id: string
+  name: string
+  gesture?: string
+  inheritsFromId?: string
+  breakpoint?: string
+  variantName?: string
+  codeFileId?: string
+}
+
+export type FramerComponentFamilyInstanceMeta = {
+  nodeId: string
+  routePath?: string
+  controls?: Record<string, unknown>
+  initialVariantId?: string
+}
+
+export type FramerComponentFamilyTransitionMeta = {
+  fromVariantId: string
+  toVariantId?: string
+  trigger?: string
+  confidence: number
+  provenance: 'plugin' | 'runtime' | 'source' | 'merged'
+}
+
+export type FramerComponentFamilyMeta = {
+  id: string
+  name: string
+  primaryVariantId: string
+  variants: FramerComponentFamilyVariantMeta[]
+  instances: FramerComponentFamilyInstanceMeta[]
+  transitions: FramerComponentFamilyTransitionMeta[]
+  provenance: 'plugin' | 'runtime' | 'source' | 'merged'
+}
+
+export const framerComponentFamilies: ReadonlyArray<FramerComponentFamilyMeta> = ${JSON.stringify(ir.componentFamilies ?? [], null, 2)}
+
+export function getFramerComponentFamilyById(id: string) {
+  return framerComponentFamilies.find((entry) => entry.id === id)
+}
+
+export function getFramerComponentFamilyByName(name: string) {
+  return framerComponentFamilies.find((entry) => entry.name === name)
+}
+`;
+}
+
+function createComponentFamiliesRuntimeModule(ir: ExportIR) {
+  const hasFamilies = (ir.componentFamilies?.length ?? 0) > 0;
+  return `import * as React from 'react'
+import {
+  framerComponentFamilies,
+  getFramerComponentFamilyById,
+  type FramerComponentFamilyMeta,
+} from './component-families'
+
+type Trigger = 'click' | 'tap' | 'hover-start' | 'hover-end' | 'focus' | 'timeout'
+
+function normalizeTrigger(value: string | undefined): Trigger | undefined {
+  switch (value) {
+    case 'click':
+    case 'tap':
+    case 'hover-start':
+    case 'hover-end':
+    case 'focus':
+    case 'timeout':
+      return value
+    default:
+      return undefined
+  }
+}
+
+function nextVariantIdForFamily(family: FramerComponentFamilyMeta, currentVariantId: string) {
+  const transition = family.transitions.find((entry) => entry.fromVariantId === currentVariantId && entry.toVariantId)
+  if (transition?.toVariantId) return transition.toVariantId
+  const variants = family.variants ?? []
+  const currentIndex = variants.findIndex((entry) => entry.id === currentVariantId)
+  if (currentIndex >= 0 && variants.length > 1) {
+    return variants[(currentIndex + 1) % variants.length]?.id ?? currentVariantId
+  }
+  return family.primaryVariantId
+}
+
+function labelForTrigger(value: string | undefined) {
+  const normalized = normalizeTrigger(value)
+  return normalized === 'tap' ? 'Tap' : normalized === 'click' ? 'Click' : normalized === 'hover-start' ? 'Hover start' : normalized === 'hover-end' ? 'Hover end' : normalized === 'focus' ? 'Focus' : normalized === 'timeout' ? 'Timeout' : 'Advance'
+}
+
+export function FramerComponentFamilyStateMachine(props: {
+  familyId: string
+  initialVariantId?: string
+  placement?: 'route' | 'gallery'
+  familyName?: string
+}) {
+  const family = getFramerComponentFamilyById(props.familyId)
+  const initialVariantId = props.initialVariantId ?? family?.primaryVariantId
+  const [currentVariantId, setCurrentVariantId] = React.useState(initialVariantId)
+
+  React.useEffect(() => {
+    setCurrentVariantId(initialVariantId)
+  }, [initialVariantId])
+
+  if (!family) {
+    return <div style={{ opacity: 0.64 }}>Unknown family {props.familyId}</div>
+  }
+
+  const currentVariant =
+    family.variants.find((entry) => entry.id === currentVariantId) ??
+    family.variants.find((entry) => entry.id === family.primaryVariantId) ??
+    family.variants[0]
+  const availableTransitions = family.transitions.filter((entry) => entry.fromVariantId === currentVariant?.id)
+
+  return (
+    <article
+      data-framer-component-family={family.id}
+      data-framer-component-family-name={props.familyName ?? family.name}
+      data-framer-component-family-placement={props.placement ?? 'gallery'}
+      style={{
+        display: 'grid',
+        gap: '0.75rem',
+        border: '1px solid rgb(24 24 27 / 0.1)',
+        borderRadius: '1rem',
+        background: 'white',
+        padding: '1rem',
+      }}
+    >
+      <header style={{ display: 'grid', gap: '0.25rem' }}>
+        <strong>{family.name}</strong>
+        <div data-framer-current-variant={currentVariant?.id ?? family.primaryVariantId} style={{ color: '#52525b', fontSize: '0.8rem' }}>
+          Current variant: <code>{currentVariant?.name ?? currentVariant?.id ?? family.primaryVariantId}</code>
+        </div>
+        <div style={{ color: '#71717a', fontSize: '0.75rem' }}>
+          Provenance: {family.provenance}
+        </div>
+      </header>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+        {(family.variants ?? []).map((variant) => (
+          <button
+            key={variant.id}
+            type="button"
+            onClick={() => setCurrentVariantId(variant.id)}
+            data-framer-variant-button={variant.id}
+            style={{
+              border: variant.id === currentVariant?.id ? '1px solid #18181b' : '1px solid rgb(24 24 27 / 0.1)',
+              borderRadius: '999px',
+              padding: '0.3rem 0.65rem',
+              background: variant.id === currentVariant?.id ? '#18181b' : 'white',
+              color: variant.id === currentVariant?.id ? 'white' : '#18181b',
+              cursor: 'pointer',
+            }}
+          >
+            {variant.name}
+          </button>
+        ))}
+      </div>
+      <div style={{ display: 'grid', gap: '0.5rem', borderRadius: '0.75rem', background: 'rgb(24 24 27 / 0.04)', padding: '0.75rem' }}>
+        <div style={{ fontSize: '0.8rem', color: '#3f3f46' }}>Variant metadata</div>
+        <div style={{ display: 'grid', gap: '0.2rem', fontSize: '0.8rem', color: '#18181b' }}>
+          {currentVariant?.gesture ? <div>Gesture: {currentVariant.gesture}</div> : null}
+          {currentVariant?.variantName ? <div>Variant name: {currentVariant.variantName}</div> : null}
+          {currentVariant?.inheritsFromId ? <div>Inherits from: {currentVariant.inheritsFromId}</div> : null}
+          {currentVariant?.breakpoint ? <div>Breakpoint: {currentVariant.breakpoint}</div> : null}
+          {!currentVariant?.gesture && !currentVariant?.variantName && !currentVariant?.inheritsFromId && !currentVariant?.breakpoint ? (
+            <div>No additional variant metadata.</div>
+          ) : null}
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+        {availableTransitions.length > 0 ? (
+          availableTransitions.map((transition, index) => (
+            <button
+              key={\`\${transition.fromVariantId}-\${transition.trigger ?? 'advance'}-\${index}\`}
+              type="button"
+              onClick={() => setCurrentVariantId(transition.toVariantId ?? nextVariantIdForFamily(family, currentVariant?.id ?? family.primaryVariantId))}
+              data-framer-transition-trigger={transition.trigger ?? 'advance'}
+              data-framer-transition-target={transition.toVariantId ?? nextVariantIdForFamily(family, currentVariant?.id ?? family.primaryVariantId)}
+              style={{
+                border: '1px solid rgb(24 24 27 / 0.1)',
+                borderRadius: '0.75rem',
+                padding: '0.45rem 0.75rem',
+                background: 'white',
+                cursor: 'pointer',
+              }}
+            >
+              {labelForTrigger(transition.trigger)}
+            </button>
+          ))
+        ) : (
+          <button
+            type="button"
+            onClick={() => setCurrentVariantId(nextVariantIdForFamily(family, currentVariant?.id ?? family.primaryVariantId))}
+            data-framer-transition-trigger="advance"
+            data-framer-transition-target={nextVariantIdForFamily(family, currentVariant?.id ?? family.primaryVariantId)}
+            style={{
+              border: '1px solid rgb(24 24 27 / 0.1)',
+              borderRadius: '0.75rem',
+              padding: '0.45rem 0.75rem',
+              background: 'white',
+              cursor: 'pointer',
+            }}
+          >
+            Advance
+          </button>
+        )}
+      </div>
+    </article>
+  )
+}
+
+export function FramerComponentFamilyGallery() {
+  if (framerComponentFamilies.length === 0) {
+    return <div style={{ opacity: 0.64 }}>No Framer component families detected.</div>
+  }
+
+  return (
+    <section data-framer-component-families="true" style={{ display: 'grid', gap: '1rem' }}>
+      {framerComponentFamilies.map((family) => (
+        <FramerComponentFamilyStateMachine
+          key={family.id}
+          familyId={family.id}
+          placement="gallery"
+          familyName={family.name}
+        />
+      ))}
+    </section>
+  )
+}
+
+export const hasFramerComponentFamilies = ${hasFamilies ? "true" : "false"} as const
+`;
+}
+
+function createCodeFilesRuntimeModule(
+  ir: ExportIR,
+  executableCodeFiles: ExecutableCodeFile[],
+) {
   const hasCodeFiles = (ir.codeFiles?.length ?? 0) > 0;
   return `import * as React from 'react'
 import { framerCodeFiles, getFramerCodeFileByName } from './code-files'
+import { FramerExecutableCodeFilePreview, getFramerExecutableCodeFileByName } from './code-file-executables'
 
 export function FramerCodeFilePreview(props: {
   name: string
@@ -2957,6 +3992,7 @@ export function FramerCodeFilePreview(props: {
 }) {
   const file = getFramerCodeFileByName(props.name)
   if (!file) return <>{props.fallback ?? null}</>
+  const executable = getFramerExecutableCodeFileByName(file.name)
 
   return (
     <article
@@ -2976,7 +4012,102 @@ export function FramerCodeFilePreview(props: {
         {file.versionId ? (
           <div style={{ color: '#52525b', fontSize: '0.75rem' }}>Version: {file.versionId}</div>
         ) : null}
+        {file.compatibility ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+            <span
+              data-framer-code-file-compatibility={file.compatibility}
+              style={{
+                border: '1px solid rgb(24 24 27 / 0.08)',
+                borderRadius: '999px',
+                padding: '0.2rem 0.55rem',
+                fontSize: '0.75rem',
+                background:
+                  file.compatibility === 'unsupported'
+                    ? 'rgb(254 226 226)'
+                    : file.compatibility === 'runtime-fallback-required'
+                      ? 'rgb(254 249 195)'
+                      : 'rgb(244 244 245)',
+                color:
+                  file.compatibility === 'unsupported'
+                    ? '#991b1b'
+                    : file.compatibility === 'runtime-fallback-required'
+                      ? '#854d0e'
+                      : '#3f3f46',
+              }}
+            >
+              {file.compatibility}
+            </span>
+            {Array.isArray(file.dependencyNames) && file.dependencyNames.length > 0 ? (
+              <span style={{ color: '#52525b', fontSize: '0.75rem' }}>
+                Dependencies: {file.dependencyNames.join(', ')}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
       </header>
+      {file.compatibility === 'unsupported' || file.compatibility === 'runtime-fallback-required' ? (
+        <div
+          data-framer-code-file-fallback={file.name}
+          style={{
+            display: 'grid',
+            gap: '0.35rem',
+            borderRadius: '0.75rem',
+            padding: '0.75rem',
+            background:
+              file.compatibility === 'unsupported'
+                ? 'rgb(254 242 242)'
+                : 'rgb(254 252 232)',
+            color:
+              file.compatibility === 'unsupported'
+                ? '#7f1d1d'
+                : '#713f12',
+            fontSize: '0.8rem',
+          }}
+        >
+          <strong>
+            {file.compatibility === 'unsupported'
+              ? 'This Framer code file could not be adapted automatically.'
+              : 'This Framer code file requires runtime fallback.'}
+          </strong>
+          {Array.isArray(file.compatibilityReasons) && file.compatibilityReasons.length > 0 ? (
+            <div>Reasons: {file.compatibilityReasons.join(', ')}</div>
+          ) : null}
+          {file.unadaptedComponentPath ? (
+            <div data-framer-code-file-fallback-path={file.unadaptedComponentPath}>
+              Preserved source: <code>{file.unadaptedComponentPath}</code>
+            </div>
+          ) : null}
+          {file.unadaptedMetadataPath ? (
+            <div>
+              Metadata: <code>{file.unadaptedMetadataPath}</code>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {executable ? (
+        <div
+          data-framer-code-file-executable-preview={file.name}
+          style={{
+            display: 'grid',
+            gap: '0.5rem',
+            borderRadius: '0.75rem',
+            padding: '0.75rem',
+            background: 'rgb(24 24 27 / 0.04)',
+          }}
+        >
+          <div style={{ fontSize: '0.8rem', color: '#3f3f46' }}>
+            Executable preview: <code>{executable.exportName}</code>
+          </div>
+          <FramerExecutableCodeFilePreview
+            name={file.name}
+            fallback={
+              <div style={{ opacity: 0.72 }}>
+                Preview unavailable.
+              </div>
+            }
+          />
+        </div>
+      ) : null}
       {Array.isArray(file.exports) && file.exports.length > 0 ? (
         <ul style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', padding: 0, margin: 0, listStyle: 'none' }}>
           {file.exports.map((entry) => (
@@ -3541,9 +4672,20 @@ function createFramerDataIndexModule(ir: ExportIR) {
   const hasCms = (ir.cmsCollections?.length ?? 0) > 0;
   const hasCodeFiles = (ir.codeFiles?.length ?? 0) > 0;
   const hasModules = (ir.componentModules?.length ?? 0) > 0;
+  const hasFamilies = (ir.componentFamilies?.length ?? 0) > 0;
 
   return `export { framerComponentModules, getFramerComponentModuleByName } from './component-modules'
+export {
+  framerComponentFamilies,
+  getFramerComponentFamilyById,
+  getFramerComponentFamilyByName,
+} from './component-families'
 export { framerComponentRegistry, getFramerRegisteredComponent } from './component-registry'
+export {
+  FramerComponentFamilyGallery,
+  FramerComponentFamilyStateMachine,
+  hasFramerComponentFamilies,
+} from './component-families-runtime'
 export {
   FramerComponentRegistryPreview,
   FramerRegisteredComponentPreview,
@@ -3555,6 +4697,11 @@ export {
   FramerCodeFilePreview,
   hasFramerCodeFiles,
 } from './code-files-runtime'
+export {
+  FramerExecutableCodeFilePreview,
+  getFramerExecutableCodeFileByName,
+  hasFramerExecutableCodeFiles,
+} from './code-file-executables'
 export {
   framerFontFamilies,
   framerFonts,
@@ -3590,9 +4737,11 @@ export {
 
 export const framerDataSummary = {
   componentModuleCount: ${ir.componentModules?.length ?? 0},
+  componentFamilyCount: ${ir.componentFamilies?.length ?? 0},
   codeFileCount: ${ir.codeFiles?.length ?? 0},
   cmsCollectionCount: ${ir.cmsCollections?.length ?? 0},
   hasComponentModules: ${hasModules ? "true" : "false"},
+  hasComponentFamilies: ${hasFamilies ? "true" : "false"},
   hasCodeFiles: ${hasCodeFiles ? "true" : "false"},
   hasCmsCollections: ${hasCms ? "true" : "false"},
 } as const

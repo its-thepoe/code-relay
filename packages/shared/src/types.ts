@@ -27,6 +27,48 @@ export type InteractionStateStyles = {
   focus?: Record<string, string>;
 };
 
+export type RuntimeInteractionReplayRecord = {
+  id: string;
+  routePath?: string;
+  viewport: ViewportName;
+  action:
+    | "click"
+    | "keyboard-enter"
+    | "blocked-click"
+    | "blocked-keyboard-enter";
+  target: {
+    tag: string;
+    text?: string;
+    role?: string;
+    name?: string;
+  };
+  allowed: boolean;
+  blockedReason?: string;
+  beforeDomSignature: string;
+  afterDomSignature?: string;
+  beforeComputedStyles: Record<string, string>;
+  afterComputedStyles?: Record<string, string>;
+  beforeScreenshotPath?: string;
+  afterScreenshotPath?: string;
+  urlChanged: boolean;
+  networkActivity: {
+    totalRequests: number;
+    fetchRequests: number;
+    xhrRequests: number;
+    documentRequests: number;
+    blockedRequests: number;
+    blockedNavigationRequests: number;
+    blockedMutationRequests: number;
+  };
+  consoleErrors: string[];
+  animationSamples: {
+    before: Record<string, string>;
+    after?: Record<string, string>;
+  };
+  stateChanged: boolean;
+  provenance: "runtime";
+};
+
 export type RuntimeNode = {
   id: string;
   routePath?: string;
@@ -60,6 +102,17 @@ export type RuntimeCapture = {
       screenshotPath: string;
       width: number;
       height: number;
+      requested?: {
+        width: number;
+        height: number;
+      };
+      observed?: {
+        innerWidth: number;
+        innerHeight: number;
+        clientWidth: number;
+        devicePixelRatio: number;
+      };
+      valid?: boolean;
     }
   >;
   nodes: RuntimeNode[];
@@ -70,10 +123,27 @@ export type RuntimeCapture = {
   >;
   captureDiagnostics?: {
     breakpointsCaptured: ViewportName[];
+    viewportValidation?: Partial<
+      Record<
+        ViewportName,
+        {
+          requestedWidth: number;
+          requestedHeight: number;
+          observedInnerWidth: number;
+          observedInnerHeight: number;
+          observedClientWidth: number;
+          screenshotWidth: number;
+          screenshotHeight: number;
+          valid: boolean;
+          reason?: string;
+        }
+      >
+    >;
     fontReadiness?: Partial<Record<ViewportName, boolean>>;
     stylesheetCount?: Partial<Record<ViewportName, number>>;
     nodeCount?: Partial<Record<ViewportName, number>>;
   };
+  interactionReplay?: RuntimeInteractionReplayRecord[];
   framerStyleCss?: string;
   stylesheetUrls?: string[];
   routeCaptures?: RuntimeRouteCapture[];
@@ -83,7 +153,7 @@ export type RuntimeRouteCapture = Omit<RuntimeCapture, "routeCaptures"> & {
   routePath: string;
   templateId?: string;
   templatePath?: string;
-  templateKind?: "static" | "cms" | "component";
+  templateKind?: "static" | "cms" | "component" | "redirect" | "utility";
 };
 
 export type ExportMode = "selection" | "components" | "full-site";
@@ -175,6 +245,23 @@ export type FramerComponentFamily = {
     provenance: "plugin" | "runtime" | "source" | "merged";
   }>;
   provenance: "plugin" | "runtime" | "source" | "merged";
+};
+
+export type FramerOverrideAssignment = {
+  id: string;
+  codeFileId?: string;
+  codeFileName?: string;
+  exportName: string;
+  exportType: "override";
+  source: "plugin";
+  insertURL?: string;
+  targetNodeId?: string;
+  targetComponentId?: string;
+  affectedProps?: string[];
+  dependencyNames?: string[];
+  assignmentStatus: "resolved" | "unresolved";
+  assignmentConfidence: number;
+  unresolvedReason?: string;
 };
 
 export type FramerFont = {
@@ -284,6 +371,15 @@ export type PluginContextSnapshot = {
     id?: string;
     name?: string;
   };
+  publishedUrl?: string | null;
+  publishInfo?: {
+    production?: {
+      url?: string | null;
+    } | null;
+    staging?: {
+      url?: string | null;
+    } | null;
+  } | null;
   selectionSnapshot?: Array<Record<string, unknown>>;
   selectedComponents?: Array<Record<string, unknown>>;
   sitePages?: Array<Record<string, unknown>>;
@@ -446,6 +542,7 @@ export type ExportIR = {
   exportTree?: ExportTreeNode[];
   componentModules?: FramerComponentModule[];
   componentFamilies?: FramerComponentFamily[];
+  overrideAssignments?: FramerOverrideAssignment[];
   codeFiles?: FramerCodeFile[];
   fonts?: FramerFont[];
   cmsCollections?: FramerCmsCollection[];
@@ -463,12 +560,14 @@ export type ExportIR = {
     sourceTextLength?: number;
     templateId?: string;
     templatePath?: string;
-    templateKind?: "static" | "cms" | "component";
+    templateKind?: "static" | "cms" | "component" | "redirect" | "utility";
+    redirectTo?: string;
+    redirectStatus?: number;
   }>;
   routeTemplates?: Array<{
     templateId: string;
     templatePath: string;
-    templateKind: "static" | "cms" | "component";
+    templateKind: "static" | "cms" | "component" | "redirect" | "utility";
     representativeRoutePath: string;
     routePaths: string[];
     routeCount: number;
@@ -500,6 +599,17 @@ export type FidelityScores = {
   breakpointScores?: Partial<Record<ViewportName, number>>;
 };
 
+export type FidelityEvidenceMode = "screenshot-backed" | "heuristic";
+
+export type FidelityEvidence = {
+  mode: FidelityEvidenceMode;
+  reason: string;
+  sourceScreenshotViewports: ViewportName[];
+  generatedScreenshotViewports: ViewportName[];
+  comparedViewports: ViewportName[];
+  previewValidationStatus?: PreviewValidationResult["status"];
+};
+
 export type PreviewValidationViewportStats = {
   viewport: ViewportName;
   inspectedNodes: number;
@@ -529,6 +639,7 @@ export type ExportAttemptResult = {
   strategy: string;
   projectDir: string;
   fidelity: FidelityScores;
+  fidelityEvidence?: FidelityEvidence;
   warnings: ExportWarning[];
   rerunReason?: string;
   diagnosis?: string[];
@@ -541,4 +652,74 @@ export type ExportAttemptResult = {
   previewValidation?: PreviewValidationResult;
   stopReason?: string;
   resetToBestStateForNextAttempt?: boolean;
+};
+
+export type ArtifactStatus = "complete" | "failed";
+
+export type ArtifactRecord = {
+  id: string;
+  artifactType: string;
+  schemaVersion: number;
+  hash: string;
+  sourceFingerprint: string;
+  dependencyArtifactIds: string[];
+  dependencyHashes: string[];
+  dependsOn?: string[];
+  path: string;
+  byteSize: number;
+  status: ArtifactStatus;
+  routePath?: string;
+  templateId?: string;
+  componentId?: string;
+  codeFileId?: string;
+  viewport?: ViewportName;
+  createdAt?: string;
+};
+
+export type ArtifactIndex = {
+  schemaVersion: number;
+  generatedAt: string;
+  revisionId?: string;
+  sourceFingerprint: string;
+  fileCount: number;
+  entries: ArtifactRecord[];
+};
+
+export type ArtifactReference = {
+  id: string;
+  artifactType: string;
+  hash: string;
+  path: string;
+};
+
+export type ArtifactInvalidation = {
+  artifact: string;
+  reason: string;
+  dependsOn?: string[];
+};
+
+export type ExportRevisionRecord = {
+  revisionId: string;
+  schemaVersion: number;
+  sourceFingerprint: string;
+  pluginFingerprint?: string;
+  artifactGraphHash?: string;
+  status: "queued" | "planning" | "capturing" | "generating" | "validating" | "completed" | "failed";
+  parentRevisionId?: string | null;
+  revisionRequest?: {
+    kind?: "initial" | "improvement";
+    requestedFocus?: "responsiveness" | "components" | "both" | "revalidate";
+    parentJobId?: string;
+    parentRevisionId?: string;
+  } | null;
+  summary: Record<string, unknown>;
+  sourceEvidence?: Record<string, unknown> | null;
+  sourceArtifacts?: Record<string, unknown> | null;
+  responsiveRecapturePlan?: Record<string, unknown> | null;
+  generatedValidation?: Record<string, unknown> | null;
+  reusedArtifactIds?: string[];
+  invalidatedArtifacts?: ArtifactInvalidation[];
+  parentInfoPath?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
 };

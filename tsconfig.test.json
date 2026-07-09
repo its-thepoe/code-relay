@@ -1,0 +1,24 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist-test",
+    "noEmit": false,
+    "noImplicitAny": false,
+    "module": "ESNext",
+    "moduleResolution": "Bundler"
+  },
+  "include": [
+    "apps/plugin/src/**/*.test.ts",
+    "apps/web/lib/**/*.test.ts",
+    "apps/worker/src/**/*.test.ts",
+    "packages/**/*.test.ts"
+  ],
+  "exclude": [
+    "dist-test",
+    "apps/web/.next",
+    "apps/web/.next 2",
+    "apps/web/.next.bak-20260613071452",
+    "apps/plugin/node_modules",
+    "apps/plugin/src/vite-env.d.ts"
+  ]
+}

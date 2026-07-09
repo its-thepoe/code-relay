@@ -7,6 +7,7 @@ import type {
   ComparisonDiagnostics,
   ExportIR,
   ExportTreeNode,
+  FidelityEvidence,
   FidelityScores,
   MotionStyles,
   PreviewValidationResult,
@@ -23,6 +24,7 @@ type CompareInput = {
 
 export type CompareResult = {
   fidelity: FidelityScores;
+  evidence: FidelityEvidence;
   diagnostics?: ComparisonDiagnostics;
   previewValidation?: PreviewValidationResult;
 };
@@ -114,6 +116,13 @@ export async function compareGeneratedPreview(
   if (!hasOriginalScreens) {
     return {
       fidelity: scoreWithoutGeneratedScreens(input.ir, allViewports, previewValidation),
+      evidence: createHeuristicEvidence({
+        reason: "No runtime screenshots were available for the source export.",
+        sourceScreenshotViewports: [],
+        generatedScreenshotViewports: [],
+        comparedViewports: [],
+        previewValidation,
+      }),
       previewValidation,
       diagnostics,
     };
@@ -133,6 +142,13 @@ export async function compareGeneratedPreview(
         allViewports,
         previewValidation,
       ),
+      evidence: createHeuristicEvidence({
+        reason: "Generated preview screenshots could not be captured.",
+        sourceScreenshotViewports: activeViewports,
+        generatedScreenshotViewports: [],
+        comparedViewports: [],
+        previewValidation,
+      }),
       diagnostics,
       previewValidation,
     };
@@ -188,6 +204,14 @@ export async function compareGeneratedPreview(
       motion,
       nodeMatch,
       breakpointScores,
+    },
+    evidence: {
+      mode: "screenshot-backed",
+      reason: `Compared rendered screenshots for ${activeViewports.length} viewport(s).`,
+      sourceScreenshotViewports: activeViewports,
+      generatedScreenshotViewports: activeViewports,
+      comparedViewports: activeViewports,
+      previewValidationStatus: previewValidation.status,
     },
     diagnostics,
     previewValidation,
@@ -270,6 +294,23 @@ function createBlockedPreviewValidation(reason: string): PreviewValidationResult
       nodesExpectingMotion: 0,
       nodesWithNonDefaultMotion: 0,
     },
+  };
+}
+
+function createHeuristicEvidence(input: {
+  reason: string;
+  sourceScreenshotViewports: ViewportName[];
+  generatedScreenshotViewports: ViewportName[];
+  comparedViewports: ViewportName[];
+  previewValidation?: PreviewValidationResult;
+}): FidelityEvidence {
+  return {
+    mode: "heuristic",
+    reason: input.reason,
+    sourceScreenshotViewports: input.sourceScreenshotViewports,
+    generatedScreenshotViewports: input.generatedScreenshotViewports,
+    comparedViewports: input.comparedViewports,
+    previewValidationStatus: input.previewValidation?.status,
   };
 }
 

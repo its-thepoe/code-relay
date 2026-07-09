@@ -10,7 +10,16 @@ import {
   type CanvasNode,
 } from "@framer/plugin";
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { createCompletedOutcomeCopy } from "../../../packages/shared/src/export-health.js";
 import { extractFramerNodeStyles } from "./framer-style-extraction";
+import {
+  createCapabilityBadges,
+  createFinalReportCards,
+  createJobOutcomeSummary,
+  createPreflightSummary,
+  describeJobProgress,
+  type JobOutcomeSummary,
+} from "./preflight";
 import "./App.css";
 
 type DebugEvent = {
@@ -59,8 +68,10 @@ type JobSnapshot = {
     zipPath?: string;
     reportPath?: string;
     previewPath?: string;
+    capabilityReportPath?: string;
   };
 };
+type JobReport = Record<string, unknown>;
 type ExportEngine =
   | "component-module"
   | "page-node-tree"
@@ -133,6 +144,8 @@ export function App() {
     [],
   );
   const [activeJob, setActiveJob] = useState<JobSnapshot | null>(null);
+  const [preflightContext, setPreflightContext] = useState<Record<string, unknown> | null>(null);
+  const [preflightBusy, setPreflightBusy] = useState(false);
 
   const simplified = useMemo(() => simplifySelection(selection), [selection]);
   const selectionLabel =
@@ -140,6 +153,29 @@ export function App() {
 
   const allComponentsSelected =
     components.length > 0 && selectedComponentIds.length === components.length;
+  const selectedComponentCount =
+    selectedComponentIds.length > 0 ? selectedComponentIds.length : components.length;
+  const preflightSummary = useMemo(
+    () =>
+      createPreflightSummary({
+        exportMode,
+        sourceUrl,
+        resolvedSourceUrl,
+        selectionCount: simplified.length,
+        selectedComponentCount,
+        componentCount: components.length,
+        context: preflightContext as any,
+      }),
+    [
+      exportMode,
+      sourceUrl,
+      resolvedSourceUrl,
+      simplified.length,
+      selectedComponentCount,
+      components.length,
+      preflightContext,
+    ],
+  );
 
   const log = (level: DebugEvent["level"], message: string, data?: unknown) => {
     setDebug((prev) => {
@@ -229,6 +265,61 @@ export function App() {
       window.clearInterval(interval);
     };
   }, [activeJob?.id, activeJob?.status, apiBaseUrl]);
+
+  useEffect(() => {
+    let active = true;
+
+    const run = async () => {
+      setPreflightBusy(true);
+      try {
+        const selectionForPreflight =
+          exportMode === "full-site"
+            ? []
+            : await readSelectionWithRetry(selection);
+        const fullSiteRoots =
+          exportMode === "full-site" ? await readFullSiteRoots(components) : null;
+        const context = await collectPluginContext({
+          exportMode,
+          selection: selectionForPreflight,
+          project,
+          components,
+          selectedComponentIds:
+            exportMode === "full-site"
+              ? components.map((node) => node.id)
+              : selectedComponentIds,
+          captureSource:
+            exportMode === "full-site"
+              ? "full-site"
+              : exportMode === "components" || selectedComponentIds.length > 0
+                ? "component-catalog"
+                : "canvas-selection",
+          sitePages: fullSiteRoots?.pages ?? [],
+          sourceUrl: sourceUrl.trim(),
+          resolvedSourceUrl,
+        });
+        if (!active) return;
+        setPreflightContext(context as Record<string, unknown>);
+      } catch (error) {
+        if (!active) return;
+        log("warn", "Capability preflight failed", error);
+      } finally {
+        if (active) setPreflightBusy(false);
+      }
+    };
+
+    void run();
+    return () => {
+      active = false;
+    };
+  }, [
+    exportMode,
+    sourceUrl,
+    resolvedSourceUrl,
+    project?.id,
+    components,
+    selectedComponentIds,
+    selection,
+  ]);
 
   async function onCreateJob() {
     const captureSource =
@@ -632,6 +723,57 @@ export function App() {
         </span>
       </div>
 
+      <div className="job-card">
+        <div className="job-card-top">
+          <div>
+            <div className="job-card-title">Capability preflight</div>
+            <div className="job-card-id">
+              {preflightBusy ? "Refreshing…" : preflightSummary.capabilityState}
+            </div>
+          </div>
+          <span className="job-pill">{preflightSummary.exportEngine}</span>
+        </div>
+        <div className="job-card-copy">
+          Runtime source: <code>{preflightSummary.runtimeSource}</code>
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 8,
+            fontSize: 11,
+            marginTop: 8,
+          }}
+        >
+          <div>Static pages: <strong>{preflightSummary.staticPageCount}</strong></div>
+          <div>CMS templates: <strong>{preflightSummary.cmsTemplateCount}</strong></div>
+          <div>CMS items: <strong>{preflightSummary.cmsItemCount}</strong></div>
+          <div>Components: <strong>{preflightSummary.componentCount}</strong></div>
+          <div>Code files: <strong>{preflightSummary.codeFileCount}</strong></div>
+          <div>Responsive captures: <strong>{preflightSummary.responsiveCaptureCount}</strong></div>
+        </div>
+        <div
+          style={{
+            marginTop: 8,
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 6,
+          }}
+        >
+          {preflightSummary.capabilityBadges.length > 0 ? (
+            preflightSummary.capabilityBadges.map((badge) => (
+              <span key={badge} className="plugin-chip">
+                {badge}
+              </span>
+            ))
+          ) : (
+            <span style={{ fontSize: 11, opacity: 0.72 }}>
+              No preflight capabilities detected yet.
+            </span>
+          )}
+        </div>
+      </div>
+
       <details>
         <summary style={{ cursor: "pointer" }}>
           Project {project ? `(${project.name})` : ""}
@@ -938,6 +1080,47 @@ function JobStatusCard({
   onOpenUrl: (url: string) => void;
 }) {
   const baseUrl = normalizeApiBaseUrl(apiBaseUrl);
+  const [report, setReport] = useState<JobReport | null>(null);
+  const [capabilityReport, setCapabilityReport] = useState<JobReport | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    const load = async () => {
+      if (!job || job.status !== "completed" || !job.artifacts?.reportPath) {
+        setReport(null);
+        setCapabilityReport(null);
+        return;
+      }
+
+      try {
+        const [reportResponse, capabilityResponse] = await Promise.all([
+          fetch(`${baseUrl}/api/jobs/${job.id}/artifact?type=report`),
+          job.artifacts?.capabilityReportPath
+            ? fetch(`${baseUrl}/api/jobs/${job.id}/artifact?type=capability-report`)
+            : Promise.resolve(null),
+        ]);
+        if (!reportResponse.ok) return;
+        const json = (await reportResponse.json()) as JobReport;
+        if (!active) return;
+        setReport(json);
+        if (capabilityResponse && capabilityResponse.ok) {
+          setCapabilityReport((await capabilityResponse.json()) as JobReport);
+        } else {
+          setCapabilityReport(null);
+        }
+      } catch {
+        if (!active) return;
+        setReport(null);
+        setCapabilityReport(null);
+      }
+    };
+
+    void load();
+    return () => {
+      active = false;
+    };
+  }, [baseUrl, job?.artifacts?.reportPath, job?.id, job?.status]);
 
   if (!job) {
     return (
@@ -954,14 +1137,22 @@ function JobStatusCard({
 
   const dashboardUrl = `${baseUrl}/jobs/${job.id}`;
   const zipUrl = `${baseUrl}/api/jobs/${job.id}/artifact?type=zip`;
+  const reportUrl = `${baseUrl}/api/jobs/${job.id}/artifact?type=report`;
+  const outcomeSummary: JobOutcomeSummary | null =
+    job.status === "completed" ? createJobOutcomeSummary(report) : null;
+  const capabilityBadges =
+    job.status === "completed" ? createCapabilityBadges(capabilityReport) : [];
+  const finalReportCards =
+    job.status === "completed" ? createFinalReportCards(report) : [];
   const statusCopy =
     job.status === "completed"
-      ? "Export complete. Download the ZIP or inspect the dashboard."
+      ? createCompletedOutcomeCopy({
+          report,
+          surface: "plugin-card",
+        })
       : job.status === "failed"
         ? job.errorMessage ?? "The worker failed before artifacts were ready."
-        : job.status === "running"
-          ? "Worker is generating the code and comparing fidelity."
-          : "Job created. Waiting for the local worker to pick it up.";
+        : describeJobProgress(job as any);
 
   return (
     <div className={["job-card", `job-card-${job.status}`].join(" ")}>
@@ -973,6 +1164,110 @@ function JobStatusCard({
         <span className="job-pill">{job.status}</span>
       </div>
       <div className="job-card-copy">{statusCopy}</div>
+      {job.status === "completed" && outcomeSummary ? (
+        <>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 8,
+              fontSize: 11,
+              marginTop: 8,
+            }}
+          >
+            <div>
+              Cache: <strong>{outcomeSummary.cacheStatus}</strong>
+            </div>
+            <div>
+              Health: <strong>{outcomeSummary.exportHealth}</strong>
+            </div>
+            <div>
+              Build: <strong>{outcomeSummary.buildStatus}</strong>
+            </div>
+            <div>
+              Routes: <strong>{outcomeSummary.routeCount ?? "-"}</strong>
+            </div>
+            <div>
+              Desktop: <strong>{outcomeSummary.desktopScore ?? "-"}</strong>
+            </div>
+            <div>
+              Responsive: <strong>{outcomeSummary.responsiveScore ?? "-"}</strong>
+            </div>
+          </div>
+          {capabilityBadges.length > 0 ? (
+            <div
+              style={{
+                marginTop: 8,
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 6,
+              }}
+            >
+              {capabilityBadges.map((badge) => (
+                <span key={badge} className="plugin-chip">
+                  {badge}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {finalReportCards.length > 0 ? (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 8,
+                marginTop: 8,
+              }}
+            >
+              {finalReportCards.map((card) => (
+                <div
+                  key={card.key}
+                  style={{
+                    border: "1px solid var(--plugin-border)",
+                    borderRadius: 8,
+                    padding: "8px 9px",
+                    background: "var(--plugin-surface-muted)",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      alignItems: "center",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 800,
+                        opacity: 0.72,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {card.label}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 900,
+                        color:
+                          card.tone === "good"
+                            ? "#059669"
+                            : card.tone === "warn"
+                              ? "#d97706"
+                              : "var(--plugin-text)",
+                      }}
+                    >
+                      {card.value}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </>
+      ) : null}
       <div className="job-card-actions">
         <div
           role="button"
@@ -1002,6 +1297,22 @@ function JobStatusCard({
             }}
           >
             Download ZIP
+          </div>
+        ) : null}
+        {job.status === "completed" && job.artifacts?.reportPath ? (
+          <div
+            role="button"
+            tabIndex={0}
+            className="job-action"
+            onClick={() => onOpenUrl(reportUrl)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onOpenUrl(reportUrl);
+              }
+            }}
+          >
+            Open report
           </div>
         ) : null}
       </div>
@@ -1372,6 +1683,14 @@ function sanitizeNode(node: unknown) {
     routePath: raw.routePath,
     url: raw.url,
     canonicalPath: raw.canonicalPath,
+    redirectTo: raw.redirectTo,
+    redirectUrl: raw.redirectUrl,
+    targetUrl: raw.targetUrl,
+    destination: raw.destination,
+    destinationUrl: raw.destinationUrl,
+    externalUrl: raw.externalUrl,
+    statusCode: raw.statusCode,
+    redirectStatus: raw.redirectStatus,
     collectionId: raw.collectionId,
     type: raw.type,
     visible: raw.visible,

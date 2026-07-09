@@ -9,6 +9,7 @@ import type {
   FramerComponentFamily,
   FramerComponentModule,
   FramerFont,
+  FramerOverrideAssignment,
   FramerTreeNode,
   ExportMode,
   ExportWarning,
@@ -27,6 +28,13 @@ type BuildIrInput = {
   runtimeCapture: RuntimeCapture;
   pluginCapture: PluginCanvasCapture;
   nodeMatches: NodeMatch[];
+};
+
+export type PluginSourceSnapshot = {
+  pluginCapture: PluginCanvasCapture;
+  componentFamilies: FramerComponentFamily[];
+  overrideAssignments: FramerOverrideAssignment[];
+  codeFiles: FramerCodeFile[];
 };
 
 export function buildIntermediateRepresentation(input: BuildIrInput): ExportIR {
@@ -77,6 +85,7 @@ export function buildIntermediateRepresentation(input: BuildIrInput): ExportIR {
   const componentModules = readComponentModules(input.pluginCapture);
   const componentFamilies = buildComponentFamilies(componentModules);
   const codeFiles = readCodeFiles(input.pluginCapture);
+  const overrideAssignments = buildOverrideAssignments(codeFiles);
   const fonts = readFonts(input);
   const cmsCollections = readCmsCollections(input.pluginCapture);
   const framerTree = buildFramerTree(input.pluginCapture);
@@ -121,6 +130,7 @@ export function buildIntermediateRepresentation(input: BuildIrInput): ExportIR {
     exportTree,
     componentModules,
     componentFamilies,
+    overrideAssignments,
     codeFiles,
     fonts,
     cmsCollections,
@@ -130,6 +140,50 @@ export function buildIntermediateRepresentation(input: BuildIrInput): ExportIR {
     exportTreeDiagnostics: summarizeExportTree(exportTree, input.runtimeCapture),
     warnings,
   };
+}
+
+export function buildPluginSourceSnapshot(
+  pluginCapture: PluginCanvasCapture,
+): PluginSourceSnapshot {
+  const componentModules = readComponentModules(pluginCapture);
+  const codeFiles = readCodeFiles(pluginCapture);
+
+  return {
+    pluginCapture,
+    componentFamilies: buildComponentFamilies(componentModules),
+    overrideAssignments: buildOverrideAssignments(codeFiles),
+    codeFiles,
+  };
+}
+
+function buildOverrideAssignments(
+  codeFiles: FramerCodeFile[],
+): FramerOverrideAssignment[] {
+  const assignments = codeFiles.flatMap((file, fileIndex) =>
+    (file.exportDetails ?? [])
+      .filter((detail) => detail?.type === "override" && detail.name)
+      .map((detail, detailIndex) => ({
+        id:
+          file.id && detail.name
+            ? `${file.id}:${detail.name}`
+            : `override-${fileIndex + 1}-${detailIndex + 1}`,
+        codeFileId: file.id,
+        codeFileName: file.name,
+        exportName: detail.name!,
+        exportType: "override" as const,
+        source: "plugin" as const,
+        insertURL: detail.insertURL,
+        targetNodeId: undefined,
+        targetComponentId: detail.componentIdentifier,
+        affectedProps: [],
+        dependencyNames: [],
+        assignmentStatus: "unresolved" as const,
+        assignmentConfidence: 0.2,
+        unresolvedReason: "plugin-assignment-not-exposed",
+      })),
+  );
+
+  return unique(assignments, (entry) => entry.id);
 }
 
 function buildComponentFamilies(
@@ -188,17 +242,36 @@ function buildComponentFamilies(
           controls: module.controls,
           initialVariantId: primaryVariant.id ?? primaryVariant.name,
         })),
-      transitions: variants
-        .filter((module) => typeof module.gesture === "string" && module.gesture.length > 0)
-        .map((module) => ({
-          fromVariantId: module.id ?? module.name,
-          trigger: module.gesture,
-          confidence: 0.7,
-          provenance: "plugin" as const,
-        })),
+      transitions: buildComponentFamilyTransitions(variants, primaryVariant),
       provenance: "plugin",
     };
   });
+}
+
+function buildComponentFamilyTransitions(
+  variants: FramerComponentModule[],
+  primaryVariant: FramerComponentModule,
+) {
+  const primaryVariantId = primaryVariant.id ?? primaryVariant.name;
+  return variants
+    .filter((module) => typeof module.gesture === "string" && module.gesture.length > 0)
+    .map((module) => {
+      const variantId = module.id ?? module.name;
+      const inferredTarget =
+        variantId !== primaryVariantId &&
+        (module.inheritsFromId === primaryVariantId ||
+          module.inheritsFromId === primaryVariant.name ||
+          variants.length === 2)
+          ? variantId
+          : undefined;
+      return {
+        fromVariantId: inferredTarget ? primaryVariantId : variantId,
+        toVariantId: inferredTarget,
+        trigger: module.gesture,
+        confidence: inferredTarget ? 0.72 : 0.55,
+        provenance: "plugin" as const,
+      };
+    });
 }
 
 function buildRuntimeSitePages(input: BuildIrInput, fallbackName: string) {
@@ -260,6 +333,64 @@ function inferTemplateKind(routePath: string) {
   return routePath.includes(":slug") ? "cms" : "static";
 }
 
+function readPageRedirectTarget(
+  source: Record<string, unknown>,
+): string | undefined {
+  for (const key of [
+    "redirectTo",
+    "redirectUrl",
+    "targetUrl",
+    "destination",
+    "destinationUrl",
+    "externalUrl",
+  ]) {
+    const value = source[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  const link = asRecord(source.link);
+  if (link) {
+    for (const key of ["url", "href", "path", "target"]) {
+      const value = link[key];
+      if (typeof value === "string" && value.trim()) {
+        return value.trim();
+      }
+    }
+  }
+
+  const metadata = asRecord(source.metadata);
+  if (metadata) {
+    return readPageRedirectTarget(metadata);
+  }
+
+  return undefined;
+}
+
+function readPageRedirectStatus(
+  source: Record<string, unknown>,
+): number | undefined {
+  for (const key of ["redirectStatus", "statusCode", "status"]) {
+    const value = source[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && /^\d{3}$/.test(value.trim())) {
+      return Number(value.trim());
+    }
+  }
+
+  const metadata = asRecord(source.metadata);
+  if (metadata) {
+    return readPageRedirectStatus(metadata);
+  }
+
+  return undefined;
+}
+
+function isExternalRedirectTarget(value: string) {
+  return /^https?:\/\//i.test(value.trim());
+}
+
 function summarizeRouteTemplates(
   sitePages: NonNullable<ExportIR["sitePages"]>,
 ): NonNullable<ExportIR["routeTemplates"]> {
@@ -268,7 +399,7 @@ function summarizeRouteTemplates(
     {
       templateId: string;
       templatePath: string;
-      templateKind: "static" | "cms" | "component";
+      templateKind: "static" | "cms" | "component" | "redirect" | "utility";
       routePaths: string[];
       sourceTextLength: number;
       nodeCount: number;
@@ -484,6 +615,13 @@ function buildSitePages(input: BuildIrInput, fallbackName: string) {
     const nodes = promoteFallbackHeading(
       pickContentNodes(matchingRuntimeNodes),
     );
+    const redirectTo = readPageRedirectTarget(sourceRecord);
+    const redirectStatus = readPageRedirectStatus(sourceRecord);
+    const templateKind = redirectTo
+      ? isExternalRedirectTarget(redirectTo)
+        ? ("utility" as const)
+        : ("redirect" as const)
+      : undefined;
 
     return {
       componentName,
@@ -491,6 +629,9 @@ function buildSitePages(input: BuildIrInput, fallbackName: string) {
         readPageRoutePath(sourceRecord) ??
         (index === 0 ? "/" : `/${toRouteSegment(title)}`),
       title,
+      redirectTo,
+      redirectStatus,
+      templateKind,
       nodes:
         nodes.length > 0
           ? nodes

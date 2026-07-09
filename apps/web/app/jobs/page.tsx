@@ -70,6 +70,17 @@ export default async function JobsPage() {
                         </span>
                       </div>
                     ) : null}
+                    {job.revision?.parentRevisionId ? (
+                      <div>
+                        Parent revision{" "}
+                        <span className="font-mono">
+                          {job.revision.parentRevisionId}
+                        </span>
+                      </div>
+                    ) : null}
+                    {job.revision?.requestedFocus ? (
+                      <div>Focus: {job.revision.requestedFocus}</div>
+                    ) : null}
                     <div>
                       Created: {new Date(job.createdAt).toLocaleString()}
                     </div>

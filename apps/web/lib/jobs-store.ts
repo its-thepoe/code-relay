@@ -40,10 +40,17 @@ export type LocalExportJob = {
     zipPath?: string;
     reportPath?: string;
     previewPath?: string;
+    resolvedRequestPath?: string;
+    statusPath?: string;
+    capabilityReportPath?: string;
+    codeCompatibilityReportPath?: string;
+    beforeAfterReportPath?: string;
+    parentInfoPath?: string;
     revisionManifestPath?: string;
     validationPath?: string;
     invalidationPlanPath?: string;
     artifactIndexPath?: string;
+    responsiveRecapturePlanPath?: string;
   };
 };
 

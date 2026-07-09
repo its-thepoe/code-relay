@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
+import { buildJobSignature } from "../../lib/job-signature";
 
 export function AutoRefresh({
   enabled,
@@ -54,69 +55,4 @@ export function AutoRefresh({
   }, [enabled, intervalMs, router, statusUrl]);
 
   return null;
-}
-
-function buildJobSignature(payload: unknown) {
-  if (Array.isArray(payload)) {
-    return payload
-      .map((job) => {
-        if (!isJobLike(job)) return "";
-        const artifacts = job.artifacts;
-        return [
-          job.id,
-          job.status,
-          artifacts?.exportDir ? "export" : "",
-          artifacts?.zipPath ? "zip" : "",
-          artifacts?.reportPath ? "report" : "",
-          artifacts?.previewPath ? "preview" : "",
-        ].join(":");
-      })
-      .join("|");
-  }
-
-  if (isJobLike(payload)) {
-    const progress = payload.progress;
-    const artifacts = payload.artifacts;
-    return [
-      payload.id,
-      payload.status,
-      progress?.stage ?? "",
-      progress?.routePath ?? "",
-      progress?.failed ?? "",
-      artifacts?.exportDir ? "export" : "",
-      artifacts?.zipPath ? "zip" : "",
-      artifacts?.reportPath ? "report" : "",
-      artifacts?.previewPath ? "preview" : "",
-      payload.errorMessage ?? "",
-    ].join(":");
-  }
-
-  return "";
-}
-
-function isJobLike(value: unknown): value is {
-  id: string;
-  status: string;
-  updatedAt?: string;
-  progress?: {
-    stage?: string;
-    routePath?: string;
-    failed?: number;
-  };
-  artifacts?: {
-    exportDir?: string;
-    zipPath?: string;
-    reportPath?: string;
-    previewPath?: string;
-  };
-  errorMessage?: string;
-} {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "id" in value &&
-    "status" in value &&
-    typeof value.id === "string" &&
-    typeof value.status === "string"
-  );
 }

@@ -1,0 +1,114 @@
+{
+  "name": "framer-published-url-benchmark-suite",
+  "description": "Published Framer URLs used to compare export fidelity, route coverage, asset completeness, editability, and report quality across exporters.",
+  "fixtures": [
+    {
+      "id": "cohesion-home",
+      "label": "Cohesion home",
+      "url": "https://cohesion.framer.ai/",
+      "surface": "portfolio"
+    },
+    {
+      "id": "artifact-home",
+      "label": "Artifact home",
+      "url": "https://artifact.framer.ai/",
+      "surface": "portfolio"
+    },
+    {
+      "id": "senri-portfolio",
+      "label": "Senri portfolio",
+      "url": "https://td-senrifolio.framer.ai/",
+      "surface": "portfolio"
+    },
+    {
+      "id": "jingbo-home",
+      "label": "Jingbo home",
+      "url": "https://jingbo.framer.ai/",
+      "surface": "portfolio"
+    },
+    {
+      "id": "portx-home",
+      "label": "Portx home",
+      "url": "https://portx.framer.ai/",
+      "surface": "portfolio"
+    },
+    {
+      "id": "mouse-terms",
+      "label": "Mouse terms",
+      "url": "https://mouse.framer.ai/terms-and-conditions",
+      "surface": "legal"
+    },
+    {
+      "id": "priyanka-portfolio",
+      "label": "Priyanka portfolio",
+      "url": "https://priyanka-portfolio-181.framer.ai/",
+      "surface": "portfolio"
+    },
+    {
+      "id": "quang-portfolio",
+      "label": "Quang portfolio",
+      "url": "https://quangnguyenportfolio.framer.ai/",
+      "surface": "portfolio"
+    },
+    {
+      "id": "simran-portfolio",
+      "label": "Simran portfolio",
+      "url": "https://simranpandit.framer.ai/",
+      "surface": "portfolio"
+    },
+    {
+      "id": "simplefolio-home",
+      "label": "SimpleFolio home",
+      "url": "https://simplefolio.framer.ai/",
+      "surface": "portfolio"
+    },
+    {
+      "id": "kernel-venue",
+      "label": "Kernel venue",
+      "url": "https://kernel.framer.ai/venue",
+      "surface": "event"
+    },
+    {
+      "id": "conflux-speaker",
+      "label": "Conflux speaker",
+      "url": "https://conflux.framer.ai/speaker/jacob-jones",
+      "surface": "event"
+    },
+    {
+      "id": "picasso-home",
+      "label": "Picasso home",
+      "url": "https://picasso.framer.ai/",
+      "surface": "portfolio"
+    },
+    {
+      "id": "mona-fun",
+      "label": "Mona fun page",
+      "url": "https://monaellis.framer.ai/fun",
+      "surface": "portfolio"
+    },
+    {
+      "id": "allaboutframer-blog",
+      "label": "All About Framer blog",
+      "url": "https://allaboutframer.framer.ai/step-by-step-guide-to-customize-a-framer-template",
+      "surface": "article"
+    },
+    {
+      "id": "leoblog-article",
+      "label": "LeoBlog article",
+      "url": "https://leoblog.framer.ai/blog/mastering-high-fashion-on-a-budget",
+      "surface": "article"
+    },
+    {
+      "id": "freetemplate-home",
+      "label": "Free template home",
+      "url": "https://freetemplate.framer.ai/",
+      "surface": "template"
+    },
+    {
+      "id": "framy-home",
+      "label": "Framy home",
+      "url": "https://framy.framer.ai/",
+      "surface": "template"
+    }
+  ]
+}

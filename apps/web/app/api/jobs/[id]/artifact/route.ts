@@ -1,6 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
+import {
+  canServeArtifactWhilePending,
+  resolveJobArtifact,
+  type JobArtifactType,
+} from "../../../../../lib/job-artifacts";
 import { readJob } from "../../../../../lib/jobs-store";
 
 function corsHeaders(request: Request) {
@@ -36,54 +41,50 @@ export async function GET(
     );
   }
 
+  const url = new URL(request.url);
+  const requestedType = url.searchParams.get("type") ?? "zip";
+  const type = isJobArtifactType(requestedType) ? requestedType : "zip";
+
   if (job.status === "queued" || job.status === "running") {
-    return NextResponse.json(
-      {
-        error: "Artifacts are not ready yet.",
-        status: job.status,
-        updatedAt: job.updatedAt,
-      },
-      { status: 409, headers: corsHeaders(request) },
-    );
+    if (!canServeArtifactWhilePending(type)) {
+      return NextResponse.json(
+        {
+          error: "Artifacts are not ready yet.",
+          status: job.status,
+          updatedAt: job.updatedAt,
+        },
+        { status: 409, headers: corsHeaders(request) },
+      );
+    }
   }
 
   if (job.status === "failed") {
-    return NextResponse.json(
-      {
-        error: job.errorMessage ?? "Export failed before artifacts were ready.",
-        status: job.status,
-        updatedAt: job.updatedAt,
-      },
-      { status: 422, headers: corsHeaders(request) },
-    );
+    if (!canServeArtifactWhilePending(type)) {
+      return NextResponse.json(
+        {
+          error: job.errorMessage ?? "Export failed before artifacts were ready.",
+          status: job.status,
+          updatedAt: job.updatedAt,
+        },
+        { status: 422, headers: corsHeaders(request) },
+      );
+    }
   }
 
   if (!job.artifacts) {
     return NextResponse.json(
-      { error: "Artifact metadata is missing for this completed job." },
+      {
+        error:
+          job.status === "queued" || job.status === "running"
+            ? "Artifact metadata is not available yet for this running job."
+            : "Artifact metadata is missing for this job.",
+      },
       { status: 404, headers: corsHeaders(request) },
     );
   }
 
-  const url = new URL(request.url);
-  const type = url.searchParams.get("type") ?? "zip";
-
-  const pickPath =
-    type === "zip"
-      ? job.artifacts.zipPath
-      : type === "report"
-        ? job.artifacts.reportPath
-        : type === "revision"
-          ? job.artifacts.revisionManifestPath
-          : type === "validation"
-            ? job.artifacts.validationPath
-        : type === "invalidation"
-          ? job.artifacts.invalidationPlanPath
-        : type === "artifact-index"
-          ? job.artifacts.artifactIndexPath
-        : type === "preview"
-          ? job.artifacts.previewPath
-          : undefined;
+  const artifact = resolveJobArtifact(job, type);
+  const pickPath = artifact.path;
 
   if (!pickPath) {
     return NextResponse.json(
@@ -102,41 +103,35 @@ export async function GET(
       { status: 404, headers: corsHeaders(request) },
     );
   }
-  const filename =
-    type === "zip"
-      ? `${id}.zip`
-      : type === "report"
-        ? `${id}-report.json`
-        : type === "revision"
-          ? `${id}-revision.json`
-        : type === "validation"
-          ? `${id}-validation.json`
-        : type === "invalidation"
-          ? `${id}-invalidation.json`
-        : type === "artifact-index"
-          ? `${id}-artifact-index.json`
-        : `${id}-preview.html`;
-
-  const contentType =
-    type === "zip"
-      ? "application/zip"
-      : type === "report" ||
-          type === "revision" ||
-          type === "validation" ||
-          type === "invalidation" ||
-          type === "artifact-index"
-        ? "application/json; charset=utf-8"
-        : "text/html; charset=utf-8";
 
   return new NextResponse(data, {
     status: 200,
     headers: {
       ...corsHeaders(request),
-      "content-type": contentType,
+      "content-type": artifact.contentType,
       "content-disposition":
         type === "zip"
-          ? `attachment; filename="${filename}"`
-          : `inline; filename="${filename}"`,
+          ? `attachment; filename="${artifact.filename}"`
+          : `inline; filename="${artifact.filename}"`,
     },
   });
+}
+
+function isJobArtifactType(value: string): value is JobArtifactType {
+  return [
+    "zip",
+    "resolved-request",
+    "status",
+    "report",
+    "capability-report",
+    "code-compatibility",
+    "before-after",
+    "parent",
+    "revision",
+    "validation",
+    "invalidation",
+    "artifact-index",
+    "responsive-plan",
+    "preview",
+  ].includes(value);
 }
