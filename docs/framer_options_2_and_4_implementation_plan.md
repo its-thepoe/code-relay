@@ -1,1443 +1,1501 @@
 # CodeRelay Implementation Plan: Option 2 + Option 4
 
+## Decision
+
+We are choosing these two tracks together:
+
+1. `Option 2`: revision and artifact model
+2. `Option 4`: plugin Code File content + recursive variant capture
+
+This is the correct pair because Option 4 gives us the missing source-aware evidence, and Option 2 is what makes that evidence durable, reusable, and safe to build on in later exports.
+
+If we do only Option 4, we improve one export and then keep recollecting the same evidence over and over.
+
+If we do only Option 2, we cache an incomplete view of the project and make the wrong output faster.
+
+The combined goal is:
+
+- new exports capture the right evidence on the first run
+- future exports reuse that evidence when the source has not changed
+- later improvement passes regenerate only what is invalidated
+- recapture becomes a recovery path, not the default workflow
+
+### Commitment for future exports
+
+This plan is not just about repairing the current failing exports.
+
+It must change the default behavior of CodeRelay so that a brand-new export already:
+
+- captures source-aware plugin evidence during revision `0001`
+- writes reusable source artifacts before heavy runtime capture
+- records completeness and portability status immediately
+- seeds the shared cache on the first successful run
+- becomes a valid parent revision for the very next export without requiring a repair pass
+
+If a future export still needs an automatic “fix-up recapture” to become trustworthy, then this implementation is incomplete.
+
+---
+
+## What “done” means
+
+After this work, a fresh export of a Framer project should:
+
+- capture plugin-visible component, variant, override, and Code File evidence immediately
+- persist that evidence as revisioned artifacts
+- derive reusable normalized component models from that evidence
+- generate code and reports from the normalized model
+- reuse prior artifacts automatically when fingerprints match
+- fail loudly when required evidence is missing instead of reporting a false success
+
+Later exports of the same project should:
+
+- compare current source/plugin fingerprints against prior artifacts
+- reuse unchanged Code File, component-family, and normalized-model artifacts
+- regenerate only affected component families, dependent IR, dependent codegen output, and dependent validation
+- avoid blanket recapture unless the system can prove it is necessary
+
+---
+
+## Non-negotiable product rule
+
+Future exports must not depend on “repair by recapture” as the normal experience.
+
+That means:
+
+- every fresh export must perform source-aware plugin capture by default
+- the cache must be seeded correctly during the initial export
+- every artifact must carry enough provenance to be reused later
+- every invalidation must be explicit and explainable
+- selective recapture must exist, but it must be a fallback, not the happy path
+
+If a future export needs full recapture all the time, this plan has failed.
+
+---
+
+## Fresh-export bootstrap contract
+
+This is the operational rule for all new exports.
+
+The first export of a project must seed the artifacts that later exports depend on. We are not allowed to skip source-aware capture on revision `0001` and then rely on a later repair pass to make the export reusable.
+
+### Required first-run sequence
+
+Before browser-heavy runtime capture begins, the pipeline must:
+
+1. resolve the request and validate `exportMode`
+2. create the revision record immediately
+3. run plugin preflight
+4. capture source-aware plugin artifacts
+5. persist those artifacts with stable hashes
+6. compute source evidence completeness
+7. write reuse and invalidation plans, even for revision `0001`
+8. seed the reusable cache with complete source artifacts
+9. continue into runtime capture and codegen
+
+That means revision `0001` already contains:
+
+- Code File source artifacts
+- Code File metadata artifacts
+- component-family artifacts
+- override-assignment artifacts
+- capability and source-evidence reports
+- cache registration metadata
+
+### First-run failure policy
+
+If a project clearly contains component/code semantics but source-aware capture cannot produce the required artifacts, the system must not silently continue as if the export is healthy.
+
+It must do one of these explicitly:
+
+1. fail the export
+2. complete with `partial` source evidence and a visible degraded-fidelity status
+
+It must never:
+
+- mark the export as fully healthy while required source artifacts are missing
+- pretend runtime capture alone is enough for reusable component fidelity
+- defer source-aware capture to a later pass without recording that the initial revision is incomplete
+
+### Why this section matters
+
+This is the concrete mechanism that prevents future exports from needing routine recapture.
+
+If revision `0001` is seeded correctly:
+
+- repeated exports can reuse source-aware artifacts immediately
+- component-only improvements can skip unrelated runtime capture
+- responsive improvements can reuse component semantics
+- revalidate-only revisions can avoid capture entirely
+
+If revision `0001` is seeded incorrectly, every later workflow becomes slower, noisier, and less trustworthy.
+
+---
+
+## Why this is the right fix
+
+The failures we have seen fall into one repeated pattern:
+
+- the pipeline can produce output even when source-aware evidence is incomplete
+- the job may be marked as “successful” because some files were written
+- the missing evidence only shows up later as blank output, missing states, missing behavior, or low-fidelity layout
+
+The violated invariant is:
+
+> A reusable export pipeline must preserve authoring evidence and provenance all the way from capture to codegen.
+
+Right now that invariant is only partially enforced.
+
+Option 4 fixes the evidence gap.
+
+Option 2 fixes the durability and reuse gap.
+
+Together they fix the actual system behavior, not just one bad export.
+
+---
+
+## Framer boundary we are designing around
+
+This plan is based on the Framer plugin boundary we can actually rely on:
+
+- plugin access to selection, nodes, hierarchy, traits, component identity, component instances, and some style/runtime-related metadata
+- plugin access to Code File content and exports where the API exposes them
+- plugin access to project and CMS context
+
+This plan does **not** assume Framer gives us a full source export of the published site.
+
+So the architecture is:
+
+- plugin capture for authoring semantics and source-aware component evidence
+- runtime/browser capture for rendered layout and visual truth
+- a reconciler that merges both into a stable export IR
+
+That keeps us honest and prevents us from pretending plugin metadata alone is enough for full visual fidelity.
+
+Source grounding used here:
+
+- `/Users/MAC/.agents/skills/framer-plugins/SKILL.md`
+
+---
+
 ## Scope
 
-This plan combines:
+This implementation plan covers:
 
-1. **Option 2: Revision and artifact model**
-2. **Option 4: Plugin Code File content and recursive variant capture**
+- revision records
+- artifact manifests
+- content-addressed shared cache
+- source-aware Code File capture
+- recursive component-family capture
+- override capture and assignment mapping
+- component-family normalization
+- component-aware invalidation
+- first-run cache seeding for new exports
+- selective regeneration for later exports
+- UI/reporting so reuse and missing evidence are visible
+- tests so this cannot silently regress
 
-These two options should be implemented together because Option 4 produces high-value source and component evidence, and Option 2 is what makes that evidence reusable across future exports and improvement revisions.
+This plan does not attempt, in this phase, to fully solve:
 
-The goal is not just to improve one broken export. The goal is to make future exports capture the right evidence from the start, persist it in a reusable artifact model, and avoid routine full recapture.
-
----
-
-## What This Plan Must Achieve
-
-After this work:
-
-- a fresh export captures source-aware component evidence on the first run
-- that evidence is stored in revisioned, content-addressed artifacts
-- future exports reuse unchanged artifacts instead of blindly recapturing
-- improvement revisions only regenerate what is invalidated
-- component source, variants, overrides, and instance context are visible in reports
-- missing evidence is explicit, not silently treated as success
-
-This plan does **not** require full recapture as the normal path.
-
-Full recapture should happen only when:
-
-- the source fingerprint changed
-- artifact schema changed incompatibly
-- a required artifact is missing or corrupt
-- a capability was unavailable during the original run
-- a user explicitly requests a full refresh
+- perfect motion parity for every Framer animation
+- arbitrary third-party browser script compatibility
+- unsupported Code Component runtime dependencies with zero adaptation work
+- complete elimination of runtime capture
 
 ---
 
-## Why These Two Options Belong Together
+## Desired end state
 
-Option 2 without Option 4 gives us a reusable cache for incomplete evidence.
-
-Option 4 without Option 2 gives us better evidence, but we keep recollecting it and cannot safely attach it to prior revisions.
-
-Together they let us:
-
-- capture Code File source once
-- fingerprint it
-- store it as an immutable artifact
-- attach it to the relevant revision
-- reuse it in later exports and later improvements
-- invalidate only the affected component, template, or generated module when source changes
-
----
-
-## Desired End State
-
-For every export job, CodeRelay should produce:
+For every export job we should end up with:
 
 ```text
-job_x
-├── revision_0001
+job_<id>/
+├── revision_0001/
+│   ├── status.json
+│   ├── parent.json
 │   ├── manifests/
 │   │   ├── revision-manifest.json
-│   │   ├── invalidation-plan.json
 │   │   ├── artifact-index.json
-│   │   └── capability-report.json
-│   ├── plugin/
+│   │   ├── invalidation-plan.json
+│   │   ├── capability-report.json
+│   │   ├── reuse-plan.json
+│   │   └── resolved-request.json
+│   ├── source-artifacts/
+│   │   ├── manifest.json
 │   │   ├── project-snapshot.json
 │   │   ├── component-catalog.json
 │   │   ├── component-families.json
 │   │   ├── override-assignments.json
-│   │   └── code-files/
-│   │       ├── <hash>.json
-│   │       └── <hash>.tsx
+│   │   ├── code-files/
+│   │   │   ├── <content-hash>.json
+│   │   │   └── <content-hash>.tsx
+│   │   ├── code-compatibility-report.json
+│   │   └── source-evidence-report.json
+│   ├── capture/
 │   ├── ir/
 │   │   ├── export-ir.json
-│   │   └── component-model.json
+│   │   ├── component-model.json
+│   │   └── component-dependency-graph.json
 │   ├── generated/
 │   ├── validation/
+│   ├── export-report.json
 │   └── export.zip
-└── revision_0002
-    ├── parent.json
-    ├── manifests/
-    ├── plugin/
-    ├── ir/
-    ├── generated/
-    ├── validation/
-    └── export.zip
+└── revision_0002/
+    └── ...
 ```
 
-In addition, a shared content-addressed cache should exist outside the per-job folder:
+And a shared cache outside the job:
 
 ```text
 .coderelay/
 └── revision-cache/
-    └── <revision-or-artifact-hash>/
+    ├── source/
+    ├── ir/
+    ├── generated/
+    └── validation/
 ```
 
-That shared cache is what prevents repeated rework across later exports and revisions.
+The shared cache is the mechanism that makes later exports cheap.
+
+The per-revision directory is the mechanism that makes every export explainable and auditable.
 
 ---
 
-## Core Rules
+## Core invariants
 
-### Rule 1: Evidence must be explicit
+### Invariant 1: Missing evidence is never treated as success
 
-If the plugin could not read Code File source, the system must record:
+If Code File content is unavailable, the system must record why:
 
-- API was unavailable, or
-- permission failed, or
-- file had no readable content, or
-- file capture was truncated, or
-- source was external/unresolved
+- unreadable
+- unavailable through plugin API
+- external or unresolved
+- permission-gated
+- empty content
+- capture error
+- truncation
 
-An empty list is not success.
+An empty array is not equivalent to “no Code Files”.
 
-### Rule 2: Reuse is based on fingerprints, not file presence
+### Invariant 2: Cache reuse depends on fingerprints, not on path existence
 
 An artifact is reusable only if:
 
 - schema version matches
-- input fingerprint matches
+- capture strategy version matches
+- codegen version matches where relevant
 - dependency hashes match
-- prior generation completed successfully
-- required files still exist
+- status is `complete`
+- required files exist
+- required byte sizes are non-zero
 
-### Rule 3: Source-aware capture must be first-class on fresh exports
+### Invariant 3: Fresh exports seed reusable source-aware artifacts
 
-Fresh exports should capture:
+A new export must capture and persist:
 
-- Code File source
-- Code File exports
+- Code File content and metadata
+- Code File export metadata
 - component family graph
-- replica and inheritance metadata
-- instance controls
-- override exports
+- replica/primary relationships
+- inherited traits
+- instance attributes/controls
+- override assignments
 
-This should not be treated as a later repair step.
+This must happen during initial export, not only during repair revisions.
 
-### Rule 4: Revisions inherit by manifest, not by guessing
+### Invariant 4: Regeneration stays within dependency scope
 
-Every improvement revision must start from:
+If one Code File changes, we invalidate only:
 
-- a parent revision id
-- a reuse plan
-- an invalidation plan
-- an explicit requested focus
-
-### Rule 5: Regeneration follows dependency scope
-
-If one Code File changes, CodeRelay should regenerate only:
-
-- dependent component family artifacts
-- dependent IR nodes
+- that Code File artifact
+- dependent component-family artifacts
+- dependent normalized component model artifacts
 - dependent generated modules
-- dependent validations
+- dependent validation artifacts
 
-It should not restart the full export unless the change invalidates the entire graph.
+We do not invalidate the whole export unless the dependency graph proves we must.
+
+### Invariant 5: Every revision explains its reuse decisions
+
+Every revision must produce:
+
+- what was reused
+- what was regenerated
+- why each invalidation happened
+- whether source evidence is `complete` or `partial`
 
 ---
 
-## Option 2: Revision and Artifact Model
+## Architecture summary
+
+```mermaid
+flowchart TD
+    A["Export request"] --> B["Resolve request + create revision"]
+    B --> C["Plugin source-aware capture"]
+    B --> D["Runtime/browser capture"]
+    C --> E["Source artifacts"]
+    D --> F["Visual/runtime artifacts"]
+    E --> G["Component graph + code-file graph"]
+    F --> H["Layout/runtime model"]
+    G --> I["Reconciler"]
+    H --> I
+    I --> J["Normalized export IR"]
+    J --> K["Codegen"]
+    K --> L["Validation"]
+    L --> M["Revision report"]
+    M --> N["Shared cache registration"]
+```
+
+The important change is that plugin capture is no longer an optional add-on.
+
+It becomes a first-class artifact stage with its own fingerprints, failures, and reuse path.
+
+---
+
+## No-routine-recapture rules
+
+These rules define when later exports are allowed to reuse, selectively regenerate, or recapture.
+
+### Reuse by default
+
+The pipeline must reuse existing source-aware artifacts when all of these still match:
+
+- project fingerprint
+- plugin fingerprint
+- source-aware schema version
+- Code File content hashes
+- component-family signatures
+- override-assignment signature
+- export strategy version
+- prior artifact completeness and integrity
+
+### Selective regeneration allowed
+
+The pipeline may regenerate only the dependency cone when one of these changes:
+
+- one Code File changed
+- one component family changed
+- one override assignment changed
+- one codegen schema changed
+- one validation strategy changed
+
+In those cases, regenerate only the artifacts that can be proven to depend on the changed node.
+
+### Recapture allowed only with proof
+
+Recapture is allowed when one of these is true:
+
+- runtime-responsive evidence is missing or invalid
+- source-aware artifact capture previously returned `partial`
+- a required artifact is corrupt or zero-byte
+- the project or publish fingerprint changed materially
+- the capture schema version changed incompatibly
+- the user explicitly requested refresh
+
+### Recapture is not allowed just because
+
+Blanket recapture must not happen merely because:
+
+- a previous export exists
+- the output directory changed
+- a build was rerun
+- a report was regenerated
+- validation was rerun
+- one downstream generated file is missing while valid source artifacts still exist
+
+Without this rule, the cache becomes decorative instead of functional.
+
+---
+
+## Workstream A: Option 2 revision and artifact model
 
 ## Objective
 
-Turn export output into a revisioned, content-addressed pipeline where unchanged artifacts can be reused safely across:
+Turn the exporter into a revisioned pipeline where unchanged evidence and unchanged output can be reused safely across:
 
-- repeated exports of the same source
+- a repeated export of the same source
 - improvement revisions
-- revalidate-only runs
+- component-focused revisions
+- revalidate-only revisions
 - exporter upgrades with selective invalidation
 
-## Deliverables
+## Required deliverables
 
-- revision records
-- artifact manifests
-- invalidation planning
-- shared cache root
-- reuse reporting in UI
-- migration path for old jobs
+- explicit revision creation
+- revision metadata in shared types
+- artifact registry
+- invalidation planner
+- reuse planner
+- shared cache registration
+- legacy-job migration path
+- UI/report visibility for cache hits and misses
 
-## Data Model
+### A1. Shared types and manifest contracts
 
-### Revision record
+Files:
 
-```ts
-type ExportRevisionRecord = {
-  id: string
-  jobId: string
-  parentRevisionId?: string
-  kind: "initial" | "improvement"
-  reason:
-    | "initial-export"
-    | "responsive-improvement"
-    | "component-source-refresh"
-    | "interaction-improvement"
-    | "revalidate-only"
-    | "schema-upgrade"
-    | "manual-regeneration"
-  requestedFocus?: "responsiveness" | "components" | "both" | "revalidate"
-  sourceFingerprint: string
-  pluginFingerprint?: string
-  artifactGraphHash: string
-  captureSchemaVersion: string
-  irSchemaVersion: string
-  codegenVersion: string
-  status: "queued" | "planning" | "capturing" | "generating" | "validating" | "completed" | "failed"
-  reusedArtifacts: ArtifactReference[]
-  invalidatedArtifacts: ArtifactInvalidation[]
-  createdAt: string
-  updatedAt: string
-}
-```
+- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/packages/shared/src/types.ts`
 
-### Artifact record
+Add or finalize:
 
 ```ts
-type ArtifactRecord = {
-  id: string
-  artifactType: string
-  schemaVersion: string
-  hash: string
-  sourceFingerprint: string
-  routePath?: string
-  templateId?: string
-  componentId?: string
-  codeFileId?: string
-  viewport?: string
-  dependencyHashes: string[]
-  filePath: string
-  byteSize: number
-  createdAt: string
-  status: "complete" | "failed"
-}
+type RevisionKind = "initial" | "improvement"
+
+type RevisionReason =
+  | "initial-export"
+  | "responsive-improvement"
+  | "component-source-refresh"
+  | "interaction-improvement"
+  | "revalidate-only"
+  | "schema-upgrade"
+  | "manual-regeneration"
+
+type RequestedFocus = "responsiveness" | "components" | "both" | "revalidate"
+
+type SourceEvidenceStatus = "complete" | "partial"
+
+type ArtifactStatus = "complete" | "failed"
+
+type ArtifactType =
+  | "source/project-snapshot"
+  | "source/component-catalog"
+  | "source/component-families"
+  | "source/code-file"
+  | "source/override-assignments"
+  | "source/code-compatibility"
+  | "ir/normalized"
+  | "ir/component-model"
+  | "generated/component-module"
+  | "generated/page-module"
+  | "generated/styles"
+  | "validation/build"
+  | "validation/runtime"
+  | "validation/interaction"
+  | "report/export"
 ```
 
-### Invalidation record
+Add:
 
-```ts
-type ArtifactInvalidation = {
-  artifact: string
-  reason:
-    | "source-fingerprint-changed"
-    | "plugin-source-missing"
-    | "schema-version-changed"
-    | "dependency-changed"
-    | "artifact-missing"
-    | "artifact-corrupt"
-    | "user-requested-refresh"
-  dependsOn?: string[]
-}
-```
+- `ExportRevisionRecord`
+- `ArtifactRecord`
+- `ArtifactReference`
+- `ArtifactInvalidation`
+- `ReusePlan`
+- `SourceEvidenceReport`
+- `ComponentSourceFingerprint`
+- `CodeFileSnapshot`
 
-## Artifact Classes
+### A2. Revision creation and planning
 
-We should support these artifact classes immediately:
+Primary file:
 
-- plugin project snapshot
-- plugin component catalog
-- plugin component family graph
-- plugin Code File snapshot
-- plugin override assignment graph
-- plugin capability report
-- export IR
-- component model IR
-- generated component module
-- generated route/page module
-- generated stylesheet
-- build result
-- runtime validation result
-- revision report
+- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/packages/exporter-core/src/local-export.ts`
 
-Responsive capture artifacts already exist in spirit, but this plan keeps focus on options 2 and 4.
+Required phases:
 
-## Fingerprinting Strategy
+1. resolve request
+2. create or load revision context
+3. derive source fingerprint
+4. derive plugin fingerprint
+5. load parent revision if present
+6. compute reuse plan
+7. compute invalidation plan
+8. persist initial source-aware artifacts before downstream capture
+9. execute only invalidated stages
+10. write revision manifest and artifact index
+11. register reusable artifacts in shared cache
 
-### Job/source fingerprint
+Planning output must be written before heavy work begins:
 
-Should include:
+- `resolved-request.json`
+- `reuse-plan.json`
+- `invalidation-plan.json`
+
+### A3. Fingerprinting model
+
+We need four separate fingerprint layers.
+
+#### Request fingerprint
+
+Includes:
 
 - source URL
 - export mode
 - selector
-- plugin project id if available
-- publish URL if available
+- requested focus
+- target fidelity
+- capture strategy version
 
-### Plugin snapshot fingerprint
+#### Source fingerprint
 
-Should include:
+Includes:
 
-- component ids and versions
-- Code File ids and version ids
+- normalized publish URL
+- plugin project identifier if available
+- plugin publish metadata if available
+- route manifest summary if relevant
+- selection or component scope identifiers
+
+#### Plugin fingerprint
+
+Includes:
+
+- Code File ids
+- Code File version ids if available
 - Code File content hashes
-- readable capability flags
-- collection ids and version markers where relevant
+- component ids
+- component family signatures
+- override assignment signature
+- plugin capability flags
 
-### Component family fingerprint
+#### Artifact fingerprint
 
-Should include:
+Includes:
 
-- primary variant id
-- variant ids
-- inheritance chain
-- gesture metadata
-- instance controls shape
-- linked Code File hash if any
-
-### Generated module fingerprint
-
-Should include:
-
-- relevant IR hash
-- codegen version
-- dependency artifact hashes
-
-## Reuse / Invalidation Algorithm
-
-### Fresh export
-
-1. compute source fingerprint
-2. compute plugin snapshot fingerprint
-3. check whether matching artifacts already exist
-4. reuse matching artifacts
-5. capture only missing or invalid plugin/source artifacts
-6. generate only missing dependent IR/codegen artifacts
-
-### Improvement revision
-
-1. load parent revision manifest
-2. compute requested focus
-3. compute invalidation plan
-4. inherit reusable artifact references
-5. recompute only invalidated nodes in the artifact graph
-6. persist a new revision manifest
-
-### Revalidate-only revision
-
-1. require parent revision id
-2. reuse parent generated output
-3. rerun validation artifacts only
-4. emit a new revision report without capture/codegen recost
-
-## File-Level Work
-
-### `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/packages/shared/src/types.ts`
-
-Add or finish:
-
-- `ExportRevisionRecord`
-- `ArtifactRecord`
-- `ArtifactInvalidation`
-- `ArtifactReference`
-- schema-versioned artifact enums
-- richer `revisionRequest` typing
-
-### `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/apps/web/lib/jobs-store.ts`
-
-Add or finish:
-
-- revision creation helpers
-- parent revision lookup
-- invalidation-plan persistence
-- artifact manifest path tracking
-- before/after revision metadata
-
-### `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/packages/exporter-core/src/local-export.ts`
-
-Add or finish:
-
-- revision planning phase
-- content-addressed artifact resolution
-- invalidation planning
-- revalidate-only fast path
-- selective regeneration based on artifact dependency graph
-- report patching for inherited revisions
-
-### `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/apps/worker/src/index.ts`
-
-Add or finish:
-
-- revision-aware logging
-- stage progress persistence
-- artifact manifest persistence
-- proper artifact paths in job record
-
-### `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/apps/web/app/jobs/[id]/page.tsx`
-
-Add or finish:
-
-- revision relationship UI
-- reuse plan UI
-- invalidation reasons UI
-- artifact counts
-- capability/source capture summary
-- revalidate-only visibility
-
-## Tests
-
-Add tests for:
-
-- identical export in different output directories reuses shared cache
-- improvement revision inherits parent artifacts
-- revalidate-only creates a new revision without new capture
-- schema version bump invalidates expected artifacts
-- corrupt artifact file forces recapture of that artifact only
-- missing parent revision fails clearly
-
-## Acceptance Criteria
-
-- two identical exports should reuse the same Code File and component-family artifacts
-- a component-only improvement revision should not force route recapture
-- a revalidate-only revision should not rerun capture or codegen
-- the revision report must list what was reused and what was invalidated
-
----
-
-## Option 4: Plugin Code File Content and Recursive Variant Capture
-
-## Objective
-
-Capture enough Framer authoring evidence to reconstruct component families, variant structure, overrides, and source-linked behavior without guessing.
-
-## Deliverables
-
-- full Code File source capture when readable
-- structured Code File export metadata
-- recursive component family graph
-- replica and inheritance model
-- instance control snapshots
-- override export capture
-- capability diagnostics for unavailable source
-
-## What Must Be Captured
-
-### Code Files
-
-For every readable Code File:
-
-- `id`
-- `name`
-- `path`
-- `versionId`
-- raw `content`
+- artifact schema version
+- relevant input fingerprint
+- dependency hashes
 - content hash
-- byte length
-- `hasContent`
-- export list
-- export details
-- insertion URL
-- default export flag
-- export type such as component or override
+- codegen version when artifact is generated code
 
-### Export detail shape
+### A4. Artifact registry
 
-```ts
-type CapturedCodeFileExport = {
-  name?: string
-  type?: string
-  insertURL?: string
-  isDefaultExport?: boolean
-  componentIdentifier?: string
-  componentName?: string
-  isVariant?: boolean
-  isPrimaryVariant?: boolean
-  gesture?: string
-  inheritsFromId?: string
-  breakpoint?: string
-  variantName?: string
-}
-```
+Every artifact written by the exporter must get an entry with:
 
-### Component graph
-
-For every component node and relevant instance:
-
-- node id
-- parent id
-- ordered children
-- rect
-- layout traits
-- text/style references
-- variant traits
-- primary/replica identity
-- breakpoint identity
-- gesture metadata
-- instance controls
-- links
-
-### Component family model
-
-Families should be grouped by durable identity, preferably:
-
-1. `componentIdentifier`
-2. `componentName`
-3. stable component node id fallback
-
-Each family should contain:
-
-- family id
-- display name
-- primary variant id
-- all variants
-- instance list
-- transition edges
-- provenance
-
-### Override capture
-
-For every override export:
-
-- source artifact reference
-- export name
-- export type
-- likely target node/component if exposed
-- assigned props if exposed
-- dependency list if derivable
-- assignment confidence
-
-If assignment is not exposed by the plugin:
-
-- mark it unresolved
-- retain source
-- allow later runtime evidence to augment it
-
-## Capture Flow
-
-### Phase A: Capability preflight
-
-Before export starts, the plugin should record:
-
-- Code File API availability
-- source content readability
-- component catalog readability
-- CMS readability
-- styles readability
-- permission failures
-- unsupported node categories
-
-### Phase B: Code File snapshot
-
-The plugin should:
-
-1. enumerate available Code Files
-2. sanitize each file into a structured payload
-3. compute `contentHash`
-4. store large source payloads as separate artifacts if necessary
-5. record a per-file status
-
-### Phase C: Component family capture
-
-The plugin should:
-
-1. enumerate components
-2. walk recursive children for each component root
-3. collect variant and inheritance traits
-4. collect instance control values
-5. map discovered Code File exports back to component families where possible
-
-### Phase D: Family graph construction
-
-The exporter core should:
-
-1. group modules into families
-2. identify primary variant
-3. derive known transition hints from gesture metadata
-4. link instances to route/template context
-5. preserve provenance and confidence
-
-## File-Level Work
-
-### `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/apps/plugin/src/App.tsx`
-
-Add or finish:
-
-- async Code File sanitization
-- content hashing
-- byte-length reporting
-- export detail extraction
-- capability report generation
-- recursive component capture
-- chunking strategy for large source payloads
-- explicit missing-source diagnostics
-
-### `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/packages/shared/src/types.ts`
-
-Add or finish:
-
-- richer `FramerCodeFile`
-- `CapturedCodeFileExport`
-- `FramerComponentFamily`
-- transition and provenance types
-
-### `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/packages/exporter-core/src/ir.ts`
-
-Add or finish:
-
-- family grouping logic
-- primary variant selection
-- transition edge storage
-- instance-to-family linking
-- provenance retention
-
-### `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/packages/exporter-core/src/local-export.ts`
-
-Add or finish:
-
-- Code File artifact persistence
-- component family artifact persistence
-- explicit capability/report writing
-- attachment of plugin source artifacts to revision manifest
-
-## Guardrails
-
-### Do not silently drop source
-
-If a Code File is present but source is unreadable, record:
-
-- `hasContent: false`
-- `contentHash: undefined`
-- explicit reason in capability report
-
-### Do not invent transition edges
-
-Only create hard transition edges from:
-
-- plugin gesture evidence
-- readable source evidence
-- runtime evidence in a later stage
-
-Multiple variants alone are not enough.
-
-### Do not flatten component families into one default snapshot
-
-The exporter must retain:
-
-- primary variant
-- replica variants
-- inheritance
-- breakpoint-specific variants when exposed
-
-## Tests
-
-Add tests for:
-
-- Code File content capture with hash and byte size
-- export metadata capture for component and override exports
-- family grouping by stable identifier
-- primary variant selection
-- inheritance preservation
-- gesture metadata preservation
-- unresolved source reported explicitly
-- large Code File artifact chunking
-
-## Acceptance Criteria
-
-- every readable Code File is persisted as a source artifact
-- every captured component family has a primary variant
-- family variants retain inheritance and gesture metadata
-- missing source is visible in reports and job UI
-
----
-
-## Combined Execution Plan
-
-## Phase 1: Finish revision plumbing already started
-
-Implement or complete:
-
-- `revisionRequest` typing
-- parent revision lookup
-- shared revision cache root
-- job artifact path wiring
-- revision manifest writing
-- report exposure in API/UI
-
-Exit condition:
-
-- the UI can show parent revision, requested focus, revision id, revision report, and artifact references
-
-## Phase 2: Make the artifact graph first-class
-
-Implement:
-
-- `artifact-index.json`
-- `invalidation-plan.json`
-- reusable artifact registry
-- dependency-based regeneration
-
-Exit condition:
-
-- a second export can explain exactly what it reused and why
-
-## Phase 3: Make plugin source capture first-class on fresh exports
-
-Implement:
-
-- Code File source artifacts
-- per-file capture status
-- capability report
-- recursive component family capture
-
-Exit condition:
-
-- a new export includes source-aware component artifacts without needing a repair pass
-
-## Phase 4: Attach source artifacts to revisions and reuse them
-
-Implement:
-
-- artifact references from revision manifest to Code File/component family artifacts
-- reuse of those artifacts on identical source fingerprints
-- invalidation when content hash changes
-
-Exit condition:
-
-- rerunning the same source does not recollect unchanged Code File source
-
-## Phase 5: Add improvement revision modes that do not start from zero
-
-Implement:
-
-- `components` improvement
-- `both` improvement
-- `revalidate` fast path
-
-Exit condition:
-
-- improvements create a new revision while preserving parent artifacts and exports
-
----
-
-## Detailed Execution Plan
-
-This section is the concrete build order for Options 2 and 4.
-
-The purpose is to make the initial export itself source-aware and revision-aware so that later exports do not need a recurring rescue pass.
-
-The core product rule is:
-
-- the first healthy export must already capture the evidence needed for reuse
-- later exports should only recapture when a fingerprint, dependency, schema, or capability meaningfully changed
-
-### Global invariants
-
-These invariants should be enforced in code and tests, not treated as conventions.
-
-#### Invariant 1: No silent partial success
-
-If any of these are missing:
-
-- `exportMode`
-- source URL
-- plugin source capability status
-- Code File readability result
-- parent revision id for revision-only flows
-
-the pipeline must either:
-
-- fail explicitly, or
-- mark the export as partial with machine-readable reasons
-
-It must never report plain success while hiding missing source evidence.
-
-#### Invariant 2: Every artifact must declare its dependencies
-
-No artifact may be written without:
-
+- `artifactId`
 - `artifactType`
 - `schemaVersion`
 - `hash`
 - `dependencyHashes`
-- `sourceFingerprint`
 - `status`
+- `byteSize`
+- `relativePath`
+- `createdAt`
 
-This is what allows correct reuse on future exports.
+Required behavior:
 
-#### Invariant 3: Reuse decisions must be reproducible
+- zero-byte output is treated as failed, not complete
+- malformed JSON is treated as corrupt
+- missing dependency hashes make artifact non-reusable
 
-If two exports have the same:
+### A5. Shared cache registration
 
-- source fingerprint
-- plugin snapshot fingerprint
-- artifact schema versions
-- dependency hashes
+We need deterministic registration under:
 
-then reuse must be deterministic regardless of job id, output folder, or machine restart.
+- `.coderelay/revision-cache/source`
+- `.coderelay/revision-cache/ir`
+- `.coderelay/revision-cache/generated`
+- `.coderelay/revision-cache/validation`
 
-#### Invariant 4: Fresh exports are the normal path
+Registration rules:
 
-The default initial export must collect:
+- only `complete` artifacts are cacheable
+- cache key = artifact type + schema version + hash
+- revisions store references, not copies, for shared reuse decisions
+- job-local copies can still exist for portability
 
-- Code File content when readable
-- export metadata
-- component-family structure
-- override/export assignments when visible
-- capability diagnostics when not visible
+### A6. Invalidation planner
 
-That evidence must be persisted as part of the first export, not postponed to an improvement pass.
+The invalidation planner must be dependency-aware.
 
-#### Invariant 5: Improvements inherit, they do not restart
+Examples:
 
-An improvement revision must start from:
+- changed Code File hash invalidates dependent component families
+- changed component-family artifact invalidates normalized component model
+- changed normalized component model invalidates generated component modules
+- changed generated component module invalidates runtime validation for affected pages/components
 
-- the parent revision manifest
-- the parent artifact index
-- a new invalidation plan
-- explicit requested focus
+Invalidation reasons must be explicit:
 
-It should only perform full recapture if the invalidation engine proves that the parent evidence is no longer trustworthy.
+- `source-fingerprint-changed`
+- `plugin-fingerprint-changed`
+- `schema-version-changed`
+- `dependency-changed`
+- `artifact-missing`
+- `artifact-corrupt`
+- `capability-was-partial`
+- `user-requested-refresh`
 
-### Workstream 1: Runtime contract hardening
+### A7. Revision modes
 
-Objective:
+We should support these revision modes consistently:
 
-- make the executed export pipeline impossible to run with missing revision or source-aware inputs
+#### Initial export
 
-Implementation tasks:
+- capture everything required for first-run correctness
+- seed all reusable source artifacts
+- seed normalized component artifacts
+- seed generated output artifacts
 
-- confirm the real executed entrypoints for:
-  - plugin submission
-  - local worker processing
-  - CLI/local export
-- add startup logs for:
-  - raw argv
-  - parsed args
-  - incoming job payload
-  - resolved revision request
-  - `runLocalExport` input
-- add hard guards in `runLocalExport` for:
-  - missing URL
-  - missing `exportMode`
-  - missing `parentRevisionId` when `requestedFocus === "revalidate"`
-  - impossible revision states such as `kind === "improvement"` with no parent
-- add a startup self-check that logs:
-  - codegen version
-  - capture schema version
-  - revision schema version
+#### Component-source refresh
+
+- recompute plugin source-aware artifacts
+- reuse unchanged runtime/layout artifacts
+- regenerate dependent component output only
+
+#### Responsive improvement
+
+- reuse component/source artifacts
+- refresh only responsive/runtime-dependent artifacts
+
+#### Revalidate-only
+
+- reuse source, IR, and generated output
+- rerun validation and reporting only
+
+This is important because it lets us improve exports without destroying prior useful work.
+
+### A8. Migration for old jobs
+
+We already have early migration support. This plan formalizes it.
+
+Legacy jobs must be upgradable into revisioned jobs by:
+
+- creating `revision_0001`
+- synthesizing revision manifest from existing artifacts
+- computing best-effort artifact hashes for existing files
+- marking weak or unverifiable artifacts as `partial`
+- registering cacheable artifacts when integrity checks pass
+
+This ensures old successful exports remain usable and can become parents for better revisions.
+
+### A9. Web and worker visibility
 
 Files:
 
 - `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/apps/worker/src/index.ts`
-- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/packages/exporter-core/src/local-export.ts`
-- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/packages/shared/src/types.ts`
-
-Exit condition:
-
-- every job log clearly shows what was requested, what was received, and which revision flow is active
-
-### Workstream 2: Revision record completion
-
-Objective:
-
-- make revisions first-class and durable rather than inferred from folder state
-
-Implementation tasks:
-
-- finalize revision ids and parent linkage
-- persist one `revision-manifest.json` per revision with:
-  - revision id
-  - job id
-  - parent revision id
-  - reason
-  - requested focus
-  - source fingerprint
-  - plugin fingerprint
-  - artifact graph hash
-  - schema versions
-  - timestamps
-  - status
-  - reused artifact ids
-  - invalidated artifact ids
-- persist one `parent.json` for improvement revisions so lineage is directly readable on disk
-- persist revision-level stage state:
-  - `planning`
-  - `capturing`
-  - `generating`
-  - `validating`
-  - `completed`
-  - `failed`
-- make the web UI render revision lineage and reason directly from revision metadata
-
-Files:
-
-- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/apps/web/lib/jobs-store.ts`
+- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/apps/worker/src/artifacts.ts`
 - `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/apps/web/app/jobs/[id]/page.tsx`
-- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/packages/shared/src/types.ts`
-- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/packages/exporter-core/src/local-export.ts`
+- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/apps/web/lib/job-artifacts.ts`
 
-Exit condition:
+Required UI/report fields:
 
-- every export and improvement is inspectable as a specific revision, not just a latest folder
+- current revision id
+- parent revision id
+- requested focus
+- source evidence status
+- reused artifact count
+- invalidated artifact count
+- cache hits by stage
+- cache misses by stage
+- partial-source warnings
+- explicit “no recapture needed” / “selective recapture required” status
 
-### Workstream 3: Artifact graph normalization
+---
 
-Objective:
+## Workstream B: Option 4 plugin Code File content and recursive variant capture
 
-- make every persistent output reusable and selectively invalidatable
+## Objective
 
-Implementation tasks:
+Capture enough authoring semantics from the plugin layer to reconstruct reusable components, preserve component families, preserve override context, and make later exports source-aware by default.
 
-- finalize `artifact-index.json` as the canonical artifact inventory
-- ensure each entry records:
-  - stable artifact id
-  - artifact type
-  - byte size
-  - content hash
-  - schema version
-  - status
-  - local path
-  - dependency artifact ids
-  - route path when relevant
-  - component family id when relevant
-  - code file id when relevant
-  - viewport when relevant
-- define artifact classes for:
-  - plugin project snapshot
-  - plugin capability report
-  - component families
-  - code file metadata
-  - code file source
-  - override assignment graph
-  - export IR
-  - component model IR
-  - generated route module
-  - generated component module
-  - generated CSS module
-  - validation output
-  - revision report
-- reject artifact registration if:
-  - hash is missing
-  - file does not exist for `complete` status
-  - dependency ids reference unknown artifacts
+This is not “grab some metadata”.
 
-Files:
+This is a real source capture lane with reuse value.
 
-- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/packages/exporter-core/src/local-export.ts`
-- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/packages/shared/src/types.ts`
+## Required deliverables
 
-Exit condition:
+- Code File snapshot capture
+- Code File content persistence
+- Code File export metadata persistence
+- recursive component graph traversal
+- component-family normalization
+- replica and inheritance tracking
+- instance control capture
+- override assignment capture
+- source evidence report
+- code compatibility analysis
 
-- one artifact index can fully explain what exists, what depends on what, and what can be reused
+### B1. Plugin capture contract
 
-### Workstream 4: First-run source-aware plugin capture
+The plugin payload must explicitly distinguish:
 
-Objective:
+- what was read successfully
+- what was not readable
+- what the API does not expose
+- what was truncated
+- what was inferred
 
-- move Code File and component-family evidence into the default initial export path
+Required payload sections:
 
-Implementation tasks:
+```ts
+type PluginSourceArtifactsPayload = {
+  projectSnapshot: ProjectSnapshot
+  componentCatalog: ComponentCatalogEntry[]
+  componentFamilies: ComponentFamilySnapshot[]
+  codeFiles: CodeFileSnapshot[]
+  overrideAssignments: OverrideAssignment[]
+  capabilityReport: PluginCapabilityReport
+  sourceEvidenceReport: SourceEvidenceReport
+}
+```
 
-- on the first export, capture and persist for each readable Code File:
-  - `id`
-  - `name`
-  - `path`
-  - `versionId`
-  - `content`
-  - `contentHash`
-  - `contentByteLength`
-  - `hasContent`
-  - `exports`
-  - `exportDetails`
-  - `insertURL`
-  - default-export markers
-  - inferred role such as component or override
-- for unreadable or partially readable Code Files, persist:
-  - capability status
-  - error reason
-  - whether content was absent, restricted, truncated, or external
-- recursively build component families using:
-  - primary/replica identity
-  - variant metadata
-  - inheritance metadata
-  - gesture metadata
-  - instance controls
-  - node hierarchy
-  - links and insertion URLs
-- persist component family artifacts independently from generated code
-- record plugin capability diagnostics in a dedicated artifact even when capture succeeds
+This payload must become part of the initial export request or be written as the earliest artifact stage.
 
-Files:
+### B2. Code File capture
+
+Files to update:
 
 - `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/apps/plugin/src/App.tsx`
-- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/packages/exporter-core/src/ir.ts`
+- plugin capture helpers under `apps/plugin/src/`
 - `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/packages/exporter-core/src/local-export.ts`
 
-Framer-specific rule:
+For each readable Code File, capture:
 
-- treat the Plugin SDK as authoring metadata and source access
-- do not treat it as proof of fully resolved browser CSS or full site source export
+- file id
+- file name
+- logical path
+- export names
+- source text
+- byte size
+- content hash
+- version id if available
+- parse status
+- import list
+- local dependency references
 
-Exit condition:
+For each unreadable Code File, capture:
 
-- a brand new export contains durable source artifacts and family artifacts before any improvement flow exists
+- identifier
+- name if available
+- reason unreadable
+- capability flag that failed
 
-### Workstream 5: Fingerprint strategy for reuse from scratch
+Storage:
 
-Objective:
+- `source-artifacts/code-files/<content-hash>.tsx`
+- `source-artifacts/code-files/<content-hash>.json`
 
-- make future fresh exports reuse previously captured evidence without needing manual recapture
+Why hash by content instead of file id:
 
-Implementation tasks:
+- different revisions can reuse identical content
+- renames do not force false invalidation
+- we can compare true source changes instead of path changes
 
-- define source fingerprint inputs:
-  - source URL
-  - export mode
-  - selector
-  - plugin project id if available
-  - publish URL if available
-- define plugin snapshot fingerprint inputs:
-  - Code File ids
-  - Code File version ids
-  - Code File content hashes
-  - component family ids
-  - readable capability flags
-  - override export metadata hashes
-- define family fingerprint inputs:
-  - primary variant id
-  - family member ids
-  - linked code file hashes
-  - inheritance markers
-  - gesture metadata
-  - controls shape
-- define generated-module fingerprint inputs:
-  - IR hash
-  - codegen version
-  - dependency artifact hashes
-- ensure fresh exports look up matching artifact hashes before recollecting or regenerating
+### B3. Recursive component traversal
+
+For each component or component-like node:
+
+1. capture node identity
+2. capture component identifier if available
+3. capture insertion/module URL if available
+4. capture primary vs replica status
+5. capture parent family relationship
+6. capture variant traits
+7. capture breakpoint traits
+8. capture inherited attributes
+9. capture local attributes
+10. capture gesture metadata
+11. capture instance controls
+12. capture children recursively
+13. link any associated Code File / module identity
+
+The exported snapshot must preserve structure.
+
+We must not flatten component families into a simple list too early.
+
+### B4. Component family model
+
+We need a stable normalized family representation:
+
+```ts
+type ComponentFamilySnapshot = {
+  id: string
+  name: string
+  primaryVariantId?: string
+  variants: Array<{
+    id: string
+    name: string
+    nodeId: string
+    isPrimary: boolean
+    breakpoint?: string
+    inheritedFrom?: string
+    gesture?: string
+    controlsSignature?: string
+    codeFileHash?: string
+  }>
+  interactionEdges: Array<{
+    fromVariantId: string
+    toVariantId: string
+    trigger: "click" | "hover" | "press" | "focus" | "auto" | "unknown"
+    confidence: "high" | "medium" | "low"
+    evidence: string[]
+  }>
+  replicas: Array<{
+    id: string
+    sourceVariantId?: string
+    breakpoint?: string
+  }>
+}
+```
 
 Important rule:
 
-- a fresh export should check for reusable source artifacts before it talks to the plugin for expensive recapture
-- the plugin should still run for minimal capability and project freshness checks when required
+Never invent an interaction edge only because multiple variants exist.
 
-Exit condition:
+If an edge is inferred, it must be labeled as inferred and low confidence.
 
-- running the same export twice should reuse source-aware artifacts on the second run without a manual improvement pass
+### B5. Override capture
 
-### Workstream 6: Invalidation engine
+We need separate capture for:
 
-Objective:
+- override source module identity
+- exported override names
+- node or component assignments where visible
+- compatibility status
 
-- make recapture rare and narrow
+This matters because export quality drops hard when overrides disappear silently.
 
-Implementation tasks:
+Required output:
 
-- finalize `invalidation-plan.json`
-- generate invalidations per artifact edge rather than per whole job
-- support invalidation reasons:
-  - source fingerprint changed
-  - plugin snapshot changed
-  - Code File content hash changed
-  - component family membership changed
-  - override export metadata changed
-  - schema version changed
-  - artifact missing
-  - artifact corrupt
-  - user requested full refresh
-  - prior capability missing and now required
-- implement dependency walk rules:
-  - changed Code File invalidates that source artifact
-  - that invalidates dependent family artifacts
-  - that invalidates dependent IR nodes
-  - that invalidates dependent generated modules
-  - that invalidates dependent validations
-- preserve unrelated artifacts even when one component changes
+- `override-assignments.json`
+- compatibility result per override
+- explicit unsupported list in the final report
 
-Files:
+### B6. Code compatibility analysis
+
+After Code File capture, run a compatibility pass.
+
+It should classify each Code File / component / override into:
+
+- `portable`
+- `portable-with-adaptation`
+- `runtime-fallback-only`
+- `unsupported`
+
+Analysis inputs:
+
+- imports
+- framer runtime dependencies
+- local alias usage
+- browser-only globals
+- unresolved project-local imports
+- unsupported package imports
+
+Outputs:
+
+- `code-compatibility-report.json`
+- compatibility summary in `export-report.json`
+- copy of unadapted source in a visible artifact folder when not portable
+
+### B7. Source evidence status
+
+Source evidence status for the revision must be computed from actual capture results:
+
+`complete` when:
+
+- all required source-aware artifact categories were captured successfully
+- no required Code File is missing when the project indicates component/code usage
+- component families and override mappings were built without structural gaps
+
+`partial` when:
+
+- any required category is missing
+- any required file is unreadable
+- any traversal failed
+- any override assignment is unresolved
+
+This status must be user-visible.
+
+That avoids fake “success” when the output is already compromised.
+
+### B8. Fresh-export default behavior
+
+This is the most important part for your requirement.
+
+On a brand-new export, the pipeline must do this automatically:
+
+1. resolve request
+2. run plugin preflight
+3. capture source-aware plugin evidence
+4. write source artifacts immediately
+5. compute source evidence status
+6. seed shared cache with complete artifacts
+7. continue into runtime capture and codegen
+
+That means future exports start with the right evidence already in the system.
+
+Recapture should only be triggered when:
+
+- source fingerprint changed
+- plugin fingerprint changed
+- a previous artifact is partial/corrupt
+- schema version changed
+- user explicitly requests improvement on stale evidence
+
+This is how we avoid “fix it later by recapture” becoming normal.
+
+---
+
+## Dependency graph for selective reuse
+
+We need an explicit graph like this:
+
+```text
+Code File source
+  -> Code File snapshot
+  -> compatibility analysis
+  -> component family normalization
+  -> normalized component model
+  -> generated component modules
+  -> generated page modules that depend on those components
+  -> runtime validation
+  -> interaction validation
+  -> final report
+```
+
+And:
+
+```text
+Override assignment changes
+  -> override assignment artifact
+  -> normalized component model
+  -> generated component/page modules
+  -> runtime validation
+  -> final report
+```
+
+And:
+
+```text
+Component family graph changes
+  -> normalized component model
+  -> generated component modules
+  -> interaction validation
+  -> final report
+```
+
+This graph is what allows selective regeneration instead of blanket recapture.
+
+---
+
+## Pipeline changes, stage by stage
+
+## Stage 0: First-run bootstrap and cache seeding
+
+This stage exists specifically to make future exports good from scratch.
+
+It runs before browser-heavy capture and before any expensive regeneration decision is finalized.
+
+Responsibilities:
+
+- create the revision directory
+- write the initial revision manifest shell
+- attempt parent revision discovery
+- compute request, source, and plugin fingerprints
+- write an artifact registry scaffold
+- run plugin source-aware capture
+- persist source-aware artifacts immediately
+- compute source evidence completeness
+- register complete source artifacts in shared cache
+
+### Required logs
+
+- revision id
+- parent revision id
+- request fingerprint
+- source fingerprint
+- plugin fingerprint
+- first-run seeded artifact count
+- source evidence status
+
+## Stage 1: Request resolution
+
+Add hard validation:
+
+- missing `url` fails immediately
+- missing `exportMode` fails immediately
+- invalid revision request fails immediately
+
+Write:
+
+- `resolved-request.json`
+
+### Required logs
+
+- raw request payload
+- parsed request payload
+- revision mode
+- parent revision id
+- requested focus
+
+## Stage 2: Plugin source-aware capture
+
+Write:
+
+- `project-snapshot.json`
+- `component-catalog.json`
+- `component-families.json`
+- `override-assignments.json`
+- Code File snapshots
+- `source-evidence-report.json`
+- `capability-report.json`
+
+### Required logs
+
+- code file count
+- readable code file count
+- unreadable code file count
+- component catalog count
+- component family count
+- override assignment count
+- source evidence status
+
+## Stage 3: Reuse + invalidation planning
+
+Write:
+
+- `reuse-plan.json`
+- `invalidation-plan.json`
+
+### Required logs
+
+- reusable source artifact count
+- invalidated source artifact count
+- invalidation reasons summary
+
+## Stage 4: Normalization
+
+Generate:
+
+- normalized component model
+- component dependency graph
+- reconciled export IR
+
+### Required logs
+
+- component family count normalized
+- interaction edge count
+- override binding count
+- dependent page count
+
+## Stage 5: Codegen
+
+Generate:
+
+- component modules
+- page modules
+- stylesheets
+- explicit fallback/unadapted outputs where needed
+
+### Required logs
+
+- generated component module count
+- generated page module count
+- generated CSS byte size
+- generated TSX byte size
+
+## Stage 6: Validation
+
+Run:
+
+- build validation
+- runtime validation
+- interaction validation for supported family transitions
+- source evidence validation
+
+### Required logs
+
+- build success/failure
+- runtime errors
+- supported interaction contracts
+- passed interaction contracts
+- failed interaction contracts
+
+## Stage 7: Reporting + cache registration
+
+Write:
+
+- `export-report.json`
+- `artifact-index.json`
+- `revision-manifest.json`
+
+### Required logs
+
+- cacheable artifact count
+- registered artifact count
+- partial-source warnings
+- final revision status
+
+---
+
+## Implementation order
+
+This is the execution order I would use.
+
+### Phase 1: Harden the revision contract
+
+Goal:
+
+- make every export revisioned
+- make reuse/invalidation explicit
+- make artifacts first-class
+
+Tasks:
+
+1. finalize shared revision/artifact types
+2. finalize revision manifest writing
+3. finalize artifact index writing
+4. finalize reuse/invalidation plan artifacts
+5. add strict completeness checks for reusable artifacts
+6. add cache registration helper
+
+Definition of done:
+
+- every export writes revision metadata and artifact index
+- every revision explains reuse and invalidation
+
+### Phase 2: Make source-aware plugin capture first-class
+
+Goal:
+
+- make Option 4 part of initial export, not a repair patch
+
+Tasks:
+
+1. formalize plugin source payload types
+2. capture Code File content and metadata
+3. persist Code File artifacts by content hash
+4. capture recursive component-family structure
+5. capture override assignments
+6. compute source evidence report
+7. surface source evidence in plugin UI and job UI
+
+Definition of done:
+
+- a new export writes source artifacts on first run
+- missing source evidence is visible immediately
+- the worker can prove those first-run source artifacts were registered for reuse
+
+### Phase 3: Add dependency-aware invalidation
+
+Goal:
+
+- prevent whole-export rebuilds for local source changes
+
+Tasks:
+
+1. build component/code-file dependency graph
+2. map generated modules back to component families
+3. invalidate only dependent artifacts
+4. reuse unchanged parent artifacts
+5. preserve runtime capture unless source change requires more
+
+Definition of done:
+
+- one Code File change does not force complete export regeneration
+
+### Phase 4: Strengthen validation and false-success prevention
+
+Goal:
+
+- stop reporting “success” when source-aware export is compromised
+
+Tasks:
+
+1. fail if required source artifacts are missing for source-aware mode
+2. fail if generated component/page outputs are zero-byte
+3. fail if artifact index is incomplete
+4. add partial-source warnings to report and UI
+5. ensure runtime/build validation reads source evidence state
+
+Definition of done:
+
+- exports cannot silently succeed with missing core artifacts
+
+### Phase 5: Backfill old jobs and verify reuse
+
+Goal:
+
+- make the current job inventory useful instead of disposable
+
+Tasks:
+
+1. migrate old jobs into revision structure
+2. synthesize source evidence status where possible
+3. register reusable old artifacts
+4. run improvement revision on migrated job
+5. confirm selective reuse actually happens
+
+Definition of done:
+
+- an old job can become parent revision for a new source-aware improvement revision
+
+---
+
+## Exact code areas to touch
+
+### Exporter core
 
 - `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/packages/exporter-core/src/local-export.ts`
+- add or refine:
+  - revision planning
+  - artifact registry
+  - reuse planner
+  - invalidation planner
+  - source artifact persistence
+  - source evidence computation
+  - dependency-scoped regeneration
 
-Exit condition:
+### Shared types
 
-- the invalidation plan can explain exactly why a future export recaptured anything at all
+- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/packages/shared/src/types.ts`
+- add or refine:
+  - revision types
+  - artifact types
+  - source evidence types
+  - component/code-file snapshot types
 
-### Workstream 7: Improvement revision flows
+### Worker
 
-Objective:
-
-- allow targeted repairs and enhancements without resetting everything
-
-Implementation tasks:
-
-- support revision reasons:
-  - `component-source-refresh`
-  - `responsive-improvement`
-  - `interaction-improvement`
-  - `revalidate-only`
-  - `schema-upgrade`
-  - `manual-regeneration`
-- finalize improvement focuses:
-  - `components`
-  - `responsiveness`
-  - `both`
-  - `revalidate`
-- implement fast paths:
-  - parent export reuse for `revalidate`
-  - parent export reuse when component source diff is empty
-  - validation-only revision creation
-- ensure improvement jobs can accept:
-  - fresh plugin capture
-  - a new selector
-  - a new source URL
-  - explicit requested focus
-- patch revision reports so the user can see:
-  - reused parent artifacts
-  - new artifacts
-  - invalidated artifacts
-  - validation outcome for the new revision
-
-Files:
-
-- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/apps/web/lib/jobs-store.ts`
 - `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/apps/worker/src/index.ts`
-- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/packages/exporter-core/src/local-export.ts`
+- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/apps/worker/src/artifacts.ts`
+- add or refine:
+  - revision-aware stage logs
+  - artifact-path persistence
+  - source artifact references in job metadata
 
-Exit condition:
+### Plugin
 
-- an improvement revision starts from the parent manifest, not from a blank workspace
+- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/apps/plugin/src/App.tsx`
+- plugin helper files under `apps/plugin/src/`
+- add or refine:
+  - plugin preflight result
+  - source-aware capture summary
+  - readable/unreadable Code File reporting
+  - component-family capture summary
+  - override capture summary
 
-### Workstream 8: UI and operator visibility
+### Web app
 
-Objective:
-
-- make reuse, partial source capture, and recapture reasons obvious to users and to us
-
-Implementation tasks:
-
-- jobs list should show:
-  - latest revision id
-  - revision reason
-  - whether output was fully generated, partially reused, or revalidated
-- job detail should show:
-  - revision lineage
-  - capability summary
-  - unreadable Code Files count
-  - component families count
-  - artifact counts by type
-  - reused artifact count
-  - invalidated artifact count
-  - direct download links for:
-    - revision manifest
-    - invalidation plan
-    - artifact index
-    - capability report
-    - export report
-- improvement actions should be explicit buttons, not inferred refreshes
-- if a source-aware artifact is missing, show that as a concrete product warning
-
-Files:
-
-- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/apps/web/app/jobs/page.tsx`
 - `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/apps/web/app/jobs/[id]/page.tsx`
-- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/apps/web/app/jobs/auto-refresh.tsx`
-
-Exit condition:
-
-- a user can tell, from the UI alone, whether the exporter reused healthy artifacts or recaptured something and why
-
-### Workstream 9: Regression test matrix
-
-Objective:
-
-- make these fixes durable so future exports get the benefit automatically
-
-Implementation tasks:
-
-- add unit tests for:
-  - source fingerprint generation
-  - plugin snapshot fingerprint generation
-  - component family grouping
-  - source artifact diffing
-  - invalidation-plan generation
-  - artifact corruption detection
-- add integration tests for:
-  - initial export writes source-aware artifacts by default
-  - identical export in a different output folder reuses shared source artifacts
-  - changed Code File invalidates only dependent family/IR/codegen artifacts
-  - unchanged component-source improvement reuses the parent export
-  - revalidate-only emits a new revision without capture/codegen
-  - missing `exportMode` fails explicitly
-  - missing parent revision fails explicitly for revalidate
-- add end-to-end assertions for:
-  - manifest/report visibility in API
-  - UI revision lineage rendering
-  - downloadable artifact manifests are valid JSON
-
-Files:
-
-- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/packages/exporter-core/src/local-export.integration.test.ts`
-- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/packages/exporter-core/src/exporter-regression.test.ts`
-- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/apps/web/app/api/jobs/[id]/artifact/route.ts`
-
-Exit condition:
-
-- a future regression cannot silently remove first-run source capture or selective reuse without failing tests
-
-### Workstream 10: Migration and rollout
-
-Objective:
-
-- move existing jobs and future jobs onto the new model without breaking downloadability
-
-Implementation tasks:
-
-- define revision/artifact schema versions explicitly
-- support old jobs with missing manifests by:
-  - marking them legacy
-  - generating derived manifests where safe
-  - refusing unsafe reuse where provenance is unknown
-- add a one-time migration step for:
-  - artifact path normalization
-  - revision lineage backfill when parent metadata is inferable
-- gate production reuse on:
-  - schema version match
-  - artifact integrity check
-  - dependency closure check
-- log and surface when a legacy export had to fall back to full regeneration
-
-Exit condition:
-
-- old jobs remain inspectable, but only new-schema jobs participate in safe reuse automatically
-
-### Recommended shipping order
-
-This is the order that gives the fastest durable payoff.
-
-1. finish runtime guards and revision manifest hardening
-2. finalize artifact index and invalidation plan
-3. make first-run Code File and component-family capture mandatory
-4. finalize source-artifact fingerprinting and shared-cache reuse
-5. finalize component-focused and revalidate-only improvement flows
-6. expose revision lineage and reuse reasons in the UI
-7. lock the entire flow with integration and regression tests
-
-### What “fixed from scratch” means in practice
-
-After Options 2 and 4 land fully, a normal new export should behave like this:
-
-1. compute source fingerprint
-2. check for reusable source-aware artifacts
-3. collect only missing or invalid plugin evidence
-4. persist Code File and component-family artifacts immediately
-5. generate IR and code only for invalidated nodes
-6. validate
-7. write a revision report that explains reuse vs regeneration
-
-That means future exports benefit on the first run from:
-
-- source-aware component capture
-- artifact reuse
-- selective invalidation
-- revision lineage
-- explicit capability reporting
-
-It also means improvement flows become optional refinement tools, not a crutch required to make the export usable.
+- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/apps/web/lib/job-artifacts.ts`
+- `/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/apps/web/lib/report-breakdown.ts`
+- add or refine:
+  - revision lineage
+  - source evidence panel
+  - cache hit/miss panel
+  - reuse plan display
+  - invalidation reason display
 
 ---
 
-## How We Prevent Future Routine Recapture
+## Testing strategy
 
-This is the most important part of the plan.
+We need tests at four layers.
 
-Future exports should not need recapture all the time because we will change the default export behavior itself:
+## 1. Unit tests
 
-### 1. Capture source-aware plugin evidence on day one
+Add tests for:
 
-Every initial export should capture:
+- artifact hash stability
+- content-hash-based Code File reuse
+- invalidation plan derivation
+- source evidence status calculation
+- component family normalization
+- override assignment normalization
 
-- Code File source
-- component family graph
-- variant metadata
-- override export metadata
+Likely files:
 
-That removes the need for a later source-only rescue pass in normal cases.
+- `packages/exporter-core/src/*.test.ts`
+- `apps/plugin/src/*.test.ts`
+- `apps/web/lib/*.test.ts`
 
-### 2. Persist immutable artifacts by content hash
+## 2. Integration tests
 
-If a Code File has the same content hash, we reuse it.
+Add integration tests for:
 
-If a component family graph has the same dependency hash, we reuse it.
+- fresh export seeds source-aware artifacts
+- second identical export reuses Code File artifacts
+- changed Code File invalidates only dependent artifacts
+- partial source evidence marks revision as `partial`
+- component-only improvement revision avoids unrelated route/runtime recapture
+- revalidate-only revision skips capture/codegen
 
-If the generated module dependencies have not changed, we reuse them.
+## 3. Regression tests
 
-### 3. Invalidate narrowly
+Add regression coverage for:
 
-Do not say “export changed, rebuild everything.”
+- missing Code File content no longer appearing as silent success
+- missing component family graph surfacing in report
+- zero-byte generated outputs failing artifact completeness
+- stale cache entry rejected when schema version changes
 
-Instead:
+## 4. End-to-end verification
 
-- changed Code File invalidates its source artifact
-- that invalidates dependent family model
-- that invalidates dependent IR
-- that invalidates dependent generated modules
+For one controlled Framer project:
 
-Nothing else should move.
+- run fresh export
+- inspect source-artifacts existence
+- run second export with unchanged source
+- confirm cache hits for source artifacts
+- change one component/code file
+- rerun export
+- confirm only dependent artifacts were regenerated
 
-### 4. Separate revalidation from regeneration
-
-Validation failures should not automatically imply recapture.
-
-If generated output already exists, allow:
-
-- revalidate-only
-- rebuild-only
-- component-source-refresh
-
-Each should have its own reason and scope.
-
-### 5. Version the schemas
-
-Any time we change the structure of:
-
-- Code File artifacts
-- component family artifacts
-- revision manifest
-- generated module dependencies
-
-we bump the schema version and invalidate only the affected layers.
-
-### 6. Make missing evidence visible in the product
-
-If the plugin could not read source, the UI should say that directly.
-
-That prevents false confidence and prevents users from assuming a blank or partial export came from a healthy source capture.
+This is the proof that future exports no longer need blanket recapture.
 
 ---
 
-## Dependencies and Ordering
+## Acceptance criteria
 
-Option 2 should land before Option 4 is fully relied on in production.
+This work is complete only if all of these are true.
 
-Recommended order:
+### Fresh-export criteria
 
-1. finish revision/request plumbing
-2. add artifact index and invalidation plan
-3. persist Code File artifacts
-4. persist component family artifacts
-5. expose reports and reuse plan in UI
-6. add revalidate-only and component-only improvement flows
-7. lock it down with regression tests
+- a brand-new export writes source-aware artifacts on first run
+- those source-aware artifacts are written before runtime/layout capture begins
+- Code File artifacts are stored by content hash
+- component family graph is present when the project contains components
+- source evidence status is computed and shown
+- missing required source evidence cannot be reported as full success
+- revision `0001` can immediately act as a valid parent for a second export
 
-Reason:
+### Reuse criteria
 
-Without the revision/artifact model, the plugin capture improvements will help, but they will still be expensive and hard to trust over time.
+- a second identical export reuses source-aware artifacts
+- unchanged Code Files are not recollected
+- unchanged component families are not renormalized unnecessarily
+- unchanged dependent modules are not regenerated unnecessarily
+- unchanged exports do not trigger blanket runtime recapture
+
+### Invalidation criteria
+
+- one changed Code File invalidates only its dependency cone
+- one changed override invalidates only dependent component/page outputs
+- schema version changes invalidate old artifacts explicitly
+
+### UX/report criteria
+
+- plugin UI shows source capture quality before export completes
+- jobs page shows revision lineage, reuse plan, and source evidence state
+- report explains whether the export relied on full capture, reuse, or selective regeneration
+
+### Durability criteria
+
+- migrated legacy jobs can become parent revisions
+- shared cache can be reused across output directories
+- corrupt artifacts do not silently pass reuse checks
+- deleting one generated output file does not force loss of valid source-aware artifacts
+
+### No-recapture criteria
+
+- a fresh export does not require a follow-up repair revision to gain source-aware component artifacts
+- a second identical export does not perform blanket recapture
+- a component-only change does not force full-site recapture
+- a revalidate-only run performs no recapture at all
+
+### Release-gate criteria
+
+No rollout is allowed to ship as complete unless CI proves all of these:
+
+- a clean first export writes source-aware artifacts during revision `0001`
+- a second identical export reuses those artifacts without plugin recapture
+- deleting one downstream generated file does not invalidate healthy source artifacts
+- changing one Code File invalidates only its dependency cone
+- partial source evidence cannot be displayed as full success in plugin UI, worker logs, or jobs UI
 
 ---
 
-## Risks
+## Risks and mitigation
 
-### Payload size growth
-
-Readable Code File source can enlarge plugin payloads.
+### Risk 1: Plugin APIs expose inconsistent source data across projects
 
 Mitigation:
 
-- chunk large source artifacts
-- persist large source separately
-- store hashes in the main payload
+- capability-report flags
+- partial-source status
+- explicit unreadable reasons
+- runtime fallback lane remains available
 
-### Partial plugin capability
-
-Some projects may expose components but not all source details.
-
-Mitigation:
-
-- explicit capability report
-- explicit per-file status
-- no silent success
-
-### Stale artifact reuse
-
-Bad reuse would be worse than recapture.
+### Risk 2: Dependency mapping becomes too coarse and invalidates too much
 
 Mitigation:
 
-- dependency hashes
-- schema versions
-- corruption checks
-- clear invalidation reasons
+- content-hash Code File artifacts
+- explicit component-family dependency graph
+- tests that prove single-file changes do not trigger full rebuild
 
-### Family grouping mistakes
-
-Grouping by weak identity could merge unrelated components.
+### Risk 3: False reuse from stale cache
 
 Mitigation:
 
-- stable priority order for identifiers
-- confidence flag
-- fallback to separate families when uncertain
+- schema-versioned artifact keys
+- dependency hash validation
+- zero-byte/corrupt artifact rejection
+
+### Risk 4: UI still implies success when quality is partial
+
+Mitigation:
+
+- source evidence banner
+- explicit partial-source warnings
+- report sections that separate complete from partial evidence
 
 ---
 
-## Test Matrix
+## Rollout plan
 
-### Unit tests
+### Rollout 1
 
-- artifact key generation
-- invalidation-plan generation
-- Code File hash generation
-- family grouping logic
-- primary variant selection
+- finalize revision/artifact contracts
+- finalize first-run source artifact writing
+- show source evidence in reports
 
-### Integration tests
+### Rollout 2
 
-- identical export reuses source artifacts
-- improvement revision reuses parent artifacts
-- revalidate-only skips capture/codegen
-- changed Code File invalidates only dependent component artifacts
-- schema bump invalidates expected layers
+- add dependency-aware invalidation
+- add component-only reuse path
+- add cache registration hardening
 
-### Product tests
+### Rollout 3
 
-- jobs page shows revision lineage
-- job detail page shows reuse/invalidation summary
-- capability report exposes unreadable source
-- downloadable revision and validation manifests are valid JSON
+- migrate selected legacy jobs
+- run real-world validation across repeated exports
+- tune any overly broad invalidation
 
 ---
 
-## Definition of Done
+## What this means for future exports
 
-This work is done only when:
+If we implement this correctly, the future flow becomes:
 
-- a new export captures Code File source and component families by default
-- identical exports reuse those artifacts without full recapture
-- improvement revisions inherit from parent revisions instead of restarting from zero
-- revalidate-only works without new capture/codegen
-- missing source is reported explicitly
-- tests prove that unchanged component evidence is reused across runs
+1. user exports a Framer project
+2. CodeRelay captures plugin source-aware evidence on the first run
+3. that evidence is stored in revisioned artifacts and registered in shared cache
+4. later exports compare fingerprints
+5. unchanged source artifacts are reused automatically
+6. only changed components or dependent outputs are regenerated
+
+So no, we should not need routine recapture all the time.
+
+Recapture remains available, but only for:
+
+- changed source
+- incomplete prior evidence
+- schema upgrades
+- explicit manual refresh
+
+That is the exact behavior we want.
 
 ---
 
-## Recommended Immediate Build Sequence
+## Final implementation checklist
 
-1. finish `local-export.ts` revision fast paths and invalidation planning
-2. formalize `artifact-index.json` and revision manifests
-3. complete plugin Code File artifact capture and capability report
-4. complete component family artifact persistence
-5. add regression tests for reuse and selective invalidation
-6. expose the reuse/invalidation evidence clearly in the web UI
+- add or finalize revision and artifact types
+- persist revision manifest, artifact index, reuse plan, invalidation plan
+- make source-aware plugin capture part of initial export
+- persist Code Files by content hash
+- persist recursive component family graph
+- persist override assignments
+- compute and expose source evidence status
+- build dependency-aware invalidation
+- reuse unchanged source artifacts across exports
+- fail hard on missing required source-aware artifacts
+- expose reuse and source evidence in plugin UI and jobs UI
+- add integration and regression coverage proving no routine recapture is needed
 
-If we do these in order, future exports should start with the right source/component evidence from scratch, and later improvements should become targeted revisions rather than expensive recapture cycles.
+---
+
+## Success statement
+
+The work succeeds when a brand-new export already contains the source-aware artifacts needed for high-quality component export, and later exports of the same project reuse those artifacts automatically without forcing another full capture.

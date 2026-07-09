@@ -4,18 +4,22 @@ import crypto from "node:crypto";
 import fs, { writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import path from "node:path";
-import { chromium } from "playwright";
+import { chromium, type Locator, type Page } from "playwright";
 import { PNG } from "pngjs";
 import { generateNextProject } from "../../codegen/src/next-project.js";
 import { compareGeneratedPreview } from "../../fidelity/src/compare.js";
 import { matchPluginNodesToDom } from "../../matcher/src/match.js";
 import type {
+  ArtifactIndex,
+  ArtifactRecord,
   ComparisonDiagnostics,
   ExportAttemptResult,
   ExportIR,
   ExportMode,
+  ExportRevisionRecord,
   ExportTreeNode,
   FramerTreeNode,
+  FidelityEvidence,
   MotionStyles,
   ExportWarning,
   FidelityScores,
@@ -24,13 +28,19 @@ import type {
   PreviewValidationResult,
   RuntimeCapture,
   RuntimeNode,
+  RuntimeRouteCapture,
+  ViewportName,
 } from "../../shared/src/types.js";
 import {
   captureRuntime,
   captureRuntimeRoutes,
   createSimulatedPluginCapture,
 } from "./capture.js";
-import { buildIntermediateRepresentation } from "./ir.js";
+import {
+  buildIntermediateRepresentation,
+  buildPluginSourceSnapshot,
+  type PluginSourceSnapshot,
+} from "./ir.js";
 import { zipDirectory } from "./package.js";
 import {
   applyAttemptPlan,
@@ -38,6 +48,7 @@ import {
   buildAttemptPlan,
   detectAttemptPlateau,
 } from "./attempt-planner.js";
+import { analyzeCodeFilesCompatibility } from "./code-compatibility.js";
 type LocalExportInput = {
   url?: string;
   pluginCapture?: PluginCanvasCapture;
@@ -67,6 +78,12 @@ type LocalExportResult = {
   zipPath: string;
   reportPath: string;
   previewPath: string;
+  resolvedRequestPath?: string;
+  statusPath?: string;
+  capabilityReportPath?: string;
+  codeCompatibilityReportPath?: string;
+  beforeAfterReportPath?: string;
+  parentInfoPath?: string;
   bestAttempt: ExportAttemptResult;
   validation: GeneratedProjectValidation;
   revisionManifestPath?: string;
@@ -74,6 +91,15 @@ type LocalExportResult = {
   artifactIndexPath?: string;
   responsiveRecapturePlanPath?: string;
   revisionCacheHit?: boolean;
+};
+
+type UnadaptedCodeFileArtifact = {
+  codeFileId?: string;
+  name: string;
+  compatibility: "runtime-fallback-required" | "unsupported";
+  reasons: string[];
+  sourcePath?: string;
+  metadataPath: string;
 };
 
 export type GeneratedProjectValidation = {
@@ -87,13 +113,44 @@ export type GeneratedProjectValidation = {
   renderedTextLength: number;
   consoleErrors: string[];
   pageErrors: string[];
+  codeFileExecutions: Array<{
+    routePath: string;
+    fileName: string;
+    exportName?: string;
+    status: "passed" | "failed";
+    renderTargetValue?: string;
+    detail?: string;
+  }>;
+  interactionContracts: Array<{
+    routePath: string;
+    familyId: string;
+    familyName?: string;
+    status: "passed" | "failed";
+    initialVariantId?: string;
+    clickVariantId?: string;
+    keyboardVariantId?: string;
+    transitionTargetId?: string;
+    detail?: string;
+  }>;
   routes: Array<{
     path: string;
     sourceTextLength: number;
     sourceNodeCount: number;
+    rootChildCount: number;
     renderedElementCount: number;
     renderedTextLength: number;
     screenshotColorCount: number;
+    viewportChecks: Array<{
+      viewport: ViewportName;
+      innerWidth: number;
+      rootWidth: number;
+      scrollWidth: number;
+      bodyScrollWidth: number;
+      renderedElementCount: number;
+      renderedTextLength: number;
+      horizontalOverflow: boolean;
+      fullWidthRoot: boolean;
+    }>;
   }>;
 };
 
@@ -114,6 +171,13 @@ type SourceArtifactsManifest = {
   generatedAt: string;
   componentFamiliesPath?: string;
   componentFamiliesArtifactId?: string;
+  componentFamiliesHash?: string;
+  overrideAssignmentsPath?: string;
+  overrideAssignmentsArtifactId?: string;
+  overrideAssignmentsHash?: string;
+  capabilityReportPath?: string;
+  capabilityReportArtifactId?: string;
+  capabilityReportHash?: string;
   codeFiles: Array<{
     id?: string;
     name: string;
@@ -123,10 +187,14 @@ type SourceArtifactsManifest = {
     contentHash?: string;
     contentByteLength?: number;
     artifactId: string;
+    metadataArtifactId?: string;
+    sourceArtifactId?: string;
     metadataPath: string;
     sourcePath?: string;
   }>;
 };
+
+type SourceArtifactsInput = PluginSourceSnapshot;
 
 type SourceArtifactDiff = {
   changedCodeFileArtifactIds: string[];
@@ -136,6 +204,43 @@ type SourceArtifactDiff = {
   parentComponentFamiliesArtifactId?: string;
   currentComponentFamiliesArtifactId?: string;
   componentFamiliesChanged: boolean;
+  parentOverrideAssignmentsArtifactId?: string;
+  currentOverrideAssignmentsArtifactId?: string;
+  overrideAssignmentsChanged: boolean;
+  capabilityReportChanged: boolean;
+};
+
+type SourceEvidenceSummary = {
+  status: "complete" | "partial";
+  reasons: string[];
+  warnings: string[];
+  codeFileCount: number;
+  readableCodeFileCount: number;
+  unreadableCodeFileCount: number;
+  overrideAssignmentCount: number;
+  unresolvedOverrideCount: number;
+  capabilityReportPresent: boolean;
+  codeFileApiReadable: boolean | null;
+};
+
+type ResolvedRequestArtifact = {
+  schemaVersion: 1;
+  generatedAt: string;
+  url: string | null;
+  exportMode: ExportMode;
+  selector: string | null;
+  name: string | null;
+  maxAttempts: number;
+  targetFidelity: number;
+  revisionRequest: LocalExportInput["revisionRequest"] | null;
+  pluginCapture: {
+    mode: PluginCanvasCapture["mode"];
+    capturedAt: string;
+    selectedNodeCount: number;
+    hasContext: boolean;
+    codeFileCount: number;
+  };
+  revisionId?: string;
 };
 
 type ResponsiveRecapturePlan = {
@@ -158,7 +263,7 @@ type ResponsiveRecapturePlan = {
   templates: Array<{
     templateId: string;
     templatePath: string;
-    templateKind: "static" | "cms" | "component";
+    templateKind: "static" | "cms" | "component" | "redirect" | "utility";
     routeCount: number;
     representativeRoutePaths: string[];
     memberRoutePaths: string[];
@@ -166,6 +271,55 @@ type ResponsiveRecapturePlan = {
     routesToCapture: string[];
     viewports: ViewportName[];
     reasons: string[];
+  }>;
+};
+
+type BeforeAfterMetric = {
+  label: string;
+  current: string;
+  parent: string;
+  delta: string;
+};
+
+type BeforeAfterReport = {
+  schemaVersion: 1;
+  generatedAt: string;
+  revisionId: string;
+  parentRevisionId: string | null;
+  metrics: BeforeAfterMetric[];
+};
+
+type RevisionExecutionStage =
+  | "queued"
+  | "planning"
+  | "capturing"
+  | "generating"
+  | "validating"
+  | "completed"
+  | "failed";
+
+type RevisionStatusFile = {
+  schemaVersion: 1;
+  revisionId?: string;
+  stage: RevisionExecutionStage;
+  updatedAt: string;
+  createdAt: string;
+  progress?: {
+    completed?: number;
+    total?: number;
+    routePath?: string;
+    failed?: number;
+  };
+  history: Array<{
+    stage: RevisionExecutionStage;
+    at: string;
+    progress?: {
+      completed?: number;
+      total?: number;
+      routePath?: string;
+      failed?: number;
+    };
+    detail?: string;
   }>;
 };
 
@@ -186,6 +340,9 @@ type ComparableFidelityKey =
   | "laptop"
   | "tablet"
   | "mobile";
+
+const ARTIFACT_INDEX_SCHEMA_VERSION = 2;
+const REVISION_MANIFEST_SCHEMA_VERSION = 2;
 
 export async function runLocalExport(
   input: LocalExportInput,
@@ -237,37 +394,71 @@ export async function runLocalExport(
   const attemptsDir = path.join(runDir, "attempts");
   const exportDir = path.join(runDir, "export");
   const sharedRevisionCacheRoot = resolveSharedRevisionCacheRoot(input.outDir);
+  let resolvedRevisionId: string | undefined;
 
   await mkdirp(workDir);
   await mkdirp(attemptsDir);
   await mkdirp(exportDir);
-
-  const revalidateOnlyRevision = await tryReuseParentRevisionForValidation({
+  await updateRevisionStatusFile({
     exportDir,
-    runDir,
-    sharedRevisionCacheRoot,
-    revisionRequest: input.revisionRequest,
-    targetFidelity: input.targetFidelity,
-    maxAttempts: input.maxAttempts,
+    stage: "planning",
+    detail: "Preparing revision workspace and request context.",
   });
-  if (revalidateOnlyRevision) {
-    return revalidateOnlyRevision;
-  }
+
+  try {
+    const revalidateOnlyRevision = await tryReuseParentRevisionForValidation({
+      exportDir,
+      runDir,
+      sharedRevisionCacheRoot,
+      localExportInput: input,
+      revisionRequest: input.revisionRequest,
+      targetFidelity: input.targetFidelity,
+      maxAttempts: input.maxAttempts,
+    });
+    if (revalidateOnlyRevision) {
+      return revalidateOnlyRevision;
+    }
+
+  const sourceSnapshot = buildPluginSourceSnapshot(pluginCapture);
+  const initialSourceArtifacts = await writeSourceArtifacts(exportDir, sourceSnapshot);
 
   const canCaptureFromUrl =
     typeof input.url === "string" &&
     /^https?:\/\//.test(input.url) &&
     input.url.length > 0;
-  const runtimeCapture = canCaptureFromUrl
+  const responsiveSelectiveReuse = canCaptureFromUrl
+    ? await readResponsiveSelectiveReuseContext({
+        sharedRevisionCacheRoot,
+        pluginCapture,
+        exportMode: input.exportMode,
+        revisionRequest: input.revisionRequest,
+      })
+    : null;
+    await updateRevisionStatusFile({
+      exportDir,
+      stage: "capturing",
+      detail: canCaptureFromUrl
+        ? "Capturing runtime and plugin evidence."
+        : "Building plugin-only runtime approximation.",
+    });
+
+    const runtimeCapture = canCaptureFromUrl
     ? input.exportMode === "full-site"
-      ? await captureRuntimeRoutes({
-          originUrl: input.url!,
-          routes: readFullSiteRouteManifest(pluginCapture),
-          workDir,
-          cacheDir: path.join(input.outDir, ".capture-cache"),
-          onProgress: (progress) =>
-            input.onProgress?.({ stage: "Capturing routes", ...progress }),
-        })
+      ? mergeRuntimeCaptures(
+          responsiveSelectiveReuse?.parentRuntimeCapture,
+          await captureRuntimeRoutes({
+            originUrl: input.url!,
+            routes:
+              responsiveSelectiveReuse?.routesToCapture ??
+              readFullSiteRouteManifest(pluginCapture),
+            workDir,
+            cacheDir: path.join(input.outDir, ".capture-cache"),
+            viewportNames: responsiveSelectiveReuse?.viewportNames,
+            baseCapturesByRoute: responsiveSelectiveReuse?.baseCapturesByRoute,
+            onProgress: (progress) =>
+              input.onProgress?.({ stage: "Capturing routes", ...progress }),
+          }),
+        )
       : await captureRuntime({
           url: input.url!,
           workDir,
@@ -291,6 +482,12 @@ export async function runLocalExport(
       createSimulatedPluginCapture(runtimeCapture.nodes).selectedNodes;
   }
   const sourceUrl = input.url ?? runtimeCapture.url;
+  const sourceFingerprint = createSourceFingerprint({
+    url: sourceUrl,
+    exportMode: input.exportMode,
+    selector: input.selector,
+    pluginCapture,
+  });
   const nodeMatches =
     input.exportMode === "full-site"
       ? []
@@ -308,7 +505,7 @@ export async function runLocalExport(
     compactMaterializedRouteCaptures(runtimeCapture);
   }
   const normalizedIr = createNormalizedIrArtifact(ir);
-  const currentSourceArtifactsPreview = createSourceArtifactsPreview(ir);
+  const currentSourceArtifactsPreview = createSourceArtifactsPreview(sourceSnapshot);
   const parentSourceArtifacts = await readParentSourceArtifacts(
     sharedRevisionCacheRoot,
     input.revisionRequest?.parentRevisionId,
@@ -318,15 +515,20 @@ export async function runLocalExport(
     parentSourceArtifacts,
   );
   const stableRevisionSummary = createStableRevisionSummary(ir);
-  const revisionId = createRevisionId({
+  const pluginFingerprint = createPluginFingerprint(pluginCapture, ir);
+    const revisionId = createRevisionId({
+    sourceFingerprint,
+    pluginFingerprint,
     stableRevisionSummary,
-    exportMode: ir.exportMode,
-    name: input.name ?? null,
-    selector: input.selector ?? null,
-    maxAttempts: input.maxAttempts,
-    targetFidelity: input.targetFidelity,
     revisionRequest: input.revisionRequest ?? null,
   });
+    resolvedRevisionId = revisionId;
+    await updateRevisionStatusFile({
+      exportDir,
+      revisionId,
+      stage: "generating",
+      detail: "Generating export attempts and source artifacts.",
+    });
   const revisionCacheDir = path.join(
     sharedRevisionCacheRoot,
     revisionId,
@@ -346,16 +548,33 @@ export async function runLocalExport(
     }
     const zipPath = path.join(runDir, `${ir.componentName}.zip`);
     await zipDirectory(exportDir, zipPath);
+    const responsivePlanPath = path.join(
+      exportDir,
+      "responsive-recapture-plan.json",
+    );
     return {
       exportDir,
       zipPath,
       reportPath: path.join(exportDir, "export-report.json"),
       previewPath: path.join(exportDir, "preview.html"),
+      capabilityReportPath: (await fileExists(
+        path.join(exportDir, "capability-report.json"),
+      ))
+        ? path.join(exportDir, "capability-report.json")
+        : undefined,
+      codeCompatibilityReportPath: (await fileExists(
+        path.join(exportDir, "code-compatibility-report.json"),
+      ))
+        ? path.join(exportDir, "code-compatibility-report.json")
+        : undefined,
       bestAttempt: cachedRevision.bestAttempt,
       validation: cachedRevision.validation,
       revisionManifestPath: path.join(exportDir, "revision-manifest.json"),
       invalidationPlanPath: path.join(exportDir, "invalidation-plan.json"),
       artifactIndexPath: path.join(exportDir, "artifact-index.json"),
+      responsiveRecapturePlanPath: (await fileExists(responsivePlanPath))
+        ? responsivePlanPath
+        : undefined,
       revisionCacheHit: true,
     };
   }
@@ -365,6 +584,7 @@ export async function runLocalExport(
       runDir,
       sharedRevisionCacheRoot,
       revisionId,
+      localExportInput: input,
       revisionRequest: input.revisionRequest,
       sourceArtifacts: currentSourceArtifactsPreview,
       parentSourceArtifacts,
@@ -388,11 +608,18 @@ export async function runLocalExport(
       exportTreeRootCount: ir.exportTree?.length ?? 0,
     }),
   );
-  const attempts = await runAttempts({
+  const codeCompatibilityReport = analyzeCodeFilesCompatibility(ir.codeFiles ?? []);
+  const unadaptedCodeFiles = createUnadaptedCodeFileArtifacts(
+    ir,
+    codeCompatibilityReport,
+  );
+    const attempts = await runAttempts({
     ir,
     attemptsDir,
     maxAttempts: input.maxAttempts,
     targetFidelity: input.targetFidelity,
+    codeCompatibilityReport,
+    unadaptedCodeFiles,
   });
   const bestAttempt = selectBestAttempt(attempts);
   if (
@@ -404,7 +631,13 @@ export async function runLocalExport(
       "Generated export failed validation: none of the runtime-derived nodes were found in the generated preview.",
     );
   }
-  const validation = await validateGeneratedProject(bestAttempt.projectDir);
+    await updateRevisionStatusFile({
+      exportDir,
+      revisionId,
+      stage: "validating",
+      detail: "Validating generated project output.",
+    });
+    const validation = await validateGeneratedProject(bestAttempt.projectDir);
 
   await copy(bestAttempt.projectDir, exportDir);
   const debugArtifacts = await bundleDebugArtifacts({
@@ -414,7 +647,7 @@ export async function runLocalExport(
     attempts,
     bestAttempt,
   });
-  const sourceArtifacts = await writeSourceArtifacts(exportDir, ir);
+  const sourceArtifacts = initialSourceArtifacts;
   const responsiveRecapturePlan = createResponsiveRecapturePlan(
     ir,
     input.revisionRequest,
@@ -430,6 +663,8 @@ export async function runLocalExport(
     input.revisionRequest,
     sourceArtifacts,
     responsiveRecapturePlan,
+    codeCompatibilityReport,
+    unadaptedCodeFiles,
   );
   await mkdirp(revisionCacheDir);
   await writeFile(
@@ -452,6 +687,13 @@ export async function runLocalExport(
     path.join(exportDir, "normalized-ir.json"),
     `${JSON.stringify(createNormalizedIrArtifact(ir), null, 2)}\n`,
   );
+  if (codeCompatibilityReport.fileCount > 0) {
+    await writeJsonFile(
+      path.join(exportDir, "code-compatibility-report.json"),
+      codeCompatibilityReport,
+    );
+  }
+  await writeUnadaptedCodeFileArtifacts(exportDir, ir, unadaptedCodeFiles);
   if (responsiveRecapturePlan) {
     await writeJsonFile(
       path.join(exportDir, "responsive-recapture-plan.json"),
@@ -460,6 +702,23 @@ export async function runLocalExport(
   }
   const reportPath = path.join(exportDir, "export-report.json");
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
+  const parentReport = await readParentRevisionReport(
+    sharedRevisionCacheRoot,
+    input.revisionRequest?.parentRevisionId,
+  );
+  const beforeAfterReport =
+    parentReport && input.revisionRequest?.kind === "improvement"
+      ? createBeforeAfterReport(report, parentReport, {
+          revisionId,
+          parentRevisionId: input.revisionRequest.parentRevisionId ?? null,
+        })
+      : null;
+  if (beforeAfterReport) {
+    await writeJsonFile(
+      path.join(exportDir, "before-after-report.json"),
+      beforeAfterReport,
+    );
+  }
   await writeFile(
     path.join(exportDir, "patch-history.json"),
     `${JSON.stringify(createPatchHistory(attempts), null, 2)}\n`,
@@ -484,20 +743,6 @@ export async function runLocalExport(
     );
   }
 
-  await writeFile(
-    path.join(exportDir, "revision-manifest.json"),
-    `${JSON.stringify(
-      {
-        ...createRevisionManifest(ir, attempts, bestAttempt, revisionId),
-        revisionRequest: input.revisionRequest ?? null,
-        normalizedIr,
-        sourceArtifacts,
-        responsiveRecapturePlan,
-      },
-      null,
-      2,
-    )}\n`,
-  );
   const invalidationPlan = createInvalidationPlan({
     revisionRequest: input.revisionRequest,
     sourceArtifacts,
@@ -510,29 +755,354 @@ export async function runLocalExport(
     path.join(exportDir, "invalidation-plan.json"),
     invalidationPlan,
   );
+  const parentInfo = createParentInfo(input.revisionRequest);
+  if (parentInfo) {
+    await writeJsonFile(path.join(exportDir, "parent.json"), parentInfo);
+  }
+  await writeJsonFile(
+    path.join(exportDir, "resolved-request.json"),
+    createResolvedRequestArtifact({
+      localExportInput: input,
+      pluginCapture,
+      revisionId,
+    }),
+  );
+  const revisionManifest = createRevisionManifest(
+    ir,
+    attempts,
+    bestAttempt,
+    revisionId,
+    {
+      sourceFingerprint,
+      pluginFingerprint,
+      revisionRequest: input.revisionRequest,
+      sourceEvidence: createSourceEvidenceSummary(ir, sourceArtifacts),
+      sourceArtifacts,
+      responsiveRecapturePlan,
+      validation,
+      reusedArtifactIds: invalidationPlan.reused,
+      invalidatedArtifacts: invalidationPlan.invalidated,
+      parentInfoPath: parentInfo ? "parent.json" : null,
+    },
+  );
+  await writeJsonFile(path.join(exportDir, "revision-manifest.json"), {
+    ...revisionManifest,
+    normalizedIr,
+  });
+  const preliminaryArtifactIndex = await createArtifactIndex(exportDir, sourceArtifacts, {
+    sourceFingerprint,
+    revisionId,
+  });
+  const artifactGraphHash = hashValue(
+    preliminaryArtifactIndex.entries
+      .filter((entry) => entry.id !== "manifest/revision")
+      .map((entry) => ({
+      id: entry.id,
+      hash: entry.hash,
+      dependencyHashes: entry.dependencyHashes,
+      })),
+  );
+  await updateRevisionStatusFile({
+    exportDir,
+    revisionId,
+    stage: "completed",
+    detail: "Revision completed successfully.",
+  });
+  await writeJsonFile(path.join(exportDir, "revision-manifest.json"), {
+    ...revisionManifest,
+    artifactGraphHash,
+    normalizedIr,
+  });
+  const artifactIndex = await createArtifactIndex(exportDir, sourceArtifacts, {
+    sourceFingerprint,
+    revisionId,
+  });
   await writeJsonFile(
     path.join(exportDir, "artifact-index.json"),
-    await createArtifactIndex(exportDir, sourceArtifacts),
+    artifactIndex,
   );
   await copy(exportDir, path.join(revisionCacheDir, "export"));
 
   const zipPath = path.join(runDir, `${ir.componentName}.zip`);
   await zipDirectory(exportDir, zipPath);
 
-  return {
+    return {
+      exportDir,
+      zipPath,
+      reportPath,
+      previewPath,
+      resolvedRequestPath: path.join(exportDir, "resolved-request.json"),
+      statusPath: path.join(exportDir, "status.json"),
+      capabilityReportPath: readCapabilityReport(pluginCapture)
+        ? path.join(exportDir, "capability-report.json")
+        : undefined,
+      codeCompatibilityReportPath:
+        codeCompatibilityReport.fileCount > 0
+          ? path.join(exportDir, "code-compatibility-report.json")
+          : undefined,
+      beforeAfterReportPath: beforeAfterReport
+        ? path.join(exportDir, "before-after-report.json")
+        : undefined,
+      parentInfoPath: parentInfo ? path.join(exportDir, "parent.json") : undefined,
+      bestAttempt,
+      validation,
+      revisionManifestPath: path.join(exportDir, "revision-manifest.json"),
+      invalidationPlanPath: path.join(exportDir, "invalidation-plan.json"),
+      artifactIndexPath: path.join(exportDir, "artifact-index.json"),
+      responsiveRecapturePlanPath: responsiveRecapturePlan
+        ? path.join(exportDir, "responsive-recapture-plan.json")
+        : undefined,
+      revisionCacheHit: false,
+    };
+  } catch (error) {
+    await updateRevisionStatusFile({
+      exportDir,
+      revisionId: resolvedRevisionId,
+      stage: "failed",
+      detail: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+}
+
+export async function migrateLegacyExportToRevision(input: {
+  jobId: string;
+  exportDir: string;
+  sourceUrl?: string;
+  exportMode?: ExportMode;
+  selector?: string;
+  pluginCapture?: PluginCanvasCapture;
+}) {
+  const exportDir = path.resolve(input.exportDir);
+  const outDir = path.dirname(path.dirname(exportDir));
+  const sharedRevisionCacheRoot = resolveSharedRevisionCacheRoot(outDir);
+  const report =
+    (await readJsonFile<Record<string, unknown>>(
+      path.join(exportDir, "export-report.json"),
+    )) ?? null;
+  const normalizedIr =
+    (await readJsonFile<Record<string, unknown>>(
+      path.join(exportDir, "normalized-ir.json"),
+    )) ?? null;
+  const runtimeCapture =
+    (await readJsonFile<RuntimeCapture>(
+      path.join(exportDir, "raw-runtime-capture.json"),
+    )) ?? null;
+  const pluginCapture =
+    input.pluginCapture ??
+    ((await readJsonFile<PluginCanvasCapture>(
+      path.join(exportDir, "raw-plugin-payload.json"),
+    )) as PluginCanvasCapture | null) ??
+    ({
+      mode: "simulated",
+      selectedNodes: [],
+      capturedAt: new Date().toISOString(),
+    } satisfies PluginCanvasCapture);
+
+  if (!report) {
+    throw new Error("Legacy export migration failed: export-report.json is missing.");
+  }
+  if (!normalizedIr) {
+    throw new Error("Legacy export migration failed: normalized-ir.json is missing.");
+  }
+
+  const routeTemplates = deriveLegacyRouteTemplates(normalizedIr, report);
+  const responsiveRecapturePlan = createLegacyResponsiveRecapturePlan({
+    runtimeCapture,
+    routeTemplates,
+  });
+  const sourceArtifacts = await writeLegacySourceArtifacts({
     exportDir,
-    zipPath,
-    reportPath,
-    previewPath,
-    bestAttempt,
+    normalizedIr,
+    pluginCapture,
+  });
+  const sourceFingerprint = createSourceFingerprint({
+    url: input.sourceUrl ??
+      (typeof report.sourceUrl === "string" ? report.sourceUrl : undefined),
+    exportMode:
+      input.exportMode ??
+      (typeof normalizedIr.exportMode === "string"
+        ? (normalizedIr.exportMode as ExportMode)
+        : undefined),
+    selector: input.selector,
+    pluginCapture,
+  });
+  const pluginFingerprint = createLegacyPluginFingerprint({
+    pluginCapture,
+    normalizedIr,
+    sourceArtifacts,
+  });
+  const stableRevisionSummary = createLegacyStableRevisionSummary({
+    jobId: input.jobId,
+    sourceUrl:
+      input.sourceUrl ??
+      (typeof report.sourceUrl === "string" ? report.sourceUrl : ""),
+    exportMode:
+      input.exportMode ??
+      (typeof normalizedIr.exportMode === "string"
+        ? (normalizedIr.exportMode as ExportMode)
+        : "selection"),
+    report,
+    normalizedIr,
+    routeTemplates,
+  });
+  const revisionId = createRevisionId({
+    sourceFingerprint,
+    pluginFingerprint,
+    stableRevisionSummary,
+    revisionRequest: null,
+    legacyMigration: true,
+  });
+
+  await updateRevisionStatusFile({
+    exportDir,
+    revisionId,
+    stage: "planning",
+    detail: "Registering legacy export as a revisioned artifact.",
+  });
+
+  const validation =
+    (await readJsonFile<GeneratedProjectValidation>(
+      path.join(exportDir, "generated-validation.json"),
+    )) ??
+    ((report.generatedValidation as GeneratedProjectValidation | undefined) ??
+      null);
+  if (!validation) {
+    throw new Error(
+      "Legacy export migration failed: generated validation is missing.",
+    );
+  }
+
+  const bestAttempt =
+    (await readJsonFile<ExportAttemptResult>(
+      path.join(exportDir, "best-attempt.json"),
+    )) ??
+    createLegacyBestAttempt(report);
+
+  await writeJsonFile(path.join(exportDir, "best-attempt.json"), bestAttempt);
+  await writeJsonFile(
+    path.join(exportDir, "generated-validation.json"),
     validation,
+  );
+  if (responsiveRecapturePlan) {
+    await writeJsonFile(
+      path.join(exportDir, "responsive-recapture-plan.json"),
+      responsiveRecapturePlan,
+    );
+  }
+
+  const invalidationPlan = createInvalidationPlan({
+    sourceArtifacts,
+    codeFileCount: Array.isArray(normalizedIr.codeFiles)
+      ? normalizedIr.codeFiles.length
+      : undefined,
+    routeTemplateCount: routeTemplates.length,
+    componentFamilyCount: Array.isArray(normalizedIr.componentFamilies)
+      ? normalizedIr.componentFamilies.length
+      : undefined,
+  });
+
+  const revisionManifest: ExportRevisionRecord = {
+    revisionId,
+    schemaVersion: REVISION_MANIFEST_SCHEMA_VERSION,
+    sourceFingerprint,
+    pluginFingerprint,
+    status: "completed",
+    parentRevisionId: null,
+    revisionRequest: null,
+    summary: stableRevisionSummary,
+    sourceArtifacts: sourceArtifacts as Record<string, unknown>,
+    responsiveRecapturePlan:
+      (responsiveRecapturePlan as Record<string, unknown> | null) ?? null,
+    generatedValidation: validation as Record<string, unknown>,
+    reusedArtifactIds: [],
+    invalidatedArtifacts: invalidationPlan.invalidated,
+    parentInfoPath: null,
+    createdAt:
+      typeof report.createdAt === "string"
+        ? report.createdAt
+        : new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  const nextReport: Record<string, unknown> = {
+    ...report,
+    revisionId,
+    revisionCacheHit: false,
+    revisionRequest: null,
+    sourceArtifacts,
+    routeTemplateCount: routeTemplates.length,
+    routeTemplates,
+    componentFamilyCount: Array.isArray(normalizedIr.componentFamilies)
+      ? normalizedIr.componentFamilies.length
+      : 0,
+    responsiveRecapturePlan:
+      (responsiveRecapturePlan as Record<string, unknown> | null) ?? null,
+    generatedValidation: validation,
+    migrationNotes: {
+      legacyResponsiveViewportInvalid:
+        responsiveRecapturePlan?.migration?.legacyResponsiveViewportInvalid ??
+        false,
+      legacyObservedViewportWidths:
+        responsiveRecapturePlan?.migration?.observedViewportWidths ?? [],
+    },
+  };
+
+  await writeJsonFile(path.join(exportDir, "export-report.json"), nextReport);
+  await writeJsonFile(
+    path.join(exportDir, "invalidation-plan.json"),
+    invalidationPlan,
+  );
+  await writeJsonFile(path.join(exportDir, "revision-manifest.json"), {
+    ...revisionManifest,
+    normalizedIr: normalizedIr,
+  });
+  const artifactIndex = await createArtifactIndex(exportDir, sourceArtifacts, {
+    sourceFingerprint,
+    revisionId,
+  });
+  const artifactGraphHash = hashValue(
+    artifactIndex.entries.map((entry) => ({
+      id: entry.id,
+      hash: entry.hash,
+      dependencyHashes: entry.dependencyHashes,
+    })),
+  );
+  await writeJsonFile(path.join(exportDir, "revision-manifest.json"), {
+    ...revisionManifest,
+    artifactGraphHash,
+    normalizedIr,
+  });
+  await writeJsonFile(
+    path.join(exportDir, "artifact-index.json"),
+    artifactIndex,
+  );
+
+  const revisionCacheDir = path.join(sharedRevisionCacheRoot, revisionId);
+  await mkdirp(revisionCacheDir);
+  await copy(exportDir, path.join(revisionCacheDir, "export"));
+  await updateRevisionStatusFile({
+    exportDir,
+    revisionId,
+    stage: "completed",
+    detail: "Legacy export registered successfully.",
+  });
+
+  return {
+    revisionId,
+    sharedRevisionCacheRoot,
+    revisionCacheDir,
+    statusPath: path.join(exportDir, "status.json"),
     revisionManifestPath: path.join(exportDir, "revision-manifest.json"),
     invalidationPlanPath: path.join(exportDir, "invalidation-plan.json"),
     artifactIndexPath: path.join(exportDir, "artifact-index.json"),
     responsiveRecapturePlanPath: responsiveRecapturePlan
       ? path.join(exportDir, "responsive-recapture-plan.json")
       : undefined,
-    revisionCacheHit: false,
+    capabilityReportPath: sourceArtifacts.capabilityReportPath
+      ? path.join(exportDir, sourceArtifacts.capabilityReportPath)
+      : undefined,
+    sourceArtifactsPath: path.join(exportDir, "source-artifacts", "manifest.json"),
   };
 }
 
@@ -604,6 +1174,356 @@ export function createNormalizedIrArtifact(ir: ExportIR) {
   };
 }
 
+function createResolvedRequestArtifact(input: {
+  localExportInput: LocalExportInput;
+  pluginCapture: PluginCanvasCapture;
+  revisionId?: string;
+}): ResolvedRequestArtifact {
+  return {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    url: input.localExportInput.url ?? null,
+    exportMode: input.localExportInput.exportMode ?? "selection",
+    selector: input.localExportInput.selector ?? null,
+    name: input.localExportInput.name ?? null,
+    maxAttempts: input.localExportInput.maxAttempts,
+    targetFidelity: input.localExportInput.targetFidelity,
+    revisionRequest: input.localExportInput.revisionRequest ?? null,
+    pluginCapture: {
+      mode: input.pluginCapture.mode,
+      capturedAt: input.pluginCapture.capturedAt,
+      selectedNodeCount: input.pluginCapture.selectedNodes.length,
+      hasContext: Boolean(input.pluginCapture.context),
+      codeFileCount: Array.isArray(input.pluginCapture.context?.codeFiles)
+        ? input.pluginCapture.context.codeFiles.length
+        : 0,
+    },
+    revisionId: input.revisionId,
+  };
+}
+
+function deriveLegacyRouteTemplates(
+  normalizedIr: Record<string, unknown>,
+  report: Record<string, unknown>,
+): Array<{
+  templateId: string;
+  templatePath: string;
+  templateKind: "static" | "cms" | "component" | "redirect" | "utility";
+  representativeRoutePath: string;
+  routePaths: string[];
+  routeCount: number;
+  sourceTextLength: number;
+  nodeCount: number;
+}> {
+  if (Array.isArray(report.routeTemplates) && report.routeTemplates.length > 0) {
+    return report.routeTemplates
+      .map((entry) => {
+        const record =
+          entry && typeof entry === "object"
+            ? (entry as Record<string, unknown>)
+            : {};
+        const templateKind:
+          | "static"
+          | "cms"
+          | "component"
+          | "redirect"
+          | "utility" =
+          record.templateKind === "cms" ||
+          record.templateKind === "component" ||
+          record.templateKind === "static" ||
+          record.templateKind === "redirect" ||
+          record.templateKind === "utility"
+            ? record.templateKind
+            : "static";
+        return {
+          templateId: String(
+            record.templateId ?? record.representativeRoutePath ?? "template",
+          ),
+          templatePath: String(
+            record.templatePath ??
+              record.representativeRoutePath ??
+              record.templateId ??
+              "/",
+          ),
+          templateKind,
+          representativeRoutePath: String(
+            record.representativeRoutePath ??
+              record.templatePath ??
+              record.templateId ??
+              "/",
+          ),
+          routePaths: Array.isArray(record.routePaths)
+            ? record.routePaths.filter(
+                (value): value is string => typeof value === "string",
+              )
+            : [String(record.representativeRoutePath ?? "/")],
+          routeCount:
+            typeof record.routeCount === "number" ? record.routeCount : 1,
+          sourceTextLength:
+            typeof record.sourceTextLength === "number"
+              ? record.sourceTextLength
+              : 0,
+          nodeCount:
+            typeof record.nodeCount === "number" ? record.nodeCount : 0,
+        };
+      })
+      .filter((entry) => entry.representativeRoutePath);
+  }
+
+  const sitePages = Array.isArray(normalizedIr.sitePages)
+    ? (normalizedIr.sitePages as Array<Record<string, unknown>>)
+    : [];
+  const grouped = new Map<
+    string,
+    {
+      templateId: string;
+      templatePath: string;
+      templateKind: "static" | "cms" | "component" | "redirect" | "utility";
+      representativeRoutePath: string;
+      routePaths: string[];
+      routeCount: number;
+      sourceTextLength: number;
+      nodeCount: number;
+    }
+  >();
+
+  for (const page of sitePages) {
+    const routePath =
+      typeof page.routePath === "string" && page.routePath.length > 0
+        ? page.routePath
+        : "/";
+    const templateId =
+      typeof page.templateId === "string" && page.templateId.length > 0
+        ? page.templateId
+        : routePath;
+    const templatePath =
+      typeof page.templatePath === "string" && page.templatePath.length > 0
+        ? page.templatePath
+        : routePath;
+    const templateKind =
+      page.templateKind === "cms" ||
+      page.templateKind === "component" ||
+      page.templateKind === "static" ||
+      page.templateKind === "redirect" ||
+      page.templateKind === "utility"
+        ? page.templateKind
+        : "static";
+    const key = `${templateKind}:${templateId}:${templatePath}`;
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.routePaths.push(routePath);
+      existing.routeCount += 1;
+      continue;
+    }
+    grouped.set(key, {
+      templateId,
+      templatePath,
+      templateKind,
+      representativeRoutePath: routePath,
+      routePaths: [routePath],
+      routeCount: 1,
+      sourceTextLength:
+        typeof page.sourceTextLength === "number" ? page.sourceTextLength : 0,
+      nodeCount: typeof page.nodeCount === "number" ? page.nodeCount : 0,
+    });
+  }
+
+  return Array.from(grouped.values()).sort((left, right) =>
+    left.representativeRoutePath.localeCompare(right.representativeRoutePath),
+  );
+}
+
+function createLegacyResponsiveRecapturePlan(input: {
+  runtimeCapture: RuntimeCapture | null;
+  routeTemplates: Array<{
+    templateId: string;
+    templatePath: string;
+    templateKind: "static" | "cms" | "component" | "redirect" | "utility";
+    representativeRoutePath: string;
+    routePaths: string[];
+    routeCount: number;
+  }>;
+}) {
+  if (input.routeTemplates.length === 0) return null;
+
+  const breakpointsCaptured = unique(
+    input.runtimeCapture?.captureDiagnostics?.breakpointsCaptured?.length
+      ? input.runtimeCapture.captureDiagnostics.breakpointsCaptured
+      : (Object.keys(input.runtimeCapture?.viewports ?? {}) as ViewportName[]),
+  );
+  const observedViewportWidths = breakpointsCaptured
+    .map((viewport) => {
+      const view = input.runtimeCapture?.viewports?.[viewport];
+      return view?.observed?.innerWidth ?? view?.requested?.width ?? view?.width;
+    })
+    .filter((value): value is number => typeof value === "number" && value > 0);
+  const uniqueObservedWidths = new Set(observedViewportWidths);
+  const legacyResponsiveViewportInvalid =
+    observedViewportWidths.length === 0 ||
+    uniqueObservedWidths.size < Math.min(2, breakpointsCaptured.length);
+  const targetViewports = legacyResponsiveViewportInvalid
+    ? (["laptop", "tablet", "mobile"] satisfies ViewportName[])
+    : breakpointsCaptured.filter(
+        (viewport): viewport is ViewportName => viewport !== "desktop",
+      );
+
+  return {
+    schemaVersion: 1,
+    captureSchemaVersion: "runtime-capture-v2",
+    generatedAt: new Date().toISOString(),
+    kind: "initial" as const,
+    requestedFocus: null,
+    parentRevisionId: null,
+    breakpointsCaptured:
+      breakpointsCaptured.length > 0
+        ? breakpointsCaptured
+        : (["desktop", "laptop", "tablet", "mobile"] satisfies ViewportName[]),
+    targetViewports:
+      targetViewports.length > 0
+        ? targetViewports
+        : (["laptop", "tablet", "mobile"] satisfies ViewportName[]),
+    reuseDesktopCapture: !legacyResponsiveViewportInvalid,
+    templateCount: input.routeTemplates.length,
+    routeCount: input.routeTemplates.reduce(
+      (total, template) => total + template.routeCount,
+      0,
+    ),
+    templates: input.routeTemplates.map((template) => ({
+      templateId: template.templateId,
+      templatePath: template.templatePath,
+      templateKind: template.templateKind,
+      routeCount: template.routeCount,
+      representativeRoutePaths:
+        template.templateKind === "cms"
+          ? [template.representativeRoutePath]
+          : template.routePaths,
+      memberRoutePaths: template.routePaths,
+      responsiveCapturePolicy:
+        template.templateKind === "cms"
+          ? "representative-viewports"
+          : "all-viewports",
+      routesToCapture:
+        legacyResponsiveViewportInvalid
+          ? template.templateKind === "cms"
+            ? [template.representativeRoutePath]
+            : template.routePaths
+          : [],
+      viewports:
+        targetViewports.length > 0
+          ? targetViewports
+          : (["laptop", "tablet", "mobile"] satisfies ViewportName[]),
+      reasons: legacyResponsiveViewportInvalid
+        ? [
+            "legacy-invalid-responsive-capture",
+            "observed-widths-missing-or-duplicated",
+          ]
+        : ["legacy-responsive-capture-valid"],
+    })),
+    migration: {
+      legacyResponsiveViewportInvalid,
+      observedViewportWidths,
+    },
+  };
+}
+
+function createResponsiveRecapturePlan(
+  ir: ExportIR,
+  revisionRequest?: LocalExportInput["revisionRequest"],
+): ResponsiveRecapturePlan | null {
+  if (
+    ir.exportMode !== "full-site" &&
+    (ir.routeTemplates?.length ?? 0) === 0 &&
+    (ir.sitePages?.length ?? 0) <= 1
+  ) {
+    return null;
+  }
+
+  const breakpointsCaptured = unique(
+    ir.runtimeCapture.captureDiagnostics?.breakpointsCaptured?.length
+      ? ir.runtimeCapture.captureDiagnostics.breakpointsCaptured
+      : (["desktop", "laptop", "tablet", "mobile"] satisfies ViewportName[]),
+  );
+  const targetViewports = breakpointsCaptured.filter(
+    (viewport): viewport is ViewportName => viewport !== "desktop",
+  );
+  const routeTemplates =
+    (ir.routeTemplates?.length ?? 0) > 0
+      ? ir.routeTemplates!
+      : (ir.sitePages ?? []).map((page) => ({
+          templateId: page.templateId ?? page.routePath,
+          templatePath: page.templatePath ?? page.routePath,
+          templateKind: page.templateKind ?? "static",
+          representativeRoutePath: page.routePath,
+          routePaths: [page.routePath],
+          routeCount: 1,
+          sourceTextLength: page.sourceTextLength ?? 0,
+          nodeCount: page.nodes.length,
+        }));
+
+  return {
+    schemaVersion: 1,
+    captureSchemaVersion: "runtime-capture-v2",
+    generatedAt: new Date().toISOString(),
+    kind: revisionRequest?.kind === "improvement" ? "improvement" : "initial",
+    requestedFocus: revisionRequest?.requestedFocus ?? null,
+    parentRevisionId: revisionRequest?.parentRevisionId ?? null,
+    breakpointsCaptured,
+    targetViewports:
+      targetViewports.length > 0
+        ? targetViewports
+        : (["laptop", "tablet", "mobile"] satisfies ViewportName[]),
+    reuseDesktopCapture: breakpointsCaptured.includes("desktop"),
+    templateCount: routeTemplates.length,
+    routeCount: routeTemplates.reduce(
+      (total, template) => total + template.routeCount,
+      0,
+    ),
+    templates: routeTemplates.map((template) => {
+      const memberRoutePaths = unique(
+        template.routePaths?.length
+          ? template.routePaths
+          : [template.representativeRoutePath],
+      );
+      const responsiveCapturePolicy =
+        template.templateKind === "cms"
+          ? "representative-viewports"
+          : "all-viewports";
+      const representativeRoutePaths =
+        template.templateKind === "cms"
+          ? [template.representativeRoutePath]
+          : memberRoutePaths;
+      return {
+        templateId: template.templateId,
+        templatePath: template.templatePath,
+        templateKind: template.templateKind,
+        routeCount: template.routeCount,
+        representativeRoutePaths,
+        memberRoutePaths,
+        responsiveCapturePolicy,
+        routesToCapture:
+          responsiveCapturePolicy === "representative-viewports"
+            ? [template.representativeRoutePath]
+            : memberRoutePaths,
+        viewports:
+          targetViewports.length > 0
+            ? targetViewports
+            : (["laptop", "tablet", "mobile"] satisfies ViewportName[]),
+        reasons:
+          responsiveCapturePolicy === "representative-viewports"
+            ? [
+                "cms-template-shared-layout",
+                "reuse-member-route-data",
+                "capture-representative-breakpoints",
+              ]
+            : [
+                "static-or-component-layout",
+                "capture-all-template-routes",
+              ],
+      };
+    }),
+  };
+}
+
 function countExportTreeNodes(nodes: ExportTreeNode[]): number {
   return nodes.reduce(
     (total, node) => total + 1 + countExportTreeNodes(node.children ?? []),
@@ -618,7 +1538,9 @@ export function readFullSiteRouteManifest(pluginCapture?: PluginCanvasCapture) {
     collectionId?: string;
     templateId?: string;
     templatePath?: string;
-    templateKind?: "static" | "cms" | "component";
+    templateKind?: "static" | "cms" | "component" | "redirect" | "utility";
+    redirectTo?: string;
+    redirectStatus?: number;
   };
   const pages = Array.isArray(pluginCapture?.context?.sitePages)
     ? pluginCapture.context.sitePages
@@ -657,6 +1579,30 @@ export function readFullSiteRouteManifest(pluginCapture?: PluginCanvasCapture) {
         metadata.name,
         metadata.title,
       ].find((value) => typeof value === "string" && value.trim());
+      const redirectTo =
+        typeof record.redirectTo === "string"
+          ? record.redirectTo
+          : typeof record.redirectUrl === "string"
+            ? record.redirectUrl
+            : typeof record.targetUrl === "string"
+              ? record.targetUrl
+              : typeof record.externalUrl === "string"
+                ? record.externalUrl
+                : typeof metadata.redirectTo === "string"
+                  ? metadata.redirectTo
+                  : typeof metadata.redirectUrl === "string"
+                    ? metadata.redirectUrl
+                    : undefined;
+      const redirectStatus =
+        typeof record.redirectStatus === "number"
+          ? record.redirectStatus
+          : typeof record.statusCode === "number"
+            ? record.statusCode
+            : typeof metadata.redirectStatus === "number"
+              ? metadata.redirectStatus
+              : typeof metadata.statusCode === "number"
+                ? metadata.statusCode
+                : undefined;
       return {
         path: typeof pathValue === "string" ? pathValue : "",
         title: typeof titleValue === "string" ? titleValue : undefined,
@@ -672,6 +1618,8 @@ export function readFullSiteRouteManifest(pluginCapture?: PluginCanvasCapture) {
             : typeof metadata.path === "string" && metadata.path.trim()
               ? metadata.path.trim()
               : undefined,
+        ...(redirectTo ? { redirectTo } : {}),
+        ...(typeof redirectStatus === "number" ? { redirectStatus } : {}),
       };
     })
     .filter(
@@ -682,11 +1630,16 @@ export function readFullSiteRouteManifest(pluginCapture?: PluginCanvasCapture) {
     )
     .flatMap((route): RouteManifestEntry[] => {
       if (!route.path.includes(":slug")) {
+        const redirectKind = route.redirectTo
+          ? /^https?:\/\//i.test(route.redirectTo)
+            ? "utility"
+            : "redirect"
+          : "static";
         return [
           {
             ...route,
             templateId: route.templatePath ?? route.path,
-            templateKind: "static",
+            templateKind: redirectKind,
             templatePath: route.templatePath ?? route.path,
           },
         ];
@@ -745,6 +1698,121 @@ export function readFullSiteRouteManifest(pluginCapture?: PluginCanvasCapture) {
           ];
     });
   return routes.length > 0 ? routes : [{ path: "/", title: "Home" }];
+}
+
+async function readResponsiveSelectiveReuseContext(input: {
+  sharedRevisionCacheRoot: string;
+  pluginCapture: PluginCanvasCapture;
+  exportMode: ExportMode;
+  revisionRequest?: LocalExportInput["revisionRequest"];
+}) {
+  if (
+    input.exportMode !== "full-site" ||
+    input.revisionRequest?.kind !== "improvement" ||
+    (input.revisionRequest.requestedFocus !== "responsiveness" &&
+      input.revisionRequest.requestedFocus !== "both") ||
+    !input.revisionRequest.parentRevisionId
+  ) {
+    return null;
+  }
+
+  const parentRuntimeCapture = await readParentRuntimeCapture(
+    input.sharedRevisionCacheRoot,
+    input.revisionRequest.parentRevisionId,
+  );
+  if (!parentRuntimeCapture?.routeCaptures?.length) {
+    return null;
+  }
+
+  const routes = readFullSiteRouteManifest(input.pluginCapture);
+  const groups = new Map<
+    string,
+    Array<{
+      path: string;
+      title?: string;
+      collectionId?: string;
+      templateId?: string;
+      templatePath?: string;
+      templateKind?: "static" | "cms" | "component" | "redirect" | "utility";
+    }>
+  >();
+  for (const route of routes) {
+    const key = route.templateId ?? route.templatePath ?? route.path;
+    groups.set(key, [...(groups.get(key) ?? []), route]);
+  }
+
+  const routesToCapture = Array.from(groups.values()).flatMap((group) => {
+    const templateKind = group[0]?.templateKind ?? "static";
+    return templateKind === "cms" ? group.slice(0, 1) : group;
+  });
+  const baseCapturesByRoute = Object.fromEntries(
+    (parentRuntimeCapture.routeCaptures ?? []).map((capture) => [
+      capture.routePath,
+      capture,
+    ]),
+  ) as Record<string, RuntimeRouteCapture | undefined>;
+
+  return {
+    parentRuntimeCapture,
+    routesToCapture,
+    viewportNames: ["laptop", "tablet", "mobile"] as ViewportName[],
+    baseCapturesByRoute,
+  };
+}
+
+async function readParentRuntimeCapture(
+  sharedRevisionCacheRoot: string,
+  parentRevisionId: string,
+) {
+  return readJsonFile<RuntimeCapture>(
+    path.join(
+      sharedRevisionCacheRoot,
+      parentRevisionId,
+      "export",
+      "raw-runtime-capture.json",
+    ),
+  );
+}
+
+function mergeRuntimeCaptures(
+  parentRuntimeCapture: RuntimeCapture | null | undefined,
+  freshRuntimeCapture: RuntimeCapture,
+) {
+  if (!parentRuntimeCapture?.routeCaptures?.length) {
+    return freshRuntimeCapture;
+  }
+
+  const freshByRoute = new Map(
+    (freshRuntimeCapture.routeCaptures ?? []).map((capture) => [
+      capture.routePath,
+      capture,
+    ]),
+  );
+  const mergedRouteCaptures = (parentRuntimeCapture.routeCaptures ?? []).map(
+    (capture) => freshByRoute.get(capture.routePath) ?? capture,
+  );
+  for (const capture of freshRuntimeCapture.routeCaptures ?? []) {
+    if (!mergedRouteCaptures.some((entry) => entry.routePath === capture.routePath)) {
+      mergedRouteCaptures.push(capture);
+    }
+  }
+
+  const primary =
+    mergedRouteCaptures.find((capture) => capture.routePath === "/") ??
+    mergedRouteCaptures[0] ??
+    freshRuntimeCapture;
+
+  return {
+    ...freshRuntimeCapture,
+    ...primary,
+    routeCaptures: mergedRouteCaptures,
+    stylesheetUrls: unique([
+      ...(parentRuntimeCapture.stylesheetUrls ?? []),
+      ...(freshRuntimeCapture.stylesheetUrls ?? []),
+    ]),
+    framerStyleCss:
+      freshRuntimeCapture.framerStyleCss || parentRuntimeCapture.framerStyleCss,
+  };
 }
 
 export async function validateGeneratedProject(
@@ -839,6 +1907,26 @@ export async function validateGeneratedProject(
         consoleErrorCount: runtime.consoleErrors.length,
         pageErrorCount: runtime.pageErrors.length,
         routeCount: runtime.routes.length,
+        codeFileExecutionCount: runtime.codeFileExecutions.length,
+        failedCodeFileExecutionCount: runtime.codeFileExecutions.filter(
+          (execution) => execution.status === "failed",
+        ).length,
+        interactionContractCount: runtime.interactionContracts.length,
+        failedInteractionContractCount: runtime.interactionContracts.filter(
+          (contract) => contract.status === "failed",
+        ).length,
+        responsiveViewportCheckCount: runtime.routes.reduce(
+          (total, route) => total + route.viewportChecks.length,
+          0,
+        ),
+        responsiveViewportFailureCount: runtime.routes.reduce(
+          (total, route) =>
+            total +
+            route.viewportChecks.filter(
+              (check) => check.horizontalOverflow || !check.fullWidthRoot,
+            ).length,
+          0,
+        ),
         failedRouteCount: runtime.routes.filter(
           (route) =>
             route.rootChildCount === 0 || route.renderedElementCount === 0,
@@ -853,6 +1941,24 @@ export async function validateGeneratedProject(
     if (runtime.pageErrors.length > 0) {
       throw new Error(
         `Generated export crashed at runtime.\n${runtime.pageErrors.join("\n")}`,
+      );
+    }
+    const failedCodeFileExecution = runtime.codeFileExecutions.find(
+      (execution) => execution.status === "failed",
+    );
+    if (failedCodeFileExecution) {
+      throw new Error(
+        `Generated export executable code-file contract failed for ${failedCodeFileExecution.fileName} on route ${failedCodeFileExecution.routePath}. ` +
+          `${failedCodeFileExecution.detail ?? "Executable preview did not mount as expected."}`,
+      );
+    }
+    const failedInteractionContract = runtime.interactionContracts.find(
+      (contract) => contract.status === "failed",
+    );
+    if (failedInteractionContract) {
+      throw new Error(
+        `Generated export interaction contract failed for family ${failedInteractionContract.familyId} on route ${failedInteractionContract.routePath}. ` +
+          `${failedInteractionContract.detail ?? "Interaction state did not update as expected."}`,
       );
     }
     const emptyRoute = runtime.routes.find(
@@ -875,6 +1981,23 @@ export async function validateGeneratedProject(
           `screenshotColors=${emptyRoute.screenshotColorCount}).`,
       );
     }
+    const failedResponsiveCheck = runtime.routes
+      .flatMap((route) =>
+        route.viewportChecks.map((check) => ({ routePath: route.path, check })),
+      )
+      .find(
+        ({ check }) => check.horizontalOverflow || !check.fullWidthRoot,
+      );
+    if (failedResponsiveCheck) {
+      throw new Error(
+        `Generated export responsive validation failed for route ${failedResponsiveCheck.routePath} at ${failedResponsiveCheck.check.viewport}. ` +
+          `horizontalOverflow=${failedResponsiveCheck.check.horizontalOverflow}, ` +
+          `fullWidthRoot=${failedResponsiveCheck.check.fullWidthRoot}, ` +
+          `innerWidth=${failedResponsiveCheck.check.innerWidth}, ` +
+          `rootWidth=${failedResponsiveCheck.check.rootWidth}, ` +
+          `scrollWidth=${failedResponsiveCheck.check.scrollWidth}.`,
+      );
+    }
 
     return {
       status: "passed",
@@ -884,6 +2007,8 @@ export async function validateGeneratedProject(
       renderedTextLength: runtime.renderedTextLength,
       consoleErrors: runtime.consoleErrors,
       pageErrors: runtime.pageErrors,
+      codeFileExecutions: runtime.codeFileExecutions,
+      interactionContracts: runtime.interactionContracts,
       routes: runtime.routes,
     };
   } finally {
@@ -1037,7 +2162,16 @@ async function inspectBuiltProject(
     sourceTextLength: number;
     sourceNodeCount: number;
   }>,
-) {
+): Promise<{
+  rootChildCount: number;
+  renderedElementCount: number;
+  renderedTextLength: number;
+  consoleErrors: string[];
+  pageErrors: string[];
+  codeFileExecutions: GeneratedProjectValidation["codeFileExecutions"];
+  interactionContracts: GeneratedProjectValidation["interactionContracts"];
+  routes: GeneratedProjectValidation["routes"];
+}> {
   const server = createServer(async (request, response) => {
     try {
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -1078,8 +2212,21 @@ async function inspectBuiltProject(
   });
 
   try {
-    const routes = [];
+    const routes: GeneratedProjectValidation["routes"] = [];
     let rootChildCount = 0;
+    const codeFileExecutions: GeneratedProjectValidation["codeFileExecutions"] =
+      [];
+    const interactionContracts: GeneratedProjectValidation["interactionContracts"] =
+      [];
+    const responsiveValidationViewports: Record<
+      ViewportName,
+      { width: number; height: number }
+    > = {
+      desktop: { width: 1440, height: 900 },
+      laptop: { width: 1280, height: 900 },
+      tablet: { width: 768, height: 1024 },
+      mobile: { width: 390, height: 844 },
+    };
     for (const route of routeManifest) {
       await page.goto(`http://127.0.0.1:${address.port}${route.path}`, {
         waitUntil: "domcontentloaded",
@@ -1112,17 +2259,87 @@ async function inspectBuiltProject(
               );
             })
           : [];
+        const rootWidth = root?.getBoundingClientRect().width ?? 0;
+        const innerWidth = window.innerWidth;
+        const scrollWidth = document.documentElement.scrollWidth;
+        const bodyScrollWidth = document.body?.scrollWidth ?? 0;
+        const horizontalOverflow =
+          scrollWidth > innerWidth + 1 || bodyScrollWidth > innerWidth + 1;
         return {
           rootChildCount: root?.children.length ?? 0,
           renderedElementCount: renderedElements.length,
           renderedTextLength: root?.textContent?.trim().length ?? 0,
+          rootWidth,
+          innerWidth,
+          scrollWidth,
+          bodyScrollWidth,
+          horizontalOverflow,
+          fullWidthRoot: rootWidth >= innerWidth - 4,
         };
       });
       const screenshotColorCount = countSampledScreenshotColors(
         await page.screenshot({ animations: "disabled" }),
       );
+      const viewportChecks: GeneratedProjectValidation["routes"][number]["viewportChecks"] =
+        [];
+      for (const [viewportName, viewport] of Object.entries(
+        responsiveValidationViewports,
+      ) as Array<[ViewportName, { width: number; height: number }]>) {
+        await page.setViewportSize(viewport);
+        await page.waitForTimeout(100);
+        const viewportState = await page.evaluate(() => {
+          const root = document.getElementById("root");
+          const renderedElements = root
+            ? Array.from(root.querySelectorAll("*")).filter((element) => {
+                const style = getComputedStyle(element);
+                const rect = element.getBoundingClientRect();
+                return (
+                  style.display !== "none" &&
+                  style.visibility !== "hidden" &&
+                  Number(style.opacity) > 0 &&
+                  rect.width > 0 &&
+                  rect.height > 0
+                );
+              })
+            : [];
+          const rootWidth = root?.getBoundingClientRect().width ?? 0;
+          const innerWidth = window.innerWidth;
+          const scrollWidth = document.documentElement.scrollWidth;
+          const bodyScrollWidth = document.body?.scrollWidth ?? 0;
+          const horizontalOverflow =
+            scrollWidth > innerWidth + 1 || bodyScrollWidth > innerWidth + 1;
+          return {
+            rootChildCount: root?.children.length ?? 0,
+            renderedElementCount: renderedElements.length,
+            renderedTextLength: root?.textContent?.trim().length ?? 0,
+            rootWidth,
+            innerWidth,
+            scrollWidth,
+            bodyScrollWidth,
+            horizontalOverflow,
+            fullWidthRoot: rootWidth >= innerWidth - 4,
+          };
+        });
+        viewportChecks.push({
+          viewport: viewportName,
+          innerWidth: viewportState.innerWidth,
+          rootWidth: viewportState.rootWidth,
+          scrollWidth: viewportState.scrollWidth,
+          bodyScrollWidth: viewportState.bodyScrollWidth,
+          renderedElementCount: viewportState.renderedElementCount,
+          renderedTextLength: viewportState.renderedTextLength,
+          horizontalOverflow: viewportState.horizontalOverflow,
+          fullWidthRoot: viewportState.fullWidthRoot,
+        });
+      }
+      codeFileExecutions.push(
+        ...(await inspectExecutableCodeFilePreviews(page, route.path)),
+      );
+      interactionContracts.push(
+        ...(await inspectComponentFamilyInteractions(page, route.path)),
+      );
       rootChildCount = Math.max(rootChildCount, inspected.rootChildCount);
-      routes.push({ ...route, ...inspected, screenshotColorCount });
+      routes.push({ ...route, ...inspected, screenshotColorCount, viewportChecks });
     }
     return {
       rootChildCount,
@@ -1136,12 +2353,266 @@ async function inspectBuiltProject(
       ),
       consoleErrors,
       pageErrors,
+      codeFileExecutions,
+      interactionContracts,
       routes,
     };
   } finally {
     await browser.close();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+}
+
+async function inspectComponentFamilyInteractions(
+  page: Page,
+  routePath: string,
+): Promise<GeneratedProjectValidation["interactionContracts"]> {
+  const routeMountedFamilies = await page
+    .locator('[data-framer-component-family-placement="route"]')
+    .all();
+  const families =
+    routeMountedFamilies.length > 0
+      ? routeMountedFamilies
+      : await page.locator("[data-framer-component-family]").all();
+  const results: GeneratedProjectValidation["interactionContracts"] = [];
+
+  for (const family of families) {
+    const familyId = (await family.getAttribute("data-framer-component-family")) ?? "";
+    const familyName =
+      (await family.getAttribute("data-framer-component-family-name")) ?? undefined;
+    const currentVariant = family.locator("[data-framer-current-variant]").first();
+    const initialVariantId =
+      (await currentVariant.getAttribute("data-framer-current-variant")) ?? undefined;
+    const variantButtons = family.locator("[data-framer-variant-button]");
+    const buttonCount = await variantButtons.count();
+
+    if (!initialVariantId || buttonCount === 0) {
+      results.push({
+        routePath,
+        familyId,
+        familyName,
+        status: "failed",
+        initialVariantId,
+        detail: "Missing initial variant marker or variant buttons.",
+      });
+      continue;
+    }
+
+    const targetButtonIndex = await findAlternateVariantButtonIndex(
+      variantButtons,
+      initialVariantId,
+    );
+    if (targetButtonIndex < 0) {
+      results.push({
+        routePath,
+        familyId,
+        familyName,
+        status: "failed",
+        initialVariantId,
+        detail: "No alternate variant button was available.",
+      });
+      continue;
+    }
+
+    const clickButton = variantButtons.nth(targetButtonIndex);
+    const clickVariantId =
+      (await clickButton.getAttribute("data-framer-variant-button")) ?? undefined;
+    await clickButton.click();
+    await page.waitForTimeout(50);
+    const variantAfterClick =
+      (await currentVariant.getAttribute("data-framer-current-variant")) ?? undefined;
+
+    if (!clickVariantId || variantAfterClick !== clickVariantId) {
+      results.push({
+        routePath,
+        familyId,
+        familyName,
+        status: "failed",
+        initialVariantId,
+        clickVariantId,
+        detail:
+          "Pointer activation did not move the family into the selected variant state.",
+      });
+      continue;
+    }
+
+    await variantButtons.nth(0).focus();
+    const keyboardTargetIndex = await findAlternateVariantButtonIndex(
+      variantButtons,
+      variantAfterClick,
+    );
+    if (keyboardTargetIndex < 0) {
+      results.push({
+        routePath,
+        familyId,
+        familyName,
+        status: "failed",
+        initialVariantId,
+        clickVariantId,
+        detail: "No alternate keyboard target variant was available after click validation.",
+      });
+      continue;
+    }
+
+    const keyboardButton = variantButtons.nth(keyboardTargetIndex);
+    const keyboardVariantId =
+      (await keyboardButton.getAttribute("data-framer-variant-button")) ?? undefined;
+    await keyboardButton.focus();
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(50);
+    const variantAfterKeyboard =
+      (await currentVariant.getAttribute("data-framer-current-variant")) ?? undefined;
+
+    if (!keyboardVariantId || variantAfterKeyboard !== keyboardVariantId) {
+      results.push({
+        routePath,
+        familyId,
+        familyName,
+        status: "failed",
+        initialVariantId,
+        clickVariantId,
+        keyboardVariantId,
+        detail:
+          "Keyboard activation did not move the family into the focused variant state.",
+      });
+      continue;
+    }
+
+    let transitionTargetId: string | undefined;
+    const transitionButtons = family.locator("[data-framer-transition-trigger]");
+    if ((await transitionButtons.count()) > 0) {
+      const transitionButton = transitionButtons.first();
+      transitionTargetId =
+        (await transitionButton.getAttribute("data-framer-transition-target")) ??
+        undefined;
+      await transitionButton.click();
+      await page.waitForTimeout(50);
+      const variantAfterTransition =
+        (await currentVariant.getAttribute("data-framer-current-variant")) ??
+        undefined;
+      if (
+        transitionTargetId &&
+        variantAfterTransition !== transitionTargetId
+      ) {
+        results.push({
+          routePath,
+          familyId,
+          familyName,
+          status: "failed",
+          initialVariantId,
+          clickVariantId,
+          keyboardVariantId,
+          transitionTargetId,
+          detail:
+            "Transition trigger did not advance the component family to the declared target state.",
+        });
+        continue;
+      }
+    }
+
+    results.push({
+      routePath,
+      familyId,
+      familyName,
+      status: "passed",
+      initialVariantId,
+      clickVariantId,
+      keyboardVariantId,
+      transitionTargetId,
+    });
+  }
+
+  return results;
+}
+
+async function inspectExecutableCodeFilePreviews(
+  page: Page,
+  routePath: string,
+): Promise<GeneratedProjectValidation["codeFileExecutions"]> {
+  return await page.evaluate((currentRoutePath) => {
+    const previews = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        "[data-framer-code-file-executable-preview]",
+      ),
+    );
+
+    return previews.map((preview) => {
+      const fileName =
+        preview.getAttribute("data-framer-code-file-executable-preview") ?? "";
+      const executable = preview.querySelector<HTMLElement>(
+        "[data-framer-code-file-executable]",
+      );
+      const fallback = preview.querySelector<HTMLElement>(
+        "[data-framer-code-file-executable-fallback]",
+      );
+      const renderTargetMarker = executable?.querySelector<HTMLElement>(
+        "[data-render-target]",
+      );
+      const renderTargetValue =
+        renderTargetMarker?.getAttribute("data-render-target") ?? undefined;
+      const exportName =
+        executable?.getAttribute("data-framer-code-file-export") ?? undefined;
+
+      if (fallback) {
+        return {
+          routePath: currentRoutePath,
+          fileName,
+          exportName,
+          status: "failed" as const,
+          renderTargetValue,
+          detail: "Executable preview fell back instead of mounting the adapted component.",
+        };
+      }
+
+      if (!executable) {
+        return {
+          routePath: currentRoutePath,
+          fileName,
+          exportName,
+          status: "failed" as const,
+          renderTargetValue,
+          detail: "Executable preview wrapper rendered, but no executable component mount marker was found.",
+        };
+      }
+
+      if (renderTargetValue && renderTargetValue !== "preview") {
+        return {
+          routePath: currentRoutePath,
+          fileName,
+          exportName,
+          status: "failed" as const,
+          renderTargetValue,
+          detail: `Executable preview mounted with an unexpected Framer adapter target (${renderTargetValue}).`,
+        };
+      }
+
+      return {
+        routePath: currentRoutePath,
+        fileName,
+        exportName,
+        status: "passed" as const,
+        renderTargetValue,
+        detail: renderTargetValue
+          ? "Executable preview mounted with the preview adapter target."
+          : "Executable preview mounted without exposing an explicit render target marker.",
+      };
+    });
+  }, routePath);
+}
+
+async function findAlternateVariantButtonIndex(
+  buttons: Locator,
+  currentVariantId: string,
+) {
+  const buttonCount = await buttons.count();
+  for (let index = 0; index < buttonCount; index += 1) {
+    const candidateId =
+      (await buttons.nth(index).getAttribute("data-framer-variant-button")) ?? "";
+    if (candidateId && candidateId !== currentVariantId) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 function countSampledScreenshotColors(buffer: Buffer) {
@@ -1718,6 +3189,8 @@ async function runAttempts(input: {
   attemptsDir: string;
   maxAttempts: number;
   targetFidelity: number;
+  codeCompatibilityReport: ReturnType<typeof analyzeCodeFilesCompatibility>;
+  unadaptedCodeFiles: UnadaptedCodeFileArtifact[];
 }) {
   const attempts: ExportAttemptResult[] = [];
   const maxAttempts = Math.max(1, input.maxAttempts);
@@ -1763,6 +3236,8 @@ async function runAttempts(input: {
       ir: workingState.ir,
       projectDir,
       strategy: workingState.strategy,
+      codeCompatibilityReport: input.codeCompatibilityReport,
+      unadaptedCodeFiles: input.unadaptedCodeFiles,
     });
     const comparison = await compareGeneratedPreview({
       ir: workingState.ir,
@@ -1775,6 +3250,7 @@ async function runAttempts(input: {
       fidelity,
       comparison.diagnostics,
       comparison.previewValidation,
+      comparison.evidence,
     );
     const rerunReason = getRerunReason(
       fidelity,
@@ -1819,6 +3295,7 @@ async function runAttempts(input: {
       patchPropertyHints: plan.patchPropertyHints,
       comparisonDiagnostics: comparison.diagnostics,
       previewValidation: comparison.previewValidation,
+      fidelityEvidence: comparison.evidence,
       stopReason,
       resetToBestStateForNextAttempt,
     });
@@ -1876,6 +3353,7 @@ function warningsForAttempt(
   fidelity: FidelityScores,
   comparisonDiagnostics?: ComparisonDiagnostics,
   previewValidation?: PreviewValidationResult,
+  fidelityEvidence?: FidelityEvidence,
 ): ExportWarning[] {
   const warnings = [...ir.warnings];
 
@@ -1926,6 +3404,14 @@ function warningsForAttempt(
           "Generated preview validation could not find any exported nodes during computed-style inspection.",
       });
     }
+  }
+
+  if (fidelityEvidence?.mode === "heuristic") {
+    warnings.push({
+      type: "heuristic_fidelity",
+      severity: "info",
+      message: `Fidelity is heuristic-only: ${fidelityEvidence.reason}`,
+    });
   }
 
   if (previewValidation?.status === "blocked") {
@@ -2013,13 +3499,32 @@ function createReport(
   revisionCacheHit: boolean,
   revisionRequest?: LocalExportInput["revisionRequest"],
   sourceArtifacts?: SourceArtifactsManifest,
+  responsiveRecapturePlan?: ResponsiveRecapturePlan | null,
+  codeCompatibilityReport: ReturnType<typeof analyzeCodeFilesCompatibility> = analyzeCodeFilesCompatibility(
+    ir.codeFiles ?? [],
+  ),
+  unadaptedCodeFiles: UnadaptedCodeFileArtifact[] = createUnadaptedCodeFileArtifacts(
+    ir,
+    codeCompatibilityReport,
+  ),
 ) {
   const styleStats = summarizeStyleExtraction(ir);
+  const sourceEvidence = createSourceEvidenceSummary(ir, sourceArtifacts);
+  const runtimeInteractionReplay = summarizeRuntimeInteractionReplay(ir.runtimeCapture);
+  const unsupportedBehavior = collectUnsupportedBehavior({
+    codeCompatibilityReport,
+    warnings: bestAttempt.warnings,
+  });
   return {
     revisionId,
     revisionCacheHit,
     revisionRequest: revisionRequest ?? null,
+    sourceEvidence,
+    fidelityEvidence: bestAttempt.fidelityEvidence ?? null,
+    runtimeInteractionReplay,
+    unsupportedBehavior,
     sourceArtifacts: sourceArtifacts ?? null,
+    responsiveRecapturePlan: responsiveRecapturePlan ?? null,
     jobId: ir.jobId,
     exportType:
       ir.exportMode === "full-site"
@@ -2035,6 +3540,7 @@ function createReport(
     pageFileCount: ir.sitePages?.length ?? 0,
     componentModuleCount: ir.componentModules?.length ?? 0,
     codeFileCount: ir.codeFiles?.length ?? 0,
+    codeCompatibility: codeCompatibilityReport,
     componentFamilyCount: ir.componentFamilies?.length ?? 0,
     routeTemplateCount: ir.routeTemplates?.length ?? 0,
     fontCount: ir.fonts?.length ?? 0,
@@ -2057,6 +3563,17 @@ function createReport(
       transitionCount: family.transitions.length,
       provenance: family.provenance,
     })),
+    overrideAssignments: (ir.overrideAssignments ?? []).map((assignment) => ({
+      id: assignment.id,
+      exportName: assignment.exportName,
+      codeFileId: assignment.codeFileId,
+      codeFileName: assignment.codeFileName,
+      targetNodeId: assignment.targetNodeId ?? null,
+      targetComponentId: assignment.targetComponentId ?? null,
+      assignmentStatus: assignment.assignmentStatus,
+      assignmentConfidence: assignment.assignmentConfidence,
+      unresolvedReason: assignment.unresolvedReason ?? null,
+    })),
     codeFiles: (ir.codeFiles ?? []).map((file) => ({
       id: file.id,
       name: file.name,
@@ -2068,6 +3585,32 @@ function createReport(
       hasContent: file.hasContent,
       contentHash: file.contentHash,
       contentByteLength: file.contentByteLength,
+      compatibility:
+        codeCompatibilityReport.files.find(
+          (entry) =>
+            entry.codeFileId === file.id ||
+            entry.path === file.path ||
+            entry.name === file.name,
+        )?.compatibility ?? null,
+      compatibilityReasons:
+        codeCompatibilityReport.files.find(
+          (entry) =>
+            entry.codeFileId === file.id ||
+            entry.path === file.path ||
+            entry.name === file.name,
+        )?.reasons ?? [],
+      unadaptedComponentPath:
+        unadaptedCodeFiles.find(
+          (entry) =>
+            entry.codeFileId === file.id ||
+            entry.name === file.name,
+        )?.sourcePath ?? null,
+      unadaptedMetadataPath:
+        unadaptedCodeFiles.find(
+          (entry) =>
+            entry.codeFileId === file.id ||
+            entry.name === file.name,
+        )?.metadataPath ?? null,
       artifact:
         sourceArtifacts?.codeFiles.find((entry) =>
           entry.contentHash && file.contentHash
@@ -2115,6 +3658,7 @@ function createReport(
       rerunReason: attempt.rerunReason,
       selectedAsBest: attempt.id === bestAttempt.id,
       warningCount: attempt.warnings.length,
+      fidelityEvidence: attempt.fidelityEvidence ?? null,
       previewValidation: attempt.previewValidation,
       diagnosis: attempt.diagnosis,
       diagnosisDetails: attempt.diagnosisDetails,
@@ -2174,6 +3718,33 @@ function createReport(
   };
 }
 
+function summarizeRuntimeInteractionReplay(runtimeCapture: RuntimeCapture) {
+  const records = [
+    ...(runtimeCapture.interactionReplay ?? []),
+    ...((runtimeCapture.routeCaptures ?? []).flatMap(
+      (capture) => capture.interactionReplay ?? [],
+    ) ?? []),
+  ];
+  const stateChanges = records.filter((record) => record.stateChanged).length;
+  const blocked = records.filter((record) => !record.allowed).length;
+  return {
+    recordCount: records.length,
+    stateChangeCount: stateChanges,
+    blockedCount: blocked,
+    routesCovered: Array.from(
+      new Set(
+        records
+          .map((record) => record.routePath)
+          .filter((routePath): routePath is string => Boolean(routePath)),
+      ),
+    ),
+    actionCounts: records.reduce<Record<string, number>>((accumulator, record) => {
+      accumulator[record.action] = (accumulator[record.action] ?? 0) + 1;
+      return accumulator;
+    }, {}),
+  };
+}
+
 function createPatchHistory(attempts: ExportAttemptResult[]) {
   return attempts.map((attempt) => ({
     attempt: attempt.attemptNumber,
@@ -2191,12 +3762,180 @@ function createPatchHistory(attempts: ExportAttemptResult[]) {
   }));
 }
 
+function createBeforeAfterReport(
+  currentReport: Record<string, unknown>,
+  parentReport: Record<string, unknown>,
+  input: {
+    revisionId: string;
+    parentRevisionId?: string | null;
+  },
+): BeforeAfterReport {
+  return {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    revisionId: input.revisionId,
+    parentRevisionId: input.parentRevisionId ?? null,
+    metrics: [
+      createBeforeAfterMetric(
+        "Overall fidelity",
+        readMetricNumber(currentReport.visualFidelity, "overall"),
+        readMetricNumber(parentReport.visualFidelity, "overall"),
+      ),
+      createBeforeAfterMetric(
+        "Rendered routes",
+        readMetricNumber(currentReport.generatedValidation, "routes.length"),
+        readMetricNumber(parentReport.generatedValidation, "routes.length"),
+        true,
+      ),
+      createBeforeAfterMetric(
+        "Rendered elements",
+        readMetricNumber(currentReport.generatedValidation, "renderedElementCount"),
+        readMetricNumber(parentReport.generatedValidation, "renderedElementCount"),
+        true,
+      ),
+      createBeforeAfterMetric(
+        "Route templates",
+        readMetricNumber(currentReport, "routeTemplateCount"),
+        readMetricNumber(parentReport, "routeTemplateCount"),
+        true,
+      ),
+      createBeforeAfterMetric(
+        "Component families",
+        readMetricNumber(currentReport, "componentFamilyCount"),
+        readMetricNumber(parentReport, "componentFamilyCount"),
+        true,
+      ),
+    ].filter((entry): entry is BeforeAfterMetric => entry !== null),
+  };
+}
+
+function createBeforeAfterMetric(
+  label: string,
+  currentValue: number | undefined,
+  parentValue: number | undefined,
+  integer = false,
+): BeforeAfterMetric | null {
+  if (currentValue === undefined && parentValue === undefined) {
+    return null;
+  }
+
+  const current = currentValue ?? 0;
+  const parent = parentValue ?? 0;
+  const deltaValue = current - parent;
+  const formatter = integer ? formatWholeMetric : formatRoundedMetric;
+
+  return {
+    label,
+    current: formatter(current),
+    parent: formatter(parent),
+    delta:
+      deltaValue === 0
+        ? "0"
+        : `${deltaValue > 0 ? "+" : ""}${formatter(deltaValue)}`,
+  };
+}
+
+function readMetricNumber(value: unknown, metricPath: string): number | undefined {
+  const parts = metricPath.split(".");
+  let current: unknown = value;
+
+  for (const part of parts) {
+    if (part === "length") {
+      if (Array.isArray(current)) {
+        current = current.length;
+        continue;
+      }
+      return undefined;
+    }
+
+    if (!current || typeof current !== "object") {
+      return undefined;
+    }
+
+    current = (current as Record<string, unknown>)[part];
+  }
+
+  return typeof current === "number" && Number.isFinite(current)
+    ? current
+    : undefined;
+}
+
+function formatWholeMetric(value: number) {
+  return `${Math.round(value)}`;
+}
+
+function formatRoundedMetric(value: number) {
+  return `${Math.round(value)}`;
+}
+
+function createParentInfo(
+  revisionRequest?: LocalExportInput["revisionRequest"],
+) {
+  if (revisionRequest?.kind !== "improvement") return null;
+  return {
+    kind: revisionRequest.kind,
+    parentJobId: revisionRequest.parentJobId ?? null,
+    parentRevisionId: revisionRequest.parentRevisionId ?? null,
+    requestedFocus: revisionRequest.requestedFocus ?? null,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+async function updateRevisionStatusFile(input: {
+  exportDir: string;
+  revisionId?: string;
+  stage: RevisionExecutionStage;
+  progress?: {
+    completed?: number;
+    total?: number;
+    routePath?: string;
+    failed?: number;
+  };
+  detail?: string;
+}) {
+  const statusPath = path.join(input.exportDir, "status.json");
+  const now = new Date().toISOString();
+  const existing = (await readJsonFile<RevisionStatusFile>(statusPath)) ?? null;
+  const createdAt = existing?.createdAt ?? now;
+  const history = Array.isArray(existing?.history) ? existing.history : [];
+
+  history.push({
+    stage: input.stage,
+    at: now,
+    progress: input.progress,
+    detail: input.detail,
+  });
+
+  const nextStatus: RevisionStatusFile = {
+    schemaVersion: 1,
+    revisionId: input.revisionId ?? existing?.revisionId,
+    stage: input.stage,
+    updatedAt: now,
+    createdAt,
+    progress: input.progress,
+    history,
+  };
+  await writeJsonFile(statusPath, nextStatus);
+}
+
 function createRevisionManifest(
   ir: ExportIR,
   attempts: ExportAttemptResult[],
   bestAttempt: ExportAttemptResult,
   revisionId: string,
-) {
+  input: {
+    sourceFingerprint: string;
+    pluginFingerprint: string;
+    revisionRequest?: LocalExportInput["revisionRequest"];
+    sourceEvidence?: SourceEvidenceSummary | null;
+    sourceArtifacts?: SourceArtifactsManifest | null;
+    responsiveRecapturePlan?: ResponsiveRecapturePlan | null;
+    validation?: GeneratedProjectValidation;
+    reusedArtifactIds?: string[];
+    invalidatedArtifacts?: Array<{ artifact: string; reason: string; dependsOn?: string[] }>;
+    parentInfoPath?: string | null;
+  },
+): ExportRevisionRecord {
   const summary = {
     sourceUrl: ir.sourceUrl,
     exportMode: ir.exportMode,
@@ -2236,19 +3975,38 @@ function createRevisionManifest(
       laptop: bestAttempt.fidelity.laptop,
       tablet: bestAttempt.fidelity.tablet,
       mobile: bestAttempt.fidelity.mobile,
+      fidelityEvidence: bestAttempt.fidelityEvidence ?? null,
     },
     attempts: attempts.map((attempt) => ({
       attempt: attempt.attemptNumber,
       strategy: attempt.strategy,
       overall: attempt.fidelity.overall,
+      fidelityEvidence: attempt.fidelityEvidence ?? null,
       warningCount: attempt.warnings.length,
       stopReason: attempt.stopReason,
     })),
   };
   return {
     revisionId,
-    schemaVersion: 1,
+    schemaVersion: REVISION_MANIFEST_SCHEMA_VERSION,
+    sourceFingerprint: input.sourceFingerprint,
+    pluginFingerprint: input.pluginFingerprint,
+    status: "completed",
+    parentRevisionId: input.revisionRequest?.parentRevisionId ?? null,
+    revisionRequest: input.revisionRequest ?? null,
     summary,
+    sourceEvidence:
+      (input.sourceEvidence as Record<string, unknown> | null) ?? null,
+    sourceArtifacts: (input.sourceArtifacts as Record<string, unknown> | null) ?? null,
+    responsiveRecapturePlan:
+      (input.responsiveRecapturePlan as Record<string, unknown> | null) ?? null,
+    generatedValidation:
+      (input.validation as Record<string, unknown> | null) ?? null,
+    reusedArtifactIds: input.reusedArtifactIds,
+    invalidatedArtifacts: input.invalidatedArtifacts,
+    parentInfoPath: input.parentInfoPath ?? null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
 }
 
@@ -2264,17 +4022,20 @@ function createInvalidationPlan(input: {
   const sourceArtifacts = input.sourceArtifacts ?? null;
   const parentSourceArtifacts = input.parentSourceArtifacts ?? null;
   const sourceDiff = createSourceArtifactDiff(sourceArtifacts, parentSourceArtifacts);
-  const codeFileArtifactIds = (sourceArtifacts?.codeFiles ?? []).map(
-    (entry) => entry.artifactId,
+  const codeFileArtifactIds = unique(
+    (sourceArtifacts?.codeFiles ?? []).flatMap((entry) => allCodeFileArtifactIds(entry)),
   );
   const readableCodeFileArtifactIds = (sourceArtifacts?.codeFiles ?? [])
     .filter((entry) => entry.hasContent)
-    .map((entry) => entry.artifactId);
+    .map((entry) => primaryCodeFileArtifactId(entry));
   const missingCodeFileArtifactIds = (sourceArtifacts?.codeFiles ?? [])
     .filter((entry) => !entry.hasContent)
-    .map((entry) => entry.artifactId);
+    .map((entry) => primaryCodeFileArtifactId(entry));
   const componentFamiliesArtifactId =
     sourceArtifacts?.componentFamiliesArtifactId ?? "source/component-families";
+  const overrideAssignmentsArtifactId =
+    sourceArtifacts?.overrideAssignmentsArtifactId ??
+    "source/override-assignments";
 
   if (!revisionRequest || revisionRequest.kind !== "improvement") {
     return {
@@ -2336,6 +4097,9 @@ function createInvalidationPlan(input: {
         "assets/*",
         ...(input.routeTemplateCount ? ["routes/templates"] : []),
         ...sourceDiff.unchangedCodeFileArtifactIds,
+        ...(sourceArtifacts?.overrideAssignmentsArtifactId
+          ? [overrideAssignmentsArtifactId]
+          : []),
       ],
       invalidated: [
         ...(input.codeFileCount && missingCodeFileArtifactIds.length > 0
@@ -2357,10 +4121,26 @@ function createInvalidationPlan(input: {
                 ? readableCodeFileArtifactIds
               : ["plugin/raw-payload"],
         },
+        ...(sourceArtifacts?.overrideAssignmentsArtifactId &&
+        sourceDiff.overrideAssignmentsChanged
+          ? [
+              {
+                artifact: overrideAssignmentsArtifactId,
+                reason: "override-assignment-refresh",
+                dependsOn: ["plugin/raw-payload"],
+              },
+            ]
+          : []),
         {
           artifact: "ir/normalized",
           reason: "depends-on-component-model",
-          dependsOn: [componentFamiliesArtifactId, ...codeFileArtifactIds],
+          dependsOn: [
+            componentFamiliesArtifactId,
+            ...(sourceArtifacts?.overrideAssignmentsArtifactId
+              ? [overrideAssignmentsArtifactId]
+              : []),
+            ...codeFileArtifactIds,
+          ],
         },
         {
           artifact: "generated/project",
@@ -2386,6 +4166,9 @@ function createInvalidationPlan(input: {
         "plugin/raw-payload",
         "source/code-files",
         componentFamiliesArtifactId,
+        ...(sourceArtifacts?.overrideAssignmentsArtifactId
+          ? [overrideAssignmentsArtifactId]
+          : []),
         "cms/*",
         "assets/*",
       ],
@@ -2414,7 +4197,14 @@ function createInvalidationPlan(input: {
     requestedFocus: revisionRequest.requestedFocus ?? "both",
     parentRevisionId: revisionRequest.parentRevisionId ?? null,
     sourceDiff,
-    reused: ["cms/*", "assets/*", ...sourceDiff.unchangedCodeFileArtifactIds],
+    reused: [
+      "cms/*",
+      "assets/*",
+      ...sourceDiff.unchangedCodeFileArtifactIds,
+      ...(sourceArtifacts?.overrideAssignmentsArtifactId
+        ? [overrideAssignmentsArtifactId]
+        : []),
+    ],
     invalidated: [
       {
         artifact: "runtime/responsive",
@@ -2429,17 +4219,30 @@ function createInvalidationPlan(input: {
             ? sourceDiff.changedCodeFileArtifactIds
             : readableCodeFileArtifactIds.length > 0
               ? readableCodeFileArtifactIds
-            : ["plugin/raw-payload"],
+              : ["plugin/raw-payload"],
       },
+      ...(sourceArtifacts?.overrideAssignmentsArtifactId &&
+      sourceDiff.overrideAssignmentsChanged
+        ? [
+            {
+              artifact: overrideAssignmentsArtifactId,
+              reason: "override-assignment-refresh",
+              dependsOn: ["plugin/raw-payload"],
+            },
+          ]
+        : []),
       {
         artifact: "ir/normalized",
         reason: "depends-on-updated-models",
-        dependsOn: [
-          "runtime/responsive",
-          componentFamiliesArtifactId,
-          ...codeFileArtifactIds,
-        ],
-      },
+          dependsOn: [
+            "runtime/responsive",
+            componentFamiliesArtifactId,
+            ...(sourceArtifacts?.overrideAssignmentsArtifactId
+              ? [overrideAssignmentsArtifactId]
+              : []),
+            ...codeFileArtifactIds,
+          ],
+        },
       {
         artifact: "generated/project",
         reason: "depends-on-updated-models",
@@ -2452,6 +4255,50 @@ function createInvalidationPlan(input: {
       },
     ],
   };
+}
+
+export function buildImprovementInvalidationPreview(input: {
+  requestedFocus: "responsiveness" | "components" | "both" | "revalidate";
+  parentRevisionId?: string | null;
+  sourceArtifacts?: {
+    componentFamiliesArtifactId?: string;
+    codeFiles?: Array<{
+      artifactId: string;
+      metadataArtifactId?: string;
+      sourceArtifactId?: string;
+      hasContent: boolean;
+      contentHash?: string;
+    }>;
+  } | null;
+  parentSourceArtifacts?: {
+    componentFamiliesArtifactId?: string;
+    codeFiles?: Array<{
+      artifactId: string;
+      metadataArtifactId?: string;
+      sourceArtifactId?: string;
+      hasContent: boolean;
+      contentHash?: string;
+    }>;
+  } | null;
+  codeFileCount?: number;
+  routeTemplateCount?: number;
+  componentFamilyCount?: number;
+}) {
+  return createInvalidationPlan({
+    revisionRequest: {
+      kind: "improvement",
+      requestedFocus: input.requestedFocus,
+      parentRevisionId: input.parentRevisionId ?? undefined,
+    },
+    sourceArtifacts:
+      (input.sourceArtifacts as SourceArtifactsManifest | null | undefined) ?? null,
+    parentSourceArtifacts:
+      (input.parentSourceArtifacts as SourceArtifactsManifest | null | undefined) ??
+      null,
+    codeFileCount: input.codeFileCount,
+    routeTemplateCount: input.routeTemplateCount,
+    componentFamilyCount: input.componentFamilyCount,
+  });
 }
 
 function resolveSharedRevisionCacheRoot(outDir: string) {
@@ -2500,10 +4347,224 @@ function createStableRevisionSummary(ir: ExportIR) {
   };
 }
 
+function createSourceFingerprint(input: {
+  url?: string;
+  exportMode?: ExportMode;
+  selector?: string;
+  pluginCapture?: PluginCanvasCapture;
+}) {
+  const publishedUrl =
+    input.pluginCapture?.context?.publishedUrl ??
+    input.pluginCapture?.context?.publishInfo?.production?.url ??
+    input.pluginCapture?.context?.publishInfo?.staging?.url;
+  return crypto
+    .createHash("sha256")
+    .update(
+      JSON.stringify({
+        url: input.url ?? null,
+        exportMode: input.exportMode ?? null,
+        selector: input.selector ?? null,
+        projectId: input.pluginCapture?.context?.project?.id ?? null,
+        publishedUrl: publishedUrl ?? null,
+      }),
+    )
+    .digest("hex");
+}
+
+function createLegacyPluginFingerprint(input: {
+  pluginCapture: PluginCanvasCapture;
+  normalizedIr: Record<string, unknown>;
+  sourceArtifacts: SourceArtifactsManifest;
+}) {
+  const componentModules = Array.isArray(input.normalizedIr.componentModules)
+    ? (input.normalizedIr.componentModules as Array<Record<string, unknown>>)
+    : [];
+  const componentFamilies = Array.isArray(input.normalizedIr.componentFamilies)
+    ? (input.normalizedIr.componentFamilies as Array<Record<string, unknown>>)
+    : [];
+
+  return crypto
+    .createHash("sha256")
+    .update(
+      JSON.stringify({
+        selectedNodeCount: input.pluginCapture.selectedNodes.length,
+        projectId: input.pluginCapture.context?.project?.id ?? null,
+        componentIds: componentModules.map(
+          (component) =>
+            (typeof component.id === "string" && component.id) ||
+            (typeof component.insertURL === "string" && component.insertURL) ||
+            (typeof component.name === "string" && component.name) ||
+            null,
+        ),
+        componentFamilyIds: componentFamilies
+          .map((family) => (typeof family.id === "string" ? family.id : null))
+          .filter(Boolean),
+        codeFiles: input.sourceArtifacts.codeFiles.map((file) => ({
+          id: file.id ?? null,
+          versionId: file.versionId ?? null,
+          contentHash: file.contentHash ?? null,
+          hasContent: file.hasContent,
+        })),
+        capabilityReport: readCapabilityReport(input.pluginCapture),
+      }),
+    )
+    .digest("hex");
+}
+
+function createPluginFingerprint(
+  pluginCapture: PluginCanvasCapture,
+  ir: ExportIR,
+) {
+  return crypto
+    .createHash("sha256")
+    .update(
+      JSON.stringify({
+        selectedNodeCount: pluginCapture.selectedNodes.length,
+        projectId: pluginCapture.context?.project?.id ?? null,
+        componentIds: (ir.componentModules ?? []).map(
+          (component) => component.id ?? component.insertURL ?? component.name,
+        ),
+        componentFamilyIds: (ir.componentFamilies ?? []).map((family) => family.id),
+        codeFiles: (ir.codeFiles ?? []).map((file) => ({
+          id: file.id ?? null,
+          versionId: file.versionId ?? null,
+          contentHash: file.contentHash ?? null,
+          hasContent: file.hasContent ?? Boolean(file.content),
+        })),
+        capabilityReport: readCapabilityReport(pluginCapture),
+      }),
+    )
+    .digest("hex");
+}
+
+function hashValue(value: unknown) {
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify(value))
+    .digest("hex");
+}
+
+function createLegacyStableRevisionSummary(input: {
+  jobId: string;
+  sourceUrl: string;
+  exportMode: ExportMode;
+  report: Record<string, unknown>;
+  normalizedIr: Record<string, unknown>;
+  routeTemplates: Array<{
+    templateId: string;
+    templatePath: string;
+    templateKind: "static" | "cms" | "component" | "redirect" | "utility";
+    representativeRoutePath: string;
+    routeCount: number;
+    nodeCount?: number;
+    sourceTextLength?: number;
+  }>;
+}) {
+  const sitePages = Array.isArray(input.normalizedIr.sitePages)
+    ? (input.normalizedIr.sitePages as Array<Record<string, unknown>>)
+    : [];
+  return {
+    sourceUrl: input.sourceUrl,
+    exportMode: input.exportMode,
+    captureMode:
+      typeof input.normalizedIr.captureMode === "string"
+        ? input.normalizedIr.captureMode
+        : "runtime-first",
+    exportEngine:
+      typeof input.normalizedIr.exportEngine === "string"
+        ? input.normalizedIr.exportEngine
+        : "published-runtime",
+    componentName:
+      typeof input.normalizedIr.componentName === "string"
+        ? input.normalizedIr.componentName
+        : typeof input.report.componentName === "string"
+          ? input.report.componentName
+          : input.jobId,
+    routeTemplates: input.routeTemplates.map((template) => ({
+      templateId: template.templateId,
+      templatePath: template.templatePath,
+      templateKind: template.templateKind,
+      representativeRoutePath: template.representativeRoutePath,
+      routeCount: template.routeCount,
+      nodeCount: template.nodeCount ?? 0,
+      sourceTextLength: template.sourceTextLength ?? 0,
+    })),
+    sitePages: sitePages.map((page) => ({
+      routePath: page.routePath,
+      templateId: page.templateId,
+      templatePath: page.templatePath,
+      templateKind: page.templateKind,
+      sourceTextLength:
+        typeof page.sourceTextLength === "number" ? page.sourceTextLength : 0,
+    })),
+    componentModuleCount: Array.isArray(input.normalizedIr.componentModules)
+      ? input.normalizedIr.componentModules.length
+      : 0,
+    codeFileCount: Array.isArray(input.normalizedIr.codeFiles)
+      ? input.normalizedIr.codeFiles.length
+      : 0,
+    cmsCollectionCount: Array.isArray(input.normalizedIr.cmsCollections)
+      ? input.normalizedIr.cmsCollections.length
+      : 0,
+    fontCount: Array.isArray(input.normalizedIr.fonts)
+      ? input.normalizedIr.fonts.length
+      : 0,
+  };
+}
+
+function createLegacyBestAttempt(report: Record<string, unknown>) {
+  const fidelity =
+    report.visualFidelity &&
+    typeof report.visualFidelity === "object"
+      ? (report.visualFidelity as Record<string, unknown>)
+      : {};
+
+  return {
+    id: "legacy-attempt-1",
+    attemptNumber:
+      report.bestAttempt &&
+      typeof report.bestAttempt === "object" &&
+      typeof (report.bestAttempt as Record<string, unknown>).attempt ===
+        "number"
+        ? Number((report.bestAttempt as Record<string, unknown>).attempt)
+        : 1,
+    strategy: "legacy-migrated",
+    projectDir: ".",
+    fidelity: {
+      overall:
+        typeof fidelity.overall === "number" ? Number(fidelity.overall) : 0,
+      layout: typeof fidelity.layout === "number" ? Number(fidelity.layout) : 0,
+      typography:
+        typeof fidelity.typography === "number" ? Number(fidelity.typography) : 0,
+      color: typeof fidelity.color === "number" ? Number(fidelity.color) : 0,
+      assets: typeof fidelity.assets === "number" ? Number(fidelity.assets) : 0,
+      motion: typeof fidelity.motion === "number" ? Number(fidelity.motion) : 0,
+      nodeMatch:
+        typeof fidelity.nodeMatch === "number" ? Number(fidelity.nodeMatch) : 0,
+      desktop:
+        typeof fidelity.desktop === "number" ? Number(fidelity.desktop) : 0,
+      laptop:
+        typeof fidelity.laptop === "number" ? Number(fidelity.laptop) : 0,
+      tablet:
+        typeof fidelity.tablet === "number" ? Number(fidelity.tablet) : 0,
+      mobile:
+        typeof fidelity.mobile === "number" ? Number(fidelity.mobile) : 0,
+      breakpointScores:
+        fidelity.breakpointScores &&
+        typeof fidelity.breakpointScores === "object"
+          ? (fidelity.breakpointScores as Record<string, number>)
+          : undefined,
+    },
+    warnings: [],
+    stopReason: "legacy-migrated",
+  } satisfies ExportAttemptResult;
+}
+
 async function tryReuseParentRevisionForValidation(input: {
   exportDir: string;
   runDir: string;
   sharedRevisionCacheRoot: string;
+  localExportInput: LocalExportInput;
   revisionRequest?: LocalExportInput["revisionRequest"];
   targetFidelity: number;
   maxAttempts: number;
@@ -2555,6 +4616,18 @@ async function tryReuseParentRevisionForValidation(input: {
   const cachedRevision = await readCachedRevision(revisionCacheDir);
   if (cachedRevision) {
     await copy(cachedRevision.exportDir, input.exportDir);
+    await writeJsonFile(
+      path.join(input.exportDir, "resolved-request.json"),
+      createResolvedRequestArtifact({
+        localExportInput: input.localExportInput,
+        pluginCapture: {
+          mode: "simulated",
+          selectedNodes: [],
+          capturedAt: new Date().toISOString(),
+        },
+        revisionId,
+      }),
+    );
     return finalizeCachedRevisionResult({
       exportDir: input.exportDir,
       runDir: input.runDir,
@@ -2564,6 +4637,12 @@ async function tryReuseParentRevisionForValidation(input: {
   }
 
   await copy(parentRevision.exportDir, input.exportDir);
+  await updateRevisionStatusFile({
+    exportDir: input.exportDir,
+    revisionId,
+    stage: "validating",
+    detail: "Revalidating copied parent revision output.",
+  });
   const validation = await validateGeneratedProject(input.exportDir);
   const parentReportPath = path.join(parentRevision.exportDir, "export-report.json");
   const parentReport = await readJsonFile<Record<string, unknown>>(parentReportPath);
@@ -2579,9 +4658,42 @@ async function tryReuseParentRevisionForValidation(input: {
     parentReport,
     createdAt: now,
   });
+  if (parentReport) {
+    await writeJsonFile(
+      path.join(input.exportDir, "before-after-report.json"),
+      createBeforeAfterReport(
+        (await readJsonFile<Record<string, unknown>>(
+          path.join(input.exportDir, "export-report.json"),
+        )) ?? {},
+        parentReport,
+        {
+          revisionId,
+          parentRevisionId: revisionRequest.parentRevisionId ?? null,
+        },
+      ),
+    );
+  }
+  await writeJsonFile(
+    path.join(input.exportDir, "resolved-request.json"),
+    createResolvedRequestArtifact({
+      localExportInput: input.localExportInput,
+      pluginCapture: {
+        mode: "simulated",
+        selectedNodes: [],
+        capturedAt: new Date().toISOString(),
+      },
+      revisionId,
+    }),
+  );
 
   await mkdirp(revisionCacheDir);
   await copy(input.exportDir, path.join(revisionCacheDir, "export"));
+  await updateRevisionStatusFile({
+    exportDir: input.exportDir,
+    revisionId,
+    stage: "completed",
+    detail: "Revalidate-only revision completed successfully.",
+  });
 
   return finalizeCachedRevisionResult({
     exportDir: input.exportDir,
@@ -2600,6 +4712,7 @@ async function tryReuseParentRevisionForUnchangedComponentSource(input: {
   runDir: string;
   sharedRevisionCacheRoot: string;
   revisionId: string;
+  localExportInput: LocalExportInput;
   revisionRequest?: LocalExportInput["revisionRequest"];
   sourceArtifacts: SourceArtifactsManifest;
   parentSourceArtifacts: SourceArtifactsManifest | null;
@@ -2621,6 +4734,7 @@ async function tryReuseParentRevisionForUnchangedComponentSource(input: {
     input.sourceDiff.addedCodeFileArtifactIds.length > 0 ||
     input.sourceDiff.removedCodeFileArtifactIds.length > 0 ||
     input.sourceDiff.componentFamiliesChanged ||
+    input.sourceDiff.overrideAssignmentsChanged ||
     input.sourceArtifacts.codeFiles.some((entry) => !entry.hasContent)
   ) {
     return null;
@@ -2636,6 +4750,12 @@ async function tryReuseParentRevisionForUnchangedComponentSource(input: {
   }
 
   await copy(parentRevision.exportDir, input.exportDir);
+  await updateRevisionStatusFile({
+    exportDir: input.exportDir,
+    revisionId: input.revisionId,
+    stage: "validating",
+    detail: "Validating reused parent export for unchanged component source.",
+  });
   const validation = await validateGeneratedProject(input.exportDir);
   const parentManifest = await readJsonFile<Record<string, unknown>>(
     path.join(parentRevision.exportDir, "revision-manifest.json"),
@@ -2644,6 +4764,16 @@ async function tryReuseParentRevisionForUnchangedComponentSource(input: {
     path.join(parentRevision.exportDir, "export-report.json"),
   );
   const createdAt = new Date().toISOString();
+  const invalidationPlan = createInvalidationPlan({
+    revisionRequest,
+    sourceArtifacts: input.sourceArtifacts,
+    parentSourceArtifacts: input.parentSourceArtifacts,
+    codeFileCount: input.sourceArtifacts.codeFiles.length,
+    componentFamilyCount: input.sourceArtifacts.componentFamiliesArtifactId
+      ? 1
+      : 0,
+  });
+  const parentInfo = createParentInfo(revisionRequest);
   const manifest: Record<string, unknown> = {
     ...(parentManifest ?? {}),
     revisionId: input.revisionId,
@@ -2654,6 +4784,9 @@ async function tryReuseParentRevisionForUnchangedComponentSource(input: {
     generatedValidation: validation,
     sourceArtifacts: input.sourceArtifacts,
     revalidatedAt: createdAt,
+    reusedArtifactIds: invalidationPlan.reused,
+    invalidatedArtifacts: invalidationPlan.invalidated,
+    parentInfoPath: parentInfo ? "parent.json" : null,
   };
   const report: Record<string, unknown> = {
     ...(parentReport ?? {}),
@@ -2676,22 +4809,45 @@ async function tryReuseParentRevisionForUnchangedComponentSource(input: {
     path.join(input.exportDir, "revision-manifest.json"),
     manifest,
   );
+  if (parentInfo) {
+    await writeJsonFile(path.join(input.exportDir, "parent.json"), parentInfo);
+  }
   await writeJsonFile(path.join(input.exportDir, "export-report.json"), report);
+  if (parentReport) {
+    await writeJsonFile(
+      path.join(input.exportDir, "before-after-report.json"),
+      createBeforeAfterReport(report, parentReport, {
+        revisionId: input.revisionId,
+        parentRevisionId: revisionRequest.parentRevisionId ?? null,
+      }),
+    );
+  }
   await writeJsonFile(
-    path.join(input.exportDir, "invalidation-plan.json"),
-    createInvalidationPlan({
-      revisionRequest,
-      sourceArtifacts: input.sourceArtifacts,
-      parentSourceArtifacts: input.parentSourceArtifacts,
-      codeFileCount: input.sourceArtifacts.codeFiles.length,
-      componentFamilyCount: input.sourceArtifacts.componentFamiliesArtifactId
-        ? 1
-        : 0,
+    path.join(input.exportDir, "source-artifacts", "manifest.json"),
+    input.sourceArtifacts,
+  );
+  await writeJsonFile(path.join(input.exportDir, "invalidation-plan.json"), invalidationPlan);
+  await writeJsonFile(
+    path.join(input.exportDir, "artifact-index.json"),
+    await createArtifactIndex(input.exportDir, input.sourceArtifacts, {
+      sourceFingerprint:
+        typeof (manifest.sourceFingerprint as string | undefined) === "string"
+          ? (manifest.sourceFingerprint as string)
+          : hashValue(manifest.summary ?? null),
+      revisionId: input.revisionId,
     }),
   );
   await writeJsonFile(
-    path.join(input.exportDir, "artifact-index.json"),
-    await createArtifactIndex(input.exportDir, input.sourceArtifacts),
+    path.join(input.exportDir, "resolved-request.json"),
+    createResolvedRequestArtifact({
+      localExportInput: input.localExportInput,
+      pluginCapture: {
+        mode: "simulated",
+        selectedNodes: [],
+        capturedAt: new Date().toISOString(),
+      },
+      revisionId: input.revisionId,
+    }),
   );
 
   const revisionCacheDir = path.join(
@@ -2700,6 +4856,12 @@ async function tryReuseParentRevisionForUnchangedComponentSource(input: {
   );
   await mkdirp(revisionCacheDir);
   await copy(input.exportDir, path.join(revisionCacheDir, "export"));
+  await updateRevisionStatusFile({
+    exportDir: input.exportDir,
+    revisionId: input.revisionId,
+    stage: "completed",
+    detail: "Unchanged component-source revision completed successfully.",
+  });
 
   return finalizeCachedRevisionResult({
     exportDir: input.exportDir,
@@ -2720,7 +4882,19 @@ async function readCachedRevision(revisionCacheDir: string): Promise<{
 } | null> {
   try {
     const exportDir = path.join(revisionCacheDir, "export");
+    const artifactIndexPath = path.join(exportDir, "artifact-index.json");
     await fs.access(path.join(exportDir, "revision-manifest.json"));
+    await fs.access(artifactIndexPath);
+    const artifactIndex = JSON.parse(
+      await fs.readFile(artifactIndexPath, "utf8"),
+    ) as ArtifactIndex;
+    const artifactIntegrity = await validateCachedArtifactIndex(
+      exportDir,
+      artifactIndex,
+    );
+    if (!artifactIntegrity.valid) {
+      return null;
+    }
     const bestAttempt = JSON.parse(
       await fs.readFile(path.join(exportDir, "best-attempt.json"), "utf8"),
     ) as ExportAttemptResult;
@@ -2733,6 +4907,61 @@ async function readCachedRevision(revisionCacheDir: string): Promise<{
   }
 }
 
+async function validateCachedArtifactIndex(
+  exportDir: string,
+  artifactIndex: ArtifactIndex,
+): Promise<
+  | { valid: true }
+  | { valid: false; reason: string; artifactId?: string; path?: string }
+> {
+  if (
+    artifactIndex.schemaVersion !== ARTIFACT_INDEX_SCHEMA_VERSION ||
+    !Array.isArray(artifactIndex.entries)
+  ) {
+    return { valid: false, reason: "artifact-index-schema-mismatch" };
+  }
+
+  if (artifactIndex.entries.length !== artifactIndex.fileCount) {
+    return { valid: false, reason: "artifact-index-count-mismatch" };
+  }
+
+  for (const entry of artifactIndex.entries) {
+    const targetPath = path.join(exportDir, entry.path);
+    let stat;
+    try {
+      stat = await fs.stat(targetPath);
+    } catch {
+      return {
+        valid: false,
+        reason: "artifact-missing",
+        artifactId: entry.id,
+        path: entry.path,
+      };
+    }
+
+    if (stat.size !== entry.byteSize) {
+      return {
+        valid: false,
+        reason: "artifact-byte-size-mismatch",
+        artifactId: entry.id,
+        path: entry.path,
+      };
+    }
+
+    const actualHash = await hashFile(targetPath);
+    if (actualHash !== entry.hash) {
+      return {
+        valid: false,
+        reason: "artifact-hash-mismatch",
+        artifactId: entry.id,
+        path: entry.path,
+      };
+    }
+  }
+
+  return { valid: true };
+}
+
 async function patchRevalidatedRevisionArtifacts(input: {
   exportDir: string;
   revisionId: string;
@@ -2743,6 +4972,26 @@ async function patchRevalidatedRevisionArtifacts(input: {
   parentReport: Record<string, unknown> | null;
   createdAt: string;
 }) {
+  const invalidationPlan = createInvalidationPlan({
+    revisionRequest: input.revisionRequest,
+    sourceArtifacts: (input.parentManifest?.sourceArtifacts as SourceArtifactsManifest | null) ?? null,
+    codeFileCount:
+      typeof (input.parentManifest?.summary as Record<string, unknown> | undefined)?.codeFileCount ===
+      "number"
+        ? ((input.parentManifest?.summary as Record<string, unknown>).codeFileCount as number)
+        : undefined,
+    routeTemplateCount:
+      Array.isArray(
+        (input.parentManifest?.summary as Record<string, unknown> | undefined)?.routeTemplates,
+      )
+        ? (
+            (input.parentManifest?.summary as Record<string, unknown>).routeTemplates as Array<
+              unknown
+            >
+          ).length
+        : undefined,
+  });
+  const parentInfo = createParentInfo(input.revisionRequest);
   const manifest: Record<string, unknown> = {
     ...(input.parentManifest ?? {}),
     revisionId: input.revisionId,
@@ -2751,6 +5000,9 @@ async function patchRevalidatedRevisionArtifacts(input: {
     revalidatedAt: input.createdAt,
     revisionRequest: input.revisionRequest,
     generatedValidation: input.validation,
+    reusedArtifactIds: invalidationPlan.reused,
+    invalidatedArtifacts: invalidationPlan.invalidated,
+    parentInfoPath: parentInfo ? "parent.json" : null,
   };
   const report: Record<string, unknown> = {
     ...(input.parentReport ?? {}),
@@ -2770,39 +5022,32 @@ async function patchRevalidatedRevisionArtifacts(input: {
     path.join(input.exportDir, "revision-manifest.json"),
     manifest,
   );
+  if (parentInfo) {
+    await writeJsonFile(path.join(input.exportDir, "parent.json"), parentInfo);
+  }
   await writeJsonFile(path.join(input.exportDir, "export-report.json"), report);
-  await writeJsonFile(
-    path.join(input.exportDir, "invalidation-plan.json"),
-    createInvalidationPlan({
-      revisionRequest: input.revisionRequest,
-      sourceArtifacts: (manifest.sourceArtifacts as SourceArtifactsManifest | null) ?? null,
-      codeFileCount:
-        typeof (manifest.summary as Record<string, unknown> | undefined)?.codeFileCount ===
-        "number"
-          ? ((manifest.summary as Record<string, unknown>).codeFileCount as number)
-          : undefined,
-      routeTemplateCount:
-        Array.isArray(
-          (manifest.summary as Record<string, unknown> | undefined)?.routeTemplates,
-        )
-          ? (
-              (manifest.summary as Record<string, unknown>).routeTemplates as Array<
-                unknown
-              >
-            ).length
-          : undefined,
-      componentFamilyCount:
-        typeof (input.parentReport?.componentFamilyCount as number | undefined) ===
-        "number"
-          ? (input.parentReport?.componentFamilyCount as number)
-          : undefined,
-    }),
-  );
+  if (input.parentReport) {
+    await writeJsonFile(
+      path.join(input.exportDir, "before-after-report.json"),
+      createBeforeAfterReport(report, input.parentReport, {
+        revisionId: input.revisionId,
+        parentRevisionId: input.parentRevisionId,
+      }),
+    );
+  }
+  await writeJsonFile(path.join(input.exportDir, "invalidation-plan.json"), invalidationPlan);
   await writeJsonFile(
     path.join(input.exportDir, "artifact-index.json"),
     await createArtifactIndex(
       input.exportDir,
       (manifest.sourceArtifacts as SourceArtifactsManifest | null) ?? null,
+      {
+        sourceFingerprint:
+          typeof (manifest.sourceFingerprint as string | undefined) === "string"
+            ? (manifest.sourceFingerprint as string)
+            : hashValue(manifest.summary ?? null),
+        revisionId: input.revisionId,
+      },
     ),
   );
 }
@@ -2832,6 +5077,16 @@ async function readParentSourceArtifacts(
   return sourceArtifacts && typeof sourceArtifacts === "object"
     ? (sourceArtifacts as SourceArtifactsManifest)
     : null;
+}
+
+async function readParentRevisionReport(
+  sharedRevisionCacheRoot: string,
+  parentRevisionId?: string,
+): Promise<Record<string, unknown> | null> {
+  if (!parentRevisionId) return null;
+  return readJsonFile<Record<string, unknown>>(
+    path.join(sharedRevisionCacheRoot, parentRevisionId, "export", "export-report.json"),
+  );
 }
 
 async function writeJsonFile(filePath: string, value: unknown) {
@@ -2873,16 +5128,49 @@ async function finalizeCachedRevisionResult(input: {
       : "CodeRelayExport";
   const zipPath = path.join(input.runDir, `${componentName}.zip`);
   await zipDirectory(input.exportDir, zipPath);
+  const responsivePlanPath = path.join(
+    input.exportDir,
+    "responsive-recapture-plan.json",
+  );
   return {
     exportDir: input.exportDir,
     zipPath,
     reportPath: path.join(input.exportDir, "export-report.json"),
     previewPath: path.join(input.exportDir, "preview.html"),
+    resolvedRequestPath: (await fileExists(
+      path.join(input.exportDir, "resolved-request.json"),
+    ))
+      ? path.join(input.exportDir, "resolved-request.json")
+      : undefined,
+    statusPath: (await fileExists(path.join(input.exportDir, "status.json")))
+      ? path.join(input.exportDir, "status.json")
+      : undefined,
+    capabilityReportPath: (await fileExists(
+      path.join(input.exportDir, "capability-report.json"),
+    ))
+      ? path.join(input.exportDir, "capability-report.json")
+      : undefined,
+    codeCompatibilityReportPath: (await fileExists(
+      path.join(input.exportDir, "code-compatibility-report.json"),
+    ))
+      ? path.join(input.exportDir, "code-compatibility-report.json")
+      : undefined,
+    beforeAfterReportPath: (await fileExists(
+      path.join(input.exportDir, "before-after-report.json"),
+    ))
+      ? path.join(input.exportDir, "before-after-report.json")
+      : undefined,
+    parentInfoPath: (await fileExists(path.join(input.exportDir, "parent.json")))
+      ? path.join(input.exportDir, "parent.json")
+      : undefined,
     bestAttempt: input.cachedRevision.bestAttempt,
     validation: input.cachedRevision.validation,
     revisionManifestPath: path.join(input.exportDir, "revision-manifest.json"),
     invalidationPlanPath: path.join(input.exportDir, "invalidation-plan.json"),
     artifactIndexPath: path.join(input.exportDir, "artifact-index.json"),
+    responsiveRecapturePlanPath: (await fileExists(responsivePlanPath))
+      ? responsivePlanPath
+      : undefined,
     revisionCacheHit: input.revisionCacheHit,
   };
 }
@@ -2890,34 +5178,108 @@ async function finalizeCachedRevisionResult(input: {
 async function createArtifactIndex(
   exportDir: string,
   sourceArtifacts?: SourceArtifactsManifest | null,
-) {
+  input?: {
+    sourceFingerprint?: string;
+    revisionId?: string;
+  },
+): Promise<ArtifactIndex> {
   const files = await listFiles(exportDir);
-  const entries = await Promise.all(
+  const draftEntries = await Promise.all(
     files.map(async (filePath) => {
       const relativePath = relativeToExport(exportDir, filePath);
       const artifactId = inferArtifactId(relativePath, sourceArtifacts);
+      const dependencyArtifactIds = inferArtifactDependencies(
+        artifactId,
+        sourceArtifacts,
+      );
+      const artifactMetadata = inferArtifactMetadata(relativePath, sourceArtifacts);
       return {
         id: artifactId,
         path: relativePath,
-        bytes: (await fs.stat(filePath)).size,
+        byteSize: (await fs.stat(filePath)).size,
         hash: await hashFile(filePath),
         artifactType: inferArtifactType(filePath),
-        dependsOn: inferArtifactDependencies(artifactId, sourceArtifacts),
-      };
+        schemaVersion: ARTIFACT_INDEX_SCHEMA_VERSION,
+        sourceFingerprint: input?.sourceFingerprint ?? "unknown",
+        dependencyArtifactIds,
+        dependencyHashes: [],
+        dependsOn: dependencyArtifactIds,
+        status: "complete",
+        createdAt: new Date().toISOString(),
+        ...artifactMetadata,
+      } satisfies ArtifactRecord;
     }),
   );
+
+  const entriesById = new Map<string, ArtifactRecord>();
+  for (const entry of draftEntries) {
+    if (entriesById.has(entry.id)) {
+      throw new Error(`Duplicate artifact id detected in artifact index: ${entry.id}`);
+    }
+    entriesById.set(entry.id, entry);
+  }
+
+  for (const entry of draftEntries) {
+    for (const dependencyArtifactId of entry.dependencyArtifactIds) {
+      if (!entriesById.has(dependencyArtifactId)) {
+        throw new Error(
+          `Artifact dependency is missing from artifact index: ${entry.id} -> ${dependencyArtifactId}`,
+        );
+      }
+    }
+  }
+
+  const entries = draftEntries.map((entry) => ({
+    ...entry,
+    dependencyHashes: entry.dependencyArtifactIds.map((dependencyArtifactId) => {
+      const dependency = entriesById.get(dependencyArtifactId);
+      if (!dependency) {
+        throw new Error(
+          `Artifact dependency hash resolution failed: ${entry.id} -> ${dependencyArtifactId}`,
+        );
+      }
+      return dependency.hash;
+    }),
+  }));
+
   return {
+    schemaVersion: ARTIFACT_INDEX_SCHEMA_VERSION,
     generatedAt: new Date().toISOString(),
+    revisionId: input?.revisionId,
+    sourceFingerprint: input?.sourceFingerprint ?? "unknown",
     fileCount: entries.length,
     entries: entries.sort((left, right) => left.path.localeCompare(right.path)),
   };
 }
 
+function inferArtifactMetadata(
+  relativePath: string,
+  sourceArtifacts?: SourceArtifactsManifest | null,
+): Partial<ArtifactRecord> {
+  const sourceArtifactEntry = (sourceArtifacts?.codeFiles ?? []).find(
+    (entry) =>
+      entry.metadataPath === relativePath || entry.sourcePath === relativePath,
+  );
+  if (sourceArtifactEntry) {
+    return {
+      codeFileId: sourceArtifactEntry.id ?? sourceArtifactEntry.path ?? sourceArtifactEntry.name,
+    };
+  }
+  return {};
+}
+
 function inferArtifactType(filePath: string) {
   const relativePath = filePath.replace(/\\/g, "/");
   if (relativePath.endsWith("revision-manifest.json")) return "revision-manifest";
+  if (relativePath.endsWith("status.json")) return "revision-status";
+  if (relativePath.endsWith("parent.json")) return "parent-link";
   if (relativePath.endsWith("invalidation-plan.json")) return "invalidation-plan";
   if (relativePath.endsWith("artifact-index.json")) return "artifact-index";
+  if (relativePath.endsWith("capability-report.json")) return "capability-report";
+  if (relativePath.endsWith("code-compatibility-report.json"))
+    return "code-compatibility-report";
+  if (relativePath.endsWith("responsive-recapture-plan.json"))
+    return "responsive-recapture-plan";
   if (relativePath.endsWith("generated-validation.json")) return "validation";
   if (relativePath.endsWith("export-report.json")) return "report";
   if (relativePath.endsWith("best-attempt.json")) return "best-attempt";
@@ -2928,6 +5290,8 @@ function inferArtifactType(filePath: string) {
     return "source-artifact-manifest";
   if (relativePath.endsWith("source-artifacts/component-families.json"))
     return "component-families";
+  if (relativePath.endsWith("source-artifacts/override-assignments.json"))
+    return "override-assignments";
   if (relativePath.includes("/source-artifacts/code-files/")) {
     return relativePath.endsWith(".json") ? "code-file-metadata" : "code-file-source";
   }
@@ -2950,8 +5314,18 @@ function inferArtifactId(
   if (relativePath === "generated-validation.json") return "validation/generated";
   if (relativePath === "export-report.json") return "report/export";
   if (relativePath === "revision-manifest.json") return "manifest/revision";
+  if (relativePath === "status.json") return "manifest/status";
+  if (relativePath === "parent.json") return "manifest/parent";
   if (relativePath === "invalidation-plan.json") return "manifest/invalidation";
   if (relativePath === "artifact-index.json") return "manifest/artifact-index";
+  if (relativePath === "capability-report.json")
+    return (
+      sourceArtifacts?.capabilityReportArtifactId ?? "plugin/capability-report"
+    );
+  if (relativePath === "code-compatibility-report.json")
+    return "source/code-compatibility";
+  if (relativePath === "responsive-recapture-plan.json")
+    return "manifest/responsive-recapture";
   if (relativePath === "best-attempt.json") return "attempt/best";
   if (relativePath === "patch-history.json") return "attempt/patch-history";
   if (relativePath === "source-artifacts/manifest.json")
@@ -2959,16 +5333,34 @@ function inferArtifactId(
   if (relativePath === "source-artifacts/component-families.json") {
     return sourceArtifacts?.componentFamiliesArtifactId ?? "source/component-families";
   }
+  if (relativePath === "source-artifacts/override-assignments.json") {
+    return (
+      sourceArtifacts?.overrideAssignmentsArtifactId ??
+      "source/override-assignments"
+    );
+  }
   if (relativePath.startsWith("source-artifacts/code-files/")) {
     const sourceMatch = (sourceArtifacts?.codeFiles ?? []).find(
       (entry) =>
         entry.metadataPath === relativePath || entry.sourcePath === relativePath,
     );
-    if (sourceMatch) return sourceMatch.artifactId;
-    return `source/code-file/${slugSegment(relativePath)}`;
+    if (sourceMatch) {
+      if (sourceMatch.metadataPath === relativePath) {
+        return sourceMatch.metadataArtifactId ?? `${sourceMatch.artifactId}/metadata`;
+      }
+      if (sourceMatch.sourcePath === relativePath) {
+        return sourceMatch.sourceArtifactId ?? `${sourceMatch.artifactId}/source`;
+      }
+      return sourceMatch.artifactId;
+    }
+    return relativePath.endsWith(".json")
+      ? `source/code-file/${slugSegment(relativePath)}/metadata`
+      : `source/code-file/${slugSegment(relativePath)}/source`;
   }
   if (relativePath === "preview.html") return "generated/project";
-  if (relativePath.startsWith("debug/")) return "debug/artifacts";
+  if (relativePath.startsWith("debug/")) {
+    return `debug/${slugSegment(relativePath)}`;
+  }
   return `artifact/${slugSegment(relativePath)}`;
 }
 
@@ -2978,10 +5370,37 @@ function inferArtifactDependencies(
 ) {
   if (artifactId === "plugin/raw-payload") return [];
   if (artifactId === "runtime/raw-capture") return [];
-  if (artifactId.startsWith("source/code-file/")) return ["plugin/raw-payload"];
+  if (artifactId === "plugin/capability-report") return ["plugin/raw-payload"];
+  if (artifactId.endsWith("/metadata") && artifactId.startsWith("source/code-file/")) {
+    return ["plugin/raw-payload"];
+  }
+  if (artifactId.endsWith("/source") && artifactId.startsWith("source/code-file/")) {
+    const metadataArtifactId = artifactId.replace(/\/source$/, "/metadata");
+    return [metadataArtifactId];
+  }
+  if (artifactId === "source/code-compatibility") {
+    return [
+      "plugin/raw-payload",
+      ...(sourceArtifacts?.codeFiles ?? []).flatMap((entry) =>
+        allCodeFileArtifactIds(entry),
+      ),
+    ];
+  }
+  if (artifactId === "source/override-assignments") {
+    const codeFileDependencies = unique(
+      (sourceArtifacts?.codeFiles ?? []).flatMap((entry) =>
+        allCodeFileArtifactIds(entry),
+      ),
+    );
+    return codeFileDependencies.length > 0
+      ? ["plugin/raw-payload", ...codeFileDependencies]
+      : ["plugin/raw-payload"];
+  }
   if (artifactId === "source/component-families") {
-    const codeFileDependencies = (sourceArtifacts?.codeFiles ?? []).map(
-      (entry) => entry.artifactId,
+    const codeFileDependencies = unique(
+      (sourceArtifacts?.codeFiles ?? []).flatMap((entry) =>
+        allCodeFileArtifactIds(entry),
+      ),
     );
     return codeFileDependencies.length > 0
       ? ["plugin/raw-payload", ...codeFileDependencies]
@@ -2992,17 +5411,33 @@ function inferArtifactDependencies(
       ...(sourceArtifacts?.componentFamiliesArtifactId
         ? [sourceArtifacts.componentFamiliesArtifactId]
         : []),
-      ...(sourceArtifacts?.codeFiles ?? []).map((entry) => entry.artifactId),
+      ...(sourceArtifacts?.overrideAssignmentsArtifactId
+        ? [sourceArtifacts.overrideAssignmentsArtifactId]
+        : []),
+      ...(sourceArtifacts?.capabilityReportArtifactId
+        ? [sourceArtifacts.capabilityReportArtifactId]
+        : []),
+      ...(sourceArtifacts?.codeFiles ?? []).flatMap((entry) =>
+        allCodeFileArtifactIds(entry),
+      ),
     ];
   }
   if (artifactId === "ir/normalized") {
     return [
       "plugin/raw-payload",
+      ...(sourceArtifacts?.capabilityReportArtifactId
+        ? [sourceArtifacts.capabilityReportArtifactId]
+        : []),
+      ...(sourceArtifacts?.overrideAssignmentsArtifactId
+        ? [sourceArtifacts.overrideAssignmentsArtifactId]
+        : []),
       "runtime/raw-capture",
       ...(sourceArtifacts?.componentFamiliesArtifactId
         ? [sourceArtifacts.componentFamiliesArtifactId]
         : []),
-      ...(sourceArtifacts?.codeFiles ?? []).map((entry) => entry.artifactId),
+      ...(sourceArtifacts?.codeFiles ?? []).flatMap((entry) =>
+        allCodeFileArtifactIds(entry),
+      ),
     ];
   }
   if (artifactId === "generated/project") return ["ir/normalized"];
@@ -3013,12 +5448,17 @@ function inferArtifactDependencies(
   if (artifactId === "manifest/revision") {
     return ["ir/normalized", "validation/generated", "manifest/source-artifacts"];
   }
+  if (artifactId === "manifest/status") return [];
+  if (artifactId === "manifest/parent") return ["manifest/revision"];
   if (artifactId === "manifest/invalidation") return ["manifest/revision"];
   if (artifactId === "manifest/artifact-index") return ["manifest/revision"];
+  if (artifactId === "manifest/responsive-recapture") {
+    return ["runtime/raw-capture", "manifest/revision"];
+  }
   if (artifactId === "attempt/best" || artifactId === "attempt/patch-history") {
     return ["ir/normalized"];
   }
-  if (artifactId === "debug/artifacts") return ["generated/project"];
+  if (artifactId.startsWith("debug/")) return ["generated/project"];
   return [];
 }
 
@@ -3027,33 +5467,67 @@ async function hashFile(filePath: string) {
   return crypto.createHash("sha256").update(content).digest("hex");
 }
 
-function createSourceArtifactsPreview(ir: ExportIR): SourceArtifactsManifest {
+function createArtifactContentHash(value: unknown) {
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify(value))
+    .digest("hex");
+}
+
+async function fileExists(filePath: string) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function createSourceArtifactsPreview(
+  input: SourceArtifactsInput,
+): SourceArtifactsManifest {
   return {
     generatedAt: new Date().toISOString(),
     componentFamiliesArtifactId:
-      (ir.componentFamilies?.length ?? 0) > 0
+      (input.componentFamilies?.length ?? 0) > 0
         ? "source/component-families"
         : undefined,
-    codeFiles: (ir.codeFiles ?? []).map((file, index) => ({
-      id: file.id,
-      name: file.name,
-      path: file.path,
-      versionId: file.versionId,
-      hasContent: file.hasContent ?? Boolean(file.content),
-      contentHash: file.contentHash,
-      contentByteLength: file.contentByteLength,
-      artifactId:
-        file.contentHash || file.id || file.path
-          ? `source/code-file/${slugSegment(
-              file.contentHash ??
-                file.id ??
-                file.path ??
-                `${file.name}-${index}`,
-            )}`
-          : `source/code-file/${slugSegment(`${file.name}-${index}`)}`,
-      metadataPath: "",
-      sourcePath: undefined,
-    })),
+    overrideAssignmentsPath:
+      (input.overrideAssignments?.length ?? 0) > 0
+        ? "source-artifacts/override-assignments.json"
+        : undefined,
+    overrideAssignmentsArtifactId:
+      (input.overrideAssignments?.length ?? 0) > 0
+        ? "source/override-assignments"
+        : undefined,
+    capabilityReportPath: readCapabilityReport(input.pluginCapture)
+      ? "capability-report.json"
+      : undefined,
+    capabilityReportArtifactId: readCapabilityReport(input.pluginCapture)
+      ? "plugin/capability-report"
+      : undefined,
+    codeFiles: (input.codeFiles ?? []).map((file, index) => {
+      const artifactRoot = createCodeFileArtifactRoot(file, index);
+      const hasContent = file.hasContent ?? Boolean(file.content);
+      const baseName = createCodeFileArtifactBaseName(file, index);
+      const extension = inferCodeFileExtension(file);
+      return {
+        id: file.id,
+        name: file.name,
+        path: file.path,
+        versionId: file.versionId,
+        hasContent,
+        contentHash: file.contentHash,
+        contentByteLength: file.contentByteLength,
+        artifactId: artifactRoot,
+        metadataArtifactId: `${artifactRoot}/metadata`,
+        sourceArtifactId: hasContent ? `${artifactRoot}/source` : undefined,
+        metadataPath: `source-artifacts/code-files/${baseName}.json`,
+        sourcePath: hasContent
+          ? `source-artifacts/code-files/${baseName}${extension}`
+          : undefined,
+      };
+    }),
   };
 }
 
@@ -3078,7 +5552,7 @@ function createSourceArtifactDiff(
   for (const [identity, currentEntry] of currentByIdentity) {
     const parentEntry = parentByIdentity.get(identity);
     if (!parentEntry) {
-      addedCodeFileArtifactIds.push(currentEntry.artifactId);
+      addedCodeFileArtifactIds.push(primaryCodeFileArtifactId(currentEntry));
       continue;
     }
     if (
@@ -3086,38 +5560,53 @@ function createSourceArtifactDiff(
       parentEntry.contentHash &&
       currentEntry.contentHash === parentEntry.contentHash
     ) {
-      unchangedCodeFileArtifactIds.push(currentEntry.artifactId);
+      unchangedCodeFileArtifactIds.push(primaryCodeFileArtifactId(currentEntry));
     } else if (
       currentEntry.contentHash &&
       parentEntry.contentHash &&
       currentEntry.contentHash !== parentEntry.contentHash
     ) {
-      changedCodeFileArtifactIds.push(currentEntry.artifactId);
+      changedCodeFileArtifactIds.push(primaryCodeFileArtifactId(currentEntry));
     } else if (
       currentEntry.hasContent === parentEntry.hasContent &&
       currentEntry.contentByteLength === parentEntry.contentByteLength &&
       currentEntry.name === parentEntry.name &&
       currentEntry.path === parentEntry.path
     ) {
-      unchangedCodeFileArtifactIds.push(currentEntry.artifactId);
+      unchangedCodeFileArtifactIds.push(primaryCodeFileArtifactId(currentEntry));
     } else {
-      changedCodeFileArtifactIds.push(currentEntry.artifactId);
+      changedCodeFileArtifactIds.push(primaryCodeFileArtifactId(currentEntry));
     }
   }
 
   for (const [identity, parentEntry] of parentByIdentity) {
     if (!currentByIdentity.has(identity)) {
-      removedCodeFileArtifactIds.push(parentEntry.artifactId);
+      removedCodeFileArtifactIds.push(primaryCodeFileArtifactId(parentEntry));
     }
   }
 
   const currentFamiliesArtifactId = current?.componentFamiliesArtifactId;
   const parentFamiliesArtifactId = parent?.componentFamiliesArtifactId;
+  const currentFamiliesHash = current?.componentFamiliesHash;
+  const parentFamiliesHash = parent?.componentFamiliesHash;
+  const currentOverrideAssignmentsArtifactId =
+    current?.overrideAssignmentsArtifactId;
+  const parentOverrideAssignmentsArtifactId =
+    parent?.overrideAssignmentsArtifactId;
+  const currentOverrideAssignmentsHash = current?.overrideAssignmentsHash;
+  const parentOverrideAssignmentsHash = parent?.overrideAssignmentsHash;
   const componentFamiliesChanged =
     changedCodeFileArtifactIds.length > 0 ||
     addedCodeFileArtifactIds.length > 0 ||
     removedCodeFileArtifactIds.length > 0 ||
-    currentFamiliesArtifactId !== parentFamiliesArtifactId;
+    currentFamiliesArtifactId !== parentFamiliesArtifactId ||
+    currentFamiliesHash !== parentFamiliesHash;
+  const overrideAssignmentsChanged =
+    currentOverrideAssignmentsArtifactId !== parentOverrideAssignmentsArtifactId ||
+    currentOverrideAssignmentsHash !== parentOverrideAssignmentsHash;
+  const capabilityReportChanged =
+    current?.capabilityReportArtifactId !== parent?.capabilityReportArtifactId ||
+    current?.capabilityReportHash !== parent?.capabilityReportHash;
 
   return {
     changedCodeFileArtifactIds,
@@ -3127,6 +5616,10 @@ function createSourceArtifactDiff(
     parentComponentFamiliesArtifactId: parentFamiliesArtifactId,
     currentComponentFamiliesArtifactId: currentFamiliesArtifactId,
     componentFamiliesChanged,
+    parentOverrideAssignmentsArtifactId,
+    currentOverrideAssignmentsArtifactId,
+    overrideAssignmentsChanged,
+    capabilityReportChanged,
   };
 }
 
@@ -3139,9 +5632,26 @@ function sourceArtifactIdentity(
   return entry.id ?? entry.path ?? `${entry.name}:${entry.versionId ?? ""}`;
 }
 
+function primaryCodeFileArtifactId(
+  entry: SourceArtifactsManifest["codeFiles"][number],
+) {
+  return entry.sourceArtifactId ?? entry.metadataArtifactId ?? entry.artifactId;
+}
+
+function allCodeFileArtifactIds(
+  entry: SourceArtifactsManifest["codeFiles"][number],
+) {
+  return unique(
+    [
+      entry.metadataArtifactId,
+      entry.sourceArtifactId,
+    ].filter((value): value is string => typeof value === "string" && value.length > 0),
+  );
+}
+
 async function writeSourceArtifacts(
   exportDir: string,
-  ir: ExportIR,
+  input: SourceArtifactsInput,
 ): Promise<SourceArtifactsManifest> {
   const rootDir = path.join(exportDir, "source-artifacts");
   const codeFilesDir = path.join(rootDir, "code-files");
@@ -3149,23 +5659,44 @@ async function writeSourceArtifacts(
 
   let componentFamiliesPath: string | undefined;
   let componentFamiliesArtifactId: string | undefined;
-  if ((ir.componentFamilies?.length ?? 0) > 0) {
+  let componentFamiliesHash: string | undefined;
+  let overrideAssignmentsPath: string | undefined;
+  let overrideAssignmentsArtifactId: string | undefined;
+  let overrideAssignmentsHash: string | undefined;
+  let capabilityReportPath: string | undefined;
+  let capabilityReportArtifactId: string | undefined;
+  let capabilityReportHash: string | undefined;
+  if ((input.componentFamilies?.length ?? 0) > 0) {
+    const serializedFamilies = input.componentFamilies ?? [];
     const target = path.join(rootDir, "component-families.json");
-    await writeJsonFile(target, ir.componentFamilies ?? []);
+    await writeJsonFile(target, serializedFamilies);
     componentFamiliesPath = relativeToExport(exportDir, target);
     componentFamiliesArtifactId = "source/component-families";
+    componentFamiliesHash = createArtifactContentHash(serializedFamilies);
+  }
+  if ((input.overrideAssignments?.length ?? 0) > 0) {
+    const serializedAssignments = input.overrideAssignments ?? [];
+    const target = path.join(rootDir, "override-assignments.json");
+    await writeJsonFile(target, serializedAssignments);
+    overrideAssignmentsPath = relativeToExport(exportDir, target);
+    overrideAssignmentsArtifactId = "source/override-assignments";
+    overrideAssignmentsHash = createArtifactContentHash(serializedAssignments);
+  }
+  const capabilityReport = readCapabilityReport(input.pluginCapture);
+  if (capabilityReport) {
+    const target = path.join(exportDir, "capability-report.json");
+    await writeJsonFile(target, capabilityReport);
+    capabilityReportPath = relativeToExport(exportDir, target);
+    capabilityReportArtifactId = "plugin/capability-report";
+    capabilityReportHash = createArtifactContentHash(capabilityReport);
   }
 
   const codeFiles = await Promise.all(
-    (ir.codeFiles ?? []).map(async (file, index) => {
+    (input.codeFiles ?? []).map(async (file, index) => {
       const baseName = createCodeFileArtifactBaseName(file, index);
       const metadataPath = path.join(codeFilesDir, `${baseName}.json`);
-      const artifactId =
-        file.contentHash || file.id || file.path
-          ? `source/code-file/${slugSegment(
-              file.contentHash ?? file.id ?? file.path ?? baseName,
-            )}`
-          : `source/code-file/${baseName}`;
+      const artifactId = createCodeFileArtifactRoot(file, index);
+      const metadataArtifactId = `${artifactId}/metadata`;
       const metadata = {
         id: file.id,
         name: file.name,
@@ -3183,11 +5714,13 @@ async function writeSourceArtifacts(
       await writeJsonFile(metadataPath, metadata);
 
       let sourcePath: string | undefined;
+      let sourceArtifactId: string | undefined;
       if (typeof file.content === "string" && file.content.length > 0) {
         const extension = inferCodeFileExtension(file);
         const target = path.join(codeFilesDir, `${baseName}${extension}`);
         await writeFile(target, file.content);
         sourcePath = relativeToExport(exportDir, target);
+        sourceArtifactId = `${artifactId}/source`;
       }
 
       return {
@@ -3199,6 +5732,8 @@ async function writeSourceArtifacts(
         contentHash: file.contentHash,
         contentByteLength: file.contentByteLength,
         artifactId,
+        metadataArtifactId,
+        sourceArtifactId,
         metadataPath: relativeToExport(exportDir, metadataPath),
         sourcePath,
       };
@@ -3209,10 +5744,364 @@ async function writeSourceArtifacts(
     generatedAt: new Date().toISOString(),
     componentFamiliesPath,
     componentFamiliesArtifactId,
+    componentFamiliesHash,
+    overrideAssignmentsPath,
+    overrideAssignmentsArtifactId,
+    overrideAssignmentsHash,
+    capabilityReportPath,
+    capabilityReportArtifactId,
+    capabilityReportHash,
     codeFiles,
   } satisfies SourceArtifactsManifest;
   await writeJsonFile(path.join(rootDir, "manifest.json"), manifest);
   return manifest;
+}
+
+async function writeLegacySourceArtifacts(input: {
+  exportDir: string;
+  normalizedIr: Record<string, unknown>;
+  pluginCapture: PluginCanvasCapture;
+}): Promise<SourceArtifactsManifest> {
+  const rootDir = path.join(input.exportDir, "source-artifacts");
+  const codeFilesDir = path.join(rootDir, "code-files");
+  await mkdirp(codeFilesDir);
+
+  const normalizedCodeFiles = Array.isArray(input.normalizedIr.codeFiles)
+    ? (input.normalizedIr.codeFiles as Array<Record<string, unknown>>)
+    : [];
+  const normalizedComponentFamilies = Array.isArray(
+    input.normalizedIr.componentFamilies,
+  )
+    ? (input.normalizedIr.componentFamilies as Array<Record<string, unknown>>)
+    : [];
+  const normalizedOverrideAssignments = Array.isArray(
+    input.normalizedIr.overrideAssignments,
+  )
+    ? (input.normalizedIr.overrideAssignments as Array<Record<string, unknown>>)
+    : [];
+
+  let componentFamiliesPath: string | undefined;
+  let componentFamiliesArtifactId: string | undefined;
+  let componentFamiliesHash: string | undefined;
+  let overrideAssignmentsPath: string | undefined;
+  let overrideAssignmentsArtifactId: string | undefined;
+  let overrideAssignmentsHash: string | undefined;
+  let capabilityReportPath: string | undefined;
+  let capabilityReportArtifactId: string | undefined;
+  let capabilityReportHash: string | undefined;
+
+  if (normalizedComponentFamilies.length > 0) {
+    const target = path.join(rootDir, "component-families.json");
+    await writeJsonFile(target, normalizedComponentFamilies);
+    componentFamiliesPath = relativeToExport(input.exportDir, target);
+    componentFamiliesArtifactId = "source/component-families";
+    componentFamiliesHash = createArtifactContentHash(normalizedComponentFamilies);
+  }
+
+  if (normalizedOverrideAssignments.length > 0) {
+    const target = path.join(rootDir, "override-assignments.json");
+    await writeJsonFile(target, normalizedOverrideAssignments);
+    overrideAssignmentsPath = relativeToExport(input.exportDir, target);
+    overrideAssignmentsArtifactId = "source/override-assignments";
+    overrideAssignmentsHash = createArtifactContentHash(
+      normalizedOverrideAssignments,
+    );
+  }
+
+  const capabilityReport = readCapabilityReport(input.pluginCapture);
+  if (capabilityReport) {
+    const target = path.join(input.exportDir, "capability-report.json");
+    await writeJsonFile(target, capabilityReport);
+    capabilityReportPath = relativeToExport(input.exportDir, target);
+    capabilityReportArtifactId = "plugin/capability-report";
+    capabilityReportHash = createArtifactContentHash(capabilityReport);
+  }
+
+  const codeFiles = await Promise.all(
+    normalizedCodeFiles.map(async (file, index) => {
+      const normalizedFile = {
+        id: typeof file.id === "string" ? file.id : undefined,
+        name:
+          typeof file.name === "string" && file.name.length > 0
+            ? file.name
+            : `CodeFile${index + 1}.tsx`,
+        path: typeof file.path === "string" ? file.path : undefined,
+        versionId:
+          typeof file.versionId === "string" ? file.versionId : undefined,
+        exports: Array.isArray(file.exports)
+          ? file.exports.filter((value): value is string => typeof value === "string")
+          : undefined,
+        exportDetails: Array.isArray(file.exportDetails)
+          ? file.exportDetails
+          : undefined,
+        isDefaultExport:
+          typeof file.isDefaultExport === "boolean"
+            ? file.isDefaultExport
+            : undefined,
+        insertURL:
+          typeof file.insertURL === "string" ? file.insertURL : undefined,
+        source: typeof file.source === "string" ? file.source : undefined,
+        content: typeof file.content === "string" ? file.content : undefined,
+        contentHash:
+          typeof file.contentHash === "string" ? file.contentHash : undefined,
+        contentByteLength:
+          typeof file.contentByteLength === "number"
+            ? file.contentByteLength
+            : undefined,
+        hasContent:
+          typeof file.hasContent === "boolean"
+            ? file.hasContent
+            : typeof file.content === "string" && file.content.length > 0,
+      } satisfies FramerCodeFile;
+      const baseName = createCodeFileArtifactBaseName(normalizedFile, index);
+      const metadataPath = path.join(codeFilesDir, `${baseName}.json`);
+      const artifactId = createCodeFileArtifactRoot(normalizedFile, index);
+      const metadataArtifactId = `${artifactId}/metadata`;
+      await writeJsonFile(metadataPath, {
+        id: normalizedFile.id,
+        name: normalizedFile.name,
+        path: normalizedFile.path,
+        versionId: normalizedFile.versionId,
+        exports: normalizedFile.exports,
+        exportDetails: normalizedFile.exportDetails,
+        isDefaultExport: normalizedFile.isDefaultExport,
+        insertURL: normalizedFile.insertURL,
+        source: normalizedFile.source,
+        hasContent: normalizedFile.hasContent,
+        contentHash: normalizedFile.contentHash,
+        contentByteLength: normalizedFile.contentByteLength,
+      });
+
+      let sourcePath: string | undefined;
+      let sourceArtifactId: string | undefined;
+      if (typeof normalizedFile.content === "string" && normalizedFile.content.length > 0) {
+        const extension = inferCodeFileExtension(normalizedFile);
+        const target = path.join(codeFilesDir, `${baseName}${extension}`);
+        await writeFile(target, normalizedFile.content);
+        sourcePath = relativeToExport(input.exportDir, target);
+        sourceArtifactId = `${artifactId}/source`;
+      }
+
+      return {
+        id: normalizedFile.id,
+        name: normalizedFile.name,
+        path: normalizedFile.path,
+        versionId: normalizedFile.versionId,
+        hasContent: normalizedFile.hasContent,
+        contentHash: normalizedFile.contentHash,
+        contentByteLength: normalizedFile.contentByteLength,
+        artifactId,
+        metadataArtifactId,
+        sourceArtifactId,
+        metadataPath: relativeToExport(input.exportDir, metadataPath),
+        sourcePath,
+      };
+    }),
+  );
+
+  const manifest = {
+    generatedAt: new Date().toISOString(),
+    componentFamiliesPath,
+    componentFamiliesArtifactId,
+    componentFamiliesHash,
+    overrideAssignmentsPath,
+    overrideAssignmentsArtifactId,
+    overrideAssignmentsHash,
+    capabilityReportPath,
+    capabilityReportArtifactId,
+    capabilityReportHash,
+    codeFiles,
+  } satisfies SourceArtifactsManifest;
+  await writeJsonFile(path.join(rootDir, "manifest.json"), manifest);
+  return manifest;
+}
+
+function readCapabilityReport(pluginCapture: PluginCanvasCapture) {
+  const report = pluginCapture.context?.capabilities?.capabilityReport;
+  return report && typeof report === "object"
+    ? (report as Record<string, unknown>)
+    : null;
+}
+
+function createSourceEvidenceSummary(
+  ir: ExportIR,
+  sourceArtifacts?: SourceArtifactsManifest | null,
+): SourceEvidenceSummary {
+  const capabilityReport = readCapabilityReport(ir.pluginCapture);
+  const capabilityCodeFiles =
+    capabilityReport?.codeFiles && typeof capabilityReport.codeFiles === "object"
+      ? (capabilityReport.codeFiles as Record<string, unknown>)
+      : null;
+  const codeFileEntries = sourceArtifacts?.codeFiles ?? [];
+  const codeFileCount = Math.max(ir.codeFiles?.length ?? 0, codeFileEntries.length);
+  const readableCodeFileCount = codeFileEntries.filter((entry) => entry.hasContent).length;
+  const unreadableCodeFileCount = Math.max(0, codeFileCount - readableCodeFileCount);
+  const overrideAssignmentCount = ir.overrideAssignments?.length ?? 0;
+  const unresolvedOverrideCount = (ir.overrideAssignments ?? []).filter(
+    (assignment) => assignment.assignmentStatus !== "resolved",
+  ).length;
+  const codeFileApiReadable =
+    typeof capabilityCodeFiles?.readable === "boolean"
+      ? capabilityCodeFiles.readable
+      : null;
+  const reportedCodeFileCount =
+    typeof capabilityCodeFiles?.count === "number" ? capabilityCodeFiles.count : codeFileCount;
+  const reportedReadableCodeFileCount =
+    typeof capabilityCodeFiles?.contentReadableCount === "number"
+      ? capabilityCodeFiles.contentReadableCount
+      : readableCodeFileCount;
+  const reasons: string[] = [];
+  const warnings: string[] = [];
+
+  if (reportedCodeFileCount > 0 && codeFileApiReadable === false) {
+    reasons.push("code-file-api-unavailable");
+  }
+  if (
+    reportedCodeFileCount > 0 &&
+    reportedReadableCodeFileCount < reportedCodeFileCount
+  ) {
+    reasons.push("code-file-source-unreadable");
+  }
+  if (unreadableCodeFileCount > 0 && !reasons.includes("code-file-source-unreadable")) {
+    reasons.push("code-file-source-unreadable");
+  }
+  if (overrideAssignmentCount > 0 && unresolvedOverrideCount > 0) {
+    warnings.push("override-assignment-unresolved");
+  }
+
+  return {
+    status: reasons.length > 0 ? "partial" : "complete",
+    reasons,
+    warnings,
+    codeFileCount: reportedCodeFileCount,
+    readableCodeFileCount: reportedReadableCodeFileCount,
+    unreadableCodeFileCount: Math.max(
+      unreadableCodeFileCount,
+      reportedCodeFileCount - reportedReadableCodeFileCount,
+    ),
+    overrideAssignmentCount,
+    unresolvedOverrideCount,
+    capabilityReportPresent: capabilityReport !== null,
+    codeFileApiReadable,
+  };
+}
+
+function collectUnsupportedBehavior(input: {
+  codeCompatibilityReport: ReturnType<typeof analyzeCodeFilesCompatibility>;
+  warnings: ExportWarning[];
+}) {
+  const issues: Array<{
+    kind: "runtime-fallback-required" | "unsupported" | "unsupported-animation";
+    scope: "code-file" | "runtime";
+    name: string;
+    reasons: string[];
+  }> = [];
+
+  for (const file of input.codeCompatibilityReport.files) {
+    if (
+      file.compatibility === "runtime-fallback-required" ||
+      file.compatibility === "unsupported"
+    ) {
+      issues.push({
+        kind: file.compatibility,
+        scope: "code-file",
+        name: file.name,
+        reasons: file.reasons,
+      });
+    }
+  }
+
+  for (const warning of input.warnings) {
+    if (warning.type === "unsupported_animation") {
+      issues.push({
+        kind: "unsupported-animation",
+        scope: "runtime",
+        name: "Motion fidelity",
+        reasons: [warning.message],
+      });
+    }
+  }
+
+  return issues;
+}
+
+function createUnadaptedCodeFileArtifacts(
+  ir: ExportIR,
+  codeCompatibilityReport: ReturnType<typeof analyzeCodeFilesCompatibility>,
+): UnadaptedCodeFileArtifact[] {
+  return codeCompatibilityReport.files.flatMap((entry) => {
+    if (
+      entry.compatibility !== "runtime-fallback-required" &&
+      entry.compatibility !== "unsupported"
+    ) {
+      return [];
+    }
+
+    const file =
+      (ir.codeFiles ?? []).find(
+        (candidate) =>
+          candidate.id === entry.codeFileId ||
+          candidate.path === entry.path ||
+          candidate.name === entry.name,
+      ) ?? null;
+    const index = file ? (ir.codeFiles ?? []).indexOf(file) : -1;
+    const baseName = createCodeFileArtifactBaseName(
+      file ?? { name: entry.name },
+      index >= 0 ? index : 0,
+    );
+    const sourcePath =
+      file && (file.hasContent ?? Boolean(file.content))
+        ? `unadapted-components/${baseName}${inferCodeFileExtension(file)}`
+        : undefined;
+
+    return [
+      {
+        codeFileId: file?.id ?? entry.codeFileId,
+        name: file?.name ?? entry.name,
+        compatibility: entry.compatibility,
+        reasons: entry.reasons,
+        sourcePath,
+        metadataPath: `unadapted-components/${baseName}.json`,
+      },
+    ];
+  });
+}
+
+async function writeUnadaptedCodeFileArtifacts(
+  exportDir: string,
+  ir: ExportIR,
+  artifacts: UnadaptedCodeFileArtifact[],
+) {
+  if (artifacts.length === 0) return;
+  const dir = path.join(exportDir, "unadapted-components");
+  await mkdirp(dir);
+
+  for (const artifact of artifacts) {
+    const file =
+      (ir.codeFiles ?? []).find(
+        (entry) =>
+          entry.id === artifact.codeFileId || entry.name === artifact.name,
+      ) ?? null;
+    const metadataTarget = path.join(exportDir, artifact.metadataPath);
+    await writeJsonFile(metadataTarget, {
+      codeFileId: artifact.codeFileId ?? file?.id ?? null,
+      name: artifact.name,
+      path: file?.path ?? null,
+      compatibility: artifact.compatibility,
+      reasons: artifact.reasons,
+      exports: file?.exports ?? [],
+      exportDetails: file?.exportDetails ?? [],
+      sourcePath: artifact.sourcePath ?? null,
+      hasContent: file?.hasContent ?? Boolean(file?.content),
+      contentHash: file?.contentHash ?? null,
+      contentByteLength: file?.contentByteLength ?? null,
+    });
+
+    if (!artifact.sourcePath || !file?.content) continue;
+    const sourceTarget = path.join(exportDir, artifact.sourcePath);
+    await mkdirp(path.dirname(sourceTarget));
+    await writeFile(sourceTarget, file.content.endsWith("\n") ? file.content : `${file.content}\n`);
+  }
 }
 
 function createCodeFileArtifactBaseName(file: FramerCodeFile, index: number) {
@@ -3222,6 +6111,10 @@ function createCodeFileArtifactBaseName(file: FramerCodeFile, index: number) {
     file.path ??
     `${file.name || "code-file"}-${index}`;
   return slugSegment(seed);
+}
+
+function createCodeFileArtifactRoot(file: FramerCodeFile, index: number) {
+  return `source/code-file/${createCodeFileArtifactBaseName(file, index)}`;
 }
 
 function inferCodeFileExtension(file: FramerCodeFile) {
@@ -3240,6 +6133,10 @@ function slugSegment(value: string) {
   const trimmed = value.trim().toLowerCase();
   const normalized = trimmed.replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
   return normalized || "artifact";
+}
+
+function unique<T>(values: T[]) {
+  return Array.from(new Set(values));
 }
 
 function summarizeStyleExtraction(ir: ExportIR) {

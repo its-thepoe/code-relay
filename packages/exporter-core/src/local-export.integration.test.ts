@@ -80,6 +80,10 @@ function createPluginCapture(): PluginCanvasCapture {
   };
 }
 
+function routeCacheFileName(routePath: string) {
+  return `${routePath.replace(/^\/+|\/+$/g, "").replace(/[^a-zA-Z0-9_-]+/g, "-") || "home"}.json`;
+}
+
 test("runtime capture property allowlist includes fidelity-critical fields", () => {
   assert.equal(CAPTURED_STYLE_PROPERTIES.includes("background"), true);
   assert.equal(CAPTURED_STYLE_PROPERTIES.includes("paddingTop"), true);
@@ -267,6 +271,35 @@ test("full-site route manifest excludes drafts and the explicit 404 page", () =>
   ]);
 });
 
+test("full-site route manifest classifies redirect and utility routes", () => {
+  const capture = createPluginCapture();
+  capture.context!.sitePages = [
+    { name: "Twitter", path: "/twitter", redirectTo: "https://twitter.com/coderelay" },
+    { name: "Docs", path: "/docs", redirectTo: "/learn" },
+  ];
+
+  assert.deepEqual(readFullSiteRouteManifest(capture), [
+    {
+      path: "/twitter",
+      title: "Twitter",
+      collectionId: undefined,
+      templateId: "/twitter",
+      templatePath: "/twitter",
+      templateKind: "utility",
+      redirectTo: "https://twitter.com/coderelay",
+    },
+    {
+      path: "/docs",
+      title: "Docs",
+      collectionId: undefined,
+      templateId: "/docs",
+      templatePath: "/docs",
+      templateKind: "redirect",
+      redirectTo: "/learn",
+    },
+  ]);
+});
+
 test("generated validation rejects a mounted but visually empty route", async () => {
   const projectDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "coderelay-empty-route-"),
@@ -317,6 +350,396 @@ test("generated validation rejects a mounted but visually empty route", async ()
   );
 });
 
+test("generated validation rejects horizontal overflow at mobile width", async () => {
+  const projectDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-overflow-route-"),
+  );
+  await fs.mkdir(path.join(projectDir, "dist"), { recursive: true });
+  await fs.writeFile(
+    path.join(projectDir, "package.json"),
+    JSON.stringify({
+      name: "overflow-route",
+      private: true,
+      scripts: { build: "node -e \"process.exit(0)\"" },
+    }),
+  );
+  await fs.writeFile(
+    path.join(projectDir, "route-manifest.json"),
+    JSON.stringify([
+      {
+        path: "/",
+        sourceTextLength: 120,
+        sourceNodeCount: 2,
+      },
+    ]),
+  );
+  await fs.writeFile(
+    path.join(projectDir, "placeholder.tsx"),
+    "export const Placeholder = () => null\n",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "placeholder.css"),
+    "body { background: #eef2ff; color: #0f172a; }\n",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "preview.html"),
+    "<!doctype html><html><body>preview</body></html>",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "dist", "index.html"),
+    `<!doctype html>
+    <html>
+      <body style="margin:0;background:#eef2ff;color:#0f172a;font-family:system-ui,sans-serif">
+        <div id="root">
+          <main style="width:100%;min-height:100vh">
+            <div style="width:1200px;height:80px;background:#2563eb;color:white">Overflowing ribbon</div>
+            <p>Responsive validation should catch horizontal overflow.</p>
+          </main>
+        </div>
+      </body>
+    </html>`,
+  );
+
+  await assert.rejects(
+    validateGeneratedProject(projectDir),
+    /responsive validation failed.*horizontalOverflow=true/i,
+  );
+});
+
+test("generated validation rejects a narrow page root", async () => {
+  const projectDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-narrow-root-route-"),
+  );
+  await fs.mkdir(path.join(projectDir, "dist"), { recursive: true });
+  await fs.writeFile(
+    path.join(projectDir, "package.json"),
+    JSON.stringify({
+      name: "narrow-root-route",
+      private: true,
+      scripts: { build: "node -e \"process.exit(0)\"" },
+    }),
+  );
+  await fs.writeFile(
+    path.join(projectDir, "route-manifest.json"),
+    JSON.stringify([
+      {
+        path: "/",
+        sourceTextLength: 120,
+        sourceNodeCount: 2,
+      },
+    ]),
+  );
+  await fs.writeFile(
+    path.join(projectDir, "placeholder.tsx"),
+    "export const Placeholder = () => null\n",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "placeholder.css"),
+    "body { background: #f8fafc; color: #0f172a; }\n",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "preview.html"),
+    "<!doctype html><html><body>preview</body></html>",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "dist", "index.html"),
+    `<!doctype html>
+    <html>
+      <body style="margin:0;background:#f8fafc;color:#0f172a;font-family:system-ui,sans-serif">
+        <div id="root" style="width:320px;margin:0 auto">
+          <main style="min-height:100vh;background:white">
+            <h1>Narrow root</h1>
+            <p>Responsive validation should reject non-full-width page roots.</p>
+          </main>
+        </div>
+      </body>
+    </html>`,
+  );
+
+  await assert.rejects(
+    validateGeneratedProject(projectDir),
+    /responsive validation failed.*fullWidthRoot=false/i,
+  );
+});
+
+test("generated validation executes component-family interaction contracts", async () => {
+  const projectDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-interaction-contracts-pass-"),
+  );
+  await fs.mkdir(path.join(projectDir, "dist"), { recursive: true });
+  await fs.writeFile(
+    path.join(projectDir, "package.json"),
+    JSON.stringify({
+      name: "interaction-contracts-pass",
+      private: true,
+      scripts: { build: "node -e \"process.exit(0)\"" },
+    }),
+  );
+  await fs.writeFile(
+    path.join(projectDir, "route-manifest.json"),
+    JSON.stringify([
+      {
+        path: "/",
+        sourceTextLength: 220,
+        sourceNodeCount: 12,
+      },
+    ]),
+  );
+  await fs.writeFile(
+    path.join(projectDir, "placeholder.tsx"),
+    "export const Placeholder = () => null\n",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "placeholder.css"),
+    "body { background: #fff8ec; color: #1f2937; }\n",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "preview.html"),
+    "<!doctype html><html><body>preview</body></html>",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "dist", "index.html"),
+    `<!doctype html>
+    <html>
+      <body style="margin:0;background:#fff8ec;color:#1f2937;font-family:system-ui,sans-serif">
+        <div id="root">
+          <main style="padding:24px">
+            <article data-framer-component-family="Button" data-framer-component-family-name="Button" data-framer-component-family-placement="route" style="display:grid;gap:12px;padding:16px;background:white;border-radius:16px">
+              <div data-framer-current-variant="button-default">Current variant: <code>Button / Default</code></div>
+              <div style="display:flex;gap:8px">
+                <button type="button" data-framer-variant-button="button-default">Default</button>
+                <button type="button" data-framer-variant-button="button-open">Open</button>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button type="button" data-framer-transition-trigger="click" data-framer-transition-target="button-open">Click</button>
+              </div>
+            </article>
+          </main>
+        </div>
+        <script>
+          const marker = document.querySelector('[data-framer-current-variant]');
+          for (const button of document.querySelectorAll('[data-framer-variant-button]')) {
+            button.addEventListener('click', () => {
+              marker.setAttribute('data-framer-current-variant', button.getAttribute('data-framer-variant-button'));
+            });
+          }
+          const transition = document.querySelector('[data-framer-transition-trigger]');
+          transition?.addEventListener('click', () => {
+            marker.setAttribute('data-framer-current-variant', transition.getAttribute('data-framer-transition-target'));
+          });
+        </script>
+      </body>
+    </html>`,
+  );
+
+  const validation = await validateGeneratedProject(projectDir);
+  assert.equal(validation.interactionContracts.length, 1);
+  assert.equal(validation.interactionContracts[0]?.status, "passed");
+  assert.equal(validation.interactionContracts[0]?.familyId, "Button");
+  assert.equal(validation.interactionContracts[0]?.clickVariantId, "button-open");
+  assert.equal(
+    validation.interactionContracts[0]?.keyboardVariantId,
+    "button-default",
+  );
+});
+
+test("generated validation fails when a component-family interaction contract does not update state", async () => {
+  const projectDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-interaction-contracts-fail-"),
+  );
+  await fs.mkdir(path.join(projectDir, "dist"), { recursive: true });
+  await fs.writeFile(
+    path.join(projectDir, "package.json"),
+    JSON.stringify({
+      name: "interaction-contracts-fail",
+      private: true,
+      scripts: { build: "node -e \"process.exit(0)\"" },
+    }),
+  );
+  await fs.writeFile(
+    path.join(projectDir, "route-manifest.json"),
+    JSON.stringify([
+      {
+        path: "/",
+        sourceTextLength: 220,
+        sourceNodeCount: 12,
+      },
+    ]),
+  );
+  await fs.writeFile(
+    path.join(projectDir, "placeholder.tsx"),
+    "export const Placeholder = () => null\n",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "placeholder.css"),
+    "body { background: #fef2f2; color: #111827; }\n",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "preview.html"),
+    "<!doctype html><html><body>preview</body></html>",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "dist", "index.html"),
+    `<!doctype html>
+    <html>
+      <body style="margin:0;background:#fef2f2;color:#111827;font-family:system-ui,sans-serif">
+        <div id="root">
+          <main style="padding:24px">
+            <article data-framer-component-family="BrokenButton" data-framer-component-family-name="BrokenButton" data-framer-component-family-placement="route" style="display:grid;gap:12px;padding:16px;background:white;border-radius:16px">
+              <div data-framer-current-variant="button-default">Current variant: <code>Button / Default</code></div>
+              <div style="display:flex;gap:8px">
+                <button type="button" data-framer-variant-button="button-default">Default</button>
+                <button type="button" data-framer-variant-button="button-open">Open</button>
+              </div>
+            </article>
+          </main>
+        </div>
+      </body>
+    </html>`,
+  );
+
+  await assert.rejects(
+    validateGeneratedProject(projectDir),
+    /interaction contract failed.*BrokenButton.*Pointer activation did not move/i,
+  );
+});
+
+test("generated validation prefers route-mounted component families over gallery previews", async () => {
+  const projectDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-interaction-contracts-route-priority-"),
+  );
+  await fs.mkdir(path.join(projectDir, "dist"), { recursive: true });
+  await fs.writeFile(
+    path.join(projectDir, "package.json"),
+    JSON.stringify({
+      name: "interaction-contracts-route-priority",
+      private: true,
+      scripts: { build: "node -e \"process.exit(0)\"" },
+    }),
+  );
+  await fs.writeFile(
+    path.join(projectDir, "route-manifest.json"),
+    JSON.stringify([
+      {
+        path: "/",
+        sourceTextLength: 260,
+        sourceNodeCount: 16,
+      },
+    ]),
+  );
+  await fs.writeFile(
+    path.join(projectDir, "placeholder.tsx"),
+    "export const Placeholder = () => null\n",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "placeholder.css"),
+    "body { background: #f8fafc; color: #0f172a; }\n",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "preview.html"),
+    "<!doctype html><html><body>preview</body></html>",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "dist", "index.html"),
+    `<!doctype html>
+    <html>
+      <body style="margin:0;background:#f8fafc;color:#0f172a;font-family:system-ui,sans-serif">
+        <div id="root">
+          <main style="padding:24px;display:grid;gap:16px">
+            <article data-framer-component-family="GalleryButton" data-framer-component-family-name="GalleryButton" data-framer-component-family-placement="gallery" style="display:grid;gap:12px;padding:16px;background:#e2e8f0;border-radius:16px">
+              <div data-framer-current-variant="gallery-default">Current variant: <code>Gallery / Default</code></div>
+              <div style="display:flex;gap:8px">
+                <button type="button" data-framer-variant-button="gallery-default">Default</button>
+                <button type="button" data-framer-variant-button="gallery-open">Open</button>
+              </div>
+            </article>
+            <article data-framer-component-family="RouteButton" data-framer-component-family-name="RouteButton" data-framer-component-family-placement="route" style="display:grid;gap:12px;padding:16px;background:white;border-radius:16px">
+              <div data-framer-current-variant="route-default">Current variant: <code>Route / Default</code></div>
+              <div style="display:flex;gap:8px">
+                <button type="button" data-framer-variant-button="route-default">Default</button>
+                <button type="button" data-framer-variant-button="route-open">Open</button>
+              </div>
+            </article>
+          </main>
+        </div>
+        <script>
+          const routeMarker = document.querySelector('[data-framer-component-family="RouteButton"] [data-framer-current-variant]');
+          for (const button of document.querySelectorAll('[data-framer-component-family="RouteButton"] [data-framer-variant-button]')) {
+            button.addEventListener('click', () => {
+              routeMarker.setAttribute('data-framer-current-variant', button.getAttribute('data-framer-variant-button'));
+            });
+          }
+        </script>
+      </body>
+    </html>`,
+  );
+
+  const validation = await validateGeneratedProject(projectDir);
+  assert.equal(validation.interactionContracts.length, 1);
+  assert.equal(validation.interactionContracts[0]?.familyId, "RouteButton");
+  assert.equal(validation.interactionContracts[0]?.status, "passed");
+});
+
+test("generated validation rejects executable code-file previews that fall back", async () => {
+  const projectDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-code-file-executable-fallback-"),
+  );
+  await fs.mkdir(path.join(projectDir, "dist"), { recursive: true });
+  await fs.writeFile(
+    path.join(projectDir, "package.json"),
+    JSON.stringify({
+      name: "code-file-executable-fallback",
+      private: true,
+      scripts: { build: "node -e \"process.exit(0)\"" },
+    }),
+  );
+  await fs.writeFile(
+    path.join(projectDir, "route-manifest.json"),
+    JSON.stringify([
+      {
+        path: "/",
+        sourceTextLength: 220,
+        sourceNodeCount: 8,
+      },
+    ]),
+  );
+  await fs.writeFile(
+    path.join(projectDir, "placeholder.tsx"),
+    "export const Placeholder = () => null\n",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "placeholder.css"),
+    "body { background: #f8fafc; color: #0f172a; }\n",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "preview.html"),
+    "<!doctype html><html><body>preview</body></html>",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "dist", "index.html"),
+    `<!doctype html>
+    <html>
+      <body style="margin:0;background:#f8fafc;color:#0f172a;font-family:system-ui,sans-serif">
+        <div id="root">
+          <main style="padding:24px">
+            <article data-framer-code-file="Hero.tsx" style="display:grid;gap:12px;padding:16px;background:white;border-radius:16px">
+              <div data-framer-code-file-executable-preview="Hero.tsx" style="display:grid;gap:8px">
+                <div>Executable preview: <code>Hero</code></div>
+                <div data-framer-code-file-executable-fallback="Hero.tsx">Preview unavailable.</div>
+              </div>
+            </article>
+          </main>
+        </div>
+      </body>
+    </html>`,
+  );
+
+  await assert.rejects(
+    validateGeneratedProject(projectDir),
+    /executable code-file contract failed.*Hero\.tsx.*fell back/i,
+  );
+});
+
 test("runLocalExport writes raw runtime capture artifact for plugin-only exports", async () => {
   const outDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "coderelay-local-export-"),
@@ -349,6 +772,9 @@ test("runLocalExport writes raw runtime capture artifact for plugin-only exports
   const debugSummary = JSON.parse(await fs.readFile(debugSummaryPath, "utf8"));
   const invalidationPlan = JSON.parse(
     await fs.readFile(result.invalidationPlanPath!, "utf8"),
+  );
+  const revisionStatus = JSON.parse(
+    await fs.readFile(path.join(result.exportDir, "status.json"), "utf8"),
   );
   const artifactIndex = JSON.parse(
     await fs.readFile(result.artifactIndexPath!, "utf8"),
@@ -404,6 +830,26 @@ test("runLocalExport writes raw runtime capture artifact for plugin-only exports
   assert.equal(debugSummary.attempt, 1);
   assert.equal(debugSummary.selectedAsBest, true);
   assert.equal(invalidationPlan.kind, "initial");
+  assert.equal(revisionStatus.stage, "completed");
+  assert.equal(
+    Array.isArray(revisionStatus.history) &&
+      revisionStatus.history.some(
+        (entry: Record<string, unknown>) => entry.stage === "planning",
+      ) &&
+      revisionStatus.history.some(
+        (entry: Record<string, unknown>) => entry.stage === "capturing",
+      ) &&
+      revisionStatus.history.some(
+        (entry: Record<string, unknown>) => entry.stage === "generating",
+      ) &&
+      revisionStatus.history.some(
+        (entry: Record<string, unknown>) => entry.stage === "validating",
+      ) &&
+      revisionStatus.history.some(
+        (entry: Record<string, unknown>) => entry.stage === "completed",
+      ),
+    true,
+  );
   assert.equal(Array.isArray(invalidationPlan.invalidated), true);
   assert.equal(typeof artifactIndex.fileCount, "number");
   assert.equal(
@@ -411,6 +857,14 @@ test("runLocalExport writes raw runtime capture artifact for plugin-only exports
       artifactIndex.entries.some(
         (entry: Record<string, unknown>) =>
           entry.path === "revision-manifest.json",
+      ),
+    true,
+  );
+  assert.equal(
+    Array.isArray(artifactIndex.entries) &&
+      artifactIndex.entries.some(
+        (entry: Record<string, unknown>) =>
+          entry.id === "manifest/status" && entry.path === "status.json",
       ),
     true,
   );
@@ -433,6 +887,23 @@ test("runLocalExport persists readable code files as source artifacts", async ()
   const pluginCapture = createPluginCapture();
   pluginCapture.context = {
     ...(pluginCapture.context ?? {}),
+    capabilities: {
+      capabilityReport: {
+        codeFiles: {
+          readable: true,
+          count: 1,
+          contentReadableCount: 1,
+          overrideExportCount: 0,
+        },
+        cms: {
+          collectionsReadable: false,
+        },
+        styles: {
+          colorStylesReadable: true,
+          textStylesReadable: true,
+        },
+      },
+    },
     codeFiles: [
       {
         id: "code-file-button",
@@ -454,6 +925,13 @@ test("runLocalExport persists readable code files as source artifacts", async ()
             componentIdentifier: "Button",
             componentName: "Button",
             isPrimaryVariant: true,
+          },
+          {
+            name: "ButtonOverride",
+            type: "override",
+            insertURL: "https://framer.com/m/ButtonOverride.js",
+            componentIdentifier: "Button",
+            componentName: "Button",
           },
         ],
         exports: ["Button"],
@@ -492,13 +970,47 @@ test("runLocalExport persists readable code files as source artifacts", async ()
   const artifactIndex = JSON.parse(
     await fs.readFile(result.artifactIndexPath!, "utf8"),
   ) as Record<string, unknown>;
+  const revisionManifest = JSON.parse(
+    await fs.readFile(result.revisionManifestPath!, "utf8"),
+  ) as Record<string, unknown>;
+  const capabilityReport = JSON.parse(
+    await fs.readFile(result.capabilityReportPath!, "utf8"),
+  ) as Record<string, unknown>;
+  const codeCompatibilityReport = JSON.parse(
+    await fs.readFile(result.codeCompatibilityReportPath!, "utf8"),
+  ) as Record<string, unknown>;
+  const overrideAssignments = JSON.parse(
+    await fs.readFile(
+      path.join(
+        result.exportDir,
+        "source-artifacts",
+        "override-assignments.json",
+      ),
+      "utf8",
+    ),
+  ) as Array<Record<string, unknown>>;
 
   assert.equal(Array.isArray(sourceManifest.codeFiles), true);
+  assert.equal(sourceManifest.capabilityReportPath, "capability-report.json");
+  assert.equal(
+    sourceManifest.overrideAssignmentsPath,
+    "source-artifacts/override-assignments.json",
+  );
   assert.equal(codeFileEntry?.name, "Button.tsx");
   assert.equal(codeFileEntry?.hasContent, true);
   assert.equal(
     typeof codeFileEntry?.artifactId === "string" &&
       String(codeFileEntry.artifactId).startsWith("source/code-file/"),
+    true,
+  );
+  assert.equal(
+    typeof codeFileEntry?.metadataArtifactId === "string" &&
+      String(codeFileEntry.metadataArtifactId).endsWith("/metadata"),
+    true,
+  );
+  assert.equal(
+    typeof codeFileEntry?.sourceArtifactId === "string" &&
+      String(codeFileEntry.sourceArtifactId).endsWith("/source"),
     true,
   );
   assert.equal(typeof codeFileEntry?.sourcePath, "string");
@@ -513,15 +1025,442 @@ test("runLocalExport persists readable code files as source artifacts", async ()
     true,
   );
   assert.equal(
+    (report.sourceEvidence as Record<string, unknown>)?.status,
+    "complete",
+  );
+  assert.equal(
+    Array.isArray((report.sourceEvidence as Record<string, unknown>)?.warnings) &&
+      ((report.sourceEvidence as Record<string, unknown>).warnings as Array<unknown>).includes(
+        "override-assignment-unresolved",
+      ),
+    true,
+  );
+  assert.equal(
+    (revisionManifest.sourceEvidence as Record<string, unknown>)?.status,
+    "complete",
+  );
+  assert.equal(
     Array.isArray(artifactIndex.entries) &&
       artifactIndex.entries.some(
         (entry: Record<string, unknown>) =>
-          entry.id === codeFileEntry?.artifactId &&
+          entry.id === codeFileEntry?.metadataArtifactId &&
           Array.isArray(entry.dependsOn) &&
           entry.dependsOn.includes("plugin/raw-payload"),
       ),
     true,
   );
+  assert.equal(artifactIndex.schemaVersion, 2);
+  assert.equal(typeof artifactIndex.sourceFingerprint, "string");
+  assert.equal(
+    Array.isArray(artifactIndex.entries) &&
+      artifactIndex.entries.some(
+        (entry: Record<string, unknown>) =>
+          entry.id === codeFileEntry?.sourceArtifactId &&
+          Array.isArray(entry.dependsOn) &&
+          entry.dependsOn.includes(String(codeFileEntry?.metadataArtifactId)) &&
+          Array.isArray(entry.dependencyHashes) &&
+          entry.dependencyHashes.length >= 1,
+      ),
+    true,
+  );
+  assert.equal(
+    (capabilityReport.codeFiles as Record<string, unknown>)?.contentReadableCount,
+    1,
+  );
+  assert.equal(codeCompatibilityReport.fileCount, 1);
+  assert.equal(
+    (codeCompatibilityReport.summary as Record<string, unknown>)?.portable,
+    1,
+  );
+  assert.equal(overrideAssignments[0]?.exportName, "ButtonOverride");
+  assert.equal(overrideAssignments[0]?.assignmentStatus, "unresolved");
+  assert.equal(
+    Array.isArray(artifactIndex.entries) &&
+      artifactIndex.entries.some(
+        (entry: Record<string, unknown>) =>
+          entry.id === "plugin/capability-report" &&
+          entry.path === "capability-report.json" &&
+          Array.isArray(entry.dependsOn) &&
+          entry.dependsOn.includes("plugin/raw-payload"),
+      ),
+    true,
+  );
+  assert.equal(
+    Array.isArray(artifactIndex.entries) &&
+      artifactIndex.entries.some(
+        (entry: Record<string, unknown>) =>
+          entry.id === "source/code-compatibility" &&
+          entry.path === "code-compatibility-report.json" &&
+          Array.isArray(entry.dependsOn) &&
+          entry.dependsOn.some((value) => String(value).startsWith("source/code-file/")),
+      ),
+    true,
+  );
+  assert.equal(
+    Array.isArray(artifactIndex.entries) &&
+      artifactIndex.entries.some(
+        (entry: Record<string, unknown>) =>
+          entry.id === "source/override-assignments" &&
+          entry.path === "source-artifacts/override-assignments.json" &&
+          Array.isArray(entry.dependsOn) &&
+          entry.dependsOn.some((value) => String(value).startsWith("source/code-file/")),
+      ),
+    true,
+  );
+});
+
+test("runLocalExport marks exports partial when code file source is unreadable", async () => {
+  const outDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-partial-source-evidence-"),
+  );
+  const pluginCapture = createPluginCapture();
+  pluginCapture.context = {
+    ...(pluginCapture.context ?? {}),
+    capabilities: {
+      capabilityReport: {
+        codeFiles: {
+          readable: true,
+          count: 1,
+          contentReadableCount: 0,
+        },
+      },
+    },
+    codeFiles: [
+      {
+        id: "code-file-hidden",
+        name: "Hidden.tsx",
+        path: "code/Hidden.tsx",
+        versionId: "v1",
+        source: "framer",
+        hasContent: false,
+        exportDetails: [
+          {
+            name: "Hidden",
+            type: "component",
+            insertURL: "https://framer.com/m/Hidden.js",
+            componentIdentifier: "Hidden",
+            componentName: "Hidden",
+            isPrimaryVariant: true,
+          },
+        ],
+        exports: ["Hidden"],
+      },
+    ],
+  };
+
+  const result = await runLocalExport({
+    outDir,
+    pluginCapture,
+    name: "IntegrationSmoke",
+    exportMode: "selection",
+    maxAttempts: 1,
+    targetFidelity: 0.92,
+  });
+
+  const report = JSON.parse(await fs.readFile(result.reportPath, "utf8")) as Record<
+    string,
+    unknown
+  >;
+  const revisionManifest = JSON.parse(
+    await fs.readFile(result.revisionManifestPath!, "utf8"),
+  ) as Record<string, unknown>;
+  const sourceEvidence = report.sourceEvidence as Record<string, unknown>;
+  const manifestSourceEvidence =
+    revisionManifest.sourceEvidence as Record<string, unknown>;
+
+  assert.equal(sourceEvidence.status, "partial");
+  assert.equal(
+    Array.isArray(sourceEvidence.reasons) &&
+      (sourceEvidence.reasons as Array<unknown>).includes(
+        "code-file-source-unreadable",
+      ),
+    true,
+  );
+  assert.equal(sourceEvidence.unreadableCodeFileCount, 1);
+  assert.equal(manifestSourceEvidence.status, "partial");
+  assert.equal(
+    Array.isArray(manifestSourceEvidence.reasons) &&
+      (manifestSourceEvidence.reasons as Array<unknown>).includes(
+        "code-file-source-unreadable",
+      ),
+    true,
+  );
+});
+
+test("runLocalExport lists unsupported behavior in the fidelity report", async () => {
+  const outDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-unsupported-behavior-"),
+  );
+  const pluginCapture = createPluginCapture();
+  pluginCapture.context = {
+    ...(pluginCapture.context ?? {}),
+    capabilities: {
+      capabilityReport: {
+        codeFiles: {
+          readable: true,
+          count: 1,
+          contentReadableCount: 1,
+        },
+      },
+    },
+    codeFiles: [
+      {
+        id: "code-file-unsupported",
+        name: "Unsupported.tsx",
+        path: "code/Unsupported.tsx",
+        versionId: "v1",
+        source: "framer",
+        content:
+          'import Card from "@/components/ui/card"; export function Unsupported(){ return <Card /> }',
+        contentHash: "unsupportedhash",
+        contentByteLength: 88,
+        hasContent: true,
+        exportDetails: [
+          {
+            name: "Unsupported",
+            type: "component",
+            componentIdentifier: "Unsupported",
+            componentName: "Unsupported",
+          },
+        ],
+        exports: ["Unsupported"],
+      },
+    ],
+  };
+
+  const result = await runLocalExport({
+    outDir,
+    pluginCapture,
+    name: "IntegrationSmoke",
+    exportMode: "selection",
+    maxAttempts: 1,
+    targetFidelity: 0.92,
+  });
+
+  const report = JSON.parse(await fs.readFile(result.reportPath, "utf8")) as Record<
+    string,
+    unknown
+  >;
+  const unadaptedSourcePath = path.join(
+    result.exportDir,
+    "unadapted-components",
+    "unsupportedhash.tsx",
+  );
+  const unadaptedMetadataPath = path.join(
+    result.exportDir,
+    "unadapted-components",
+    "unsupportedhash.json",
+  );
+  const unsupportedBehavior = Array.isArray(report.unsupportedBehavior)
+    ? (report.unsupportedBehavior as Array<Record<string, unknown>>)
+    : [];
+  const reportCodeFiles = Array.isArray(report.codeFiles)
+    ? (report.codeFiles as Array<Record<string, unknown>>)
+    : [];
+  const unadaptedMetadata = JSON.parse(
+    await fs.readFile(unadaptedMetadataPath, "utf8"),
+  ) as Record<string, unknown>;
+
+  assert.equal(unsupportedBehavior.length > 0, true);
+  assert.equal(unsupportedBehavior[0]?.kind, "unsupported");
+  assert.equal(unsupportedBehavior[0]?.scope, "code-file");
+  assert.equal(unsupportedBehavior[0]?.name, "Unsupported.tsx");
+  assert.equal(
+    Array.isArray(unsupportedBehavior[0]?.reasons) &&
+      unsupportedBehavior[0]?.reasons?.includes("uses-unresolved-project-aliases"),
+    true,
+  );
+  assert.match(await fs.readFile(unadaptedSourcePath, "utf8"), /Unsupported/);
+  assert.equal(unadaptedMetadata.compatibility, "unsupported");
+  assert.equal(unadaptedMetadata.sourcePath, "unadapted-components/unsupportedhash.tsx");
+  assert.equal(reportCodeFiles[0]?.unadaptedComponentPath, "unadapted-components/unsupportedhash.tsx");
+  assert.equal(reportCodeFiles[0]?.unadaptedMetadataPath, "unadapted-components/unsupportedhash.json");
+});
+
+test("runLocalExport adapts portable code files into executable preview modules", async () => {
+  const outDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-code-file-adaptation-"),
+  );
+  const pluginCapture = createPluginCapture();
+  pluginCapture.context = {
+    ...(pluginCapture.context ?? {}),
+    capabilities: {
+      capabilityReport: {
+        codeFiles: {
+          readable: true,
+          count: 1,
+          contentReadableCount: 1,
+        },
+      },
+    },
+    codeFiles: [
+      {
+        id: "code-file-adapter",
+        name: "Hero.tsx",
+        path: "code/Hero.tsx",
+        versionId: "v1",
+        source: "framer",
+        content: `
+          import * as React from "react";
+          import { RenderTarget, addPropertyControls } from "framer";
+          export function Hero() {
+            return <div data-render-target={RenderTarget.current()}>Hero preview</div>;
+          }
+          addPropertyControls(Hero, {});
+        `,
+        contentHash: "heroadapterhash",
+        contentByteLength: 228,
+        hasContent: true,
+        exportDetails: [
+          {
+            name: "Hero",
+            type: "component",
+            componentIdentifier: "Hero",
+            componentName: "Hero",
+          },
+        ],
+        exports: ["Hero"],
+      },
+    ],
+  };
+
+  const result = await runLocalExport({
+    outDir,
+    pluginCapture,
+    name: "IntegrationSmoke",
+    exportMode: "selection",
+    maxAttempts: 1,
+    targetFidelity: 0.92,
+  });
+
+  const adapterPath = path.join(
+    result.exportDir,
+    "src",
+    "framer-data",
+    "framer-adapter.tsx",
+  );
+  const executablesPath = path.join(
+    result.exportDir,
+    "src",
+    "framer-data",
+    "code-file-executables.tsx",
+  );
+  const adaptedFilePath = path.join(
+    result.exportDir,
+    "src",
+    "framer-generated-code",
+    "code",
+    "Hero.tsx",
+  );
+
+  assert.match(await fs.readFile(adapterPath, "utf8"), /RenderTarget/);
+  assert.match(await fs.readFile(executablesPath, "utf8"), /'Hero\.tsx'/);
+  assert.match(
+    await fs.readFile(executablesPath, "utf8"),
+    /data-framer-code-file-executable-fallback=/,
+  );
+  assert.match(await fs.readFile(adaptedFilePath, "utf8"), /framer-adapter/);
+  assert.equal(result.validation.codeFileExecutions.length, 1);
+  assert.equal(result.validation.codeFileExecutions[0]?.status, "passed");
+  assert.equal(result.validation.codeFileExecutions[0]?.fileName, "Hero.tsx");
+  assert.equal(result.validation.codeFileExecutions[0]?.renderTargetValue, "preview");
+});
+
+test("runLocalExport adapts local code-file imports and records dependency licenses", async () => {
+  const outDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-code-file-local-import-chain-"),
+  );
+  const pluginCapture = createPluginCapture();
+  pluginCapture.context = {
+    ...(pluginCapture.context ?? {}),
+    capabilities: {
+      capabilityReport: {
+        codeFiles: {
+          readable: true,
+          count: 2,
+          contentReadableCount: 2,
+        },
+      },
+    },
+    codeFiles: [
+      {
+        id: "code-file-hero-local",
+        name: "Hero.tsx",
+        path: "code/Hero.tsx",
+        versionId: "v1",
+        source: "framer",
+        content: `
+          import * as React from "react";
+          import clsx from "clsx";
+          import { Card } from "./Card";
+          export function Hero() {
+            return <Card className={clsx("hero-card")}>Hero preview</Card>;
+          }
+        `,
+        contentHash: "hero-local-hash",
+        contentByteLength: 208,
+        hasContent: true,
+        exportDetails: [
+          {
+            name: "Hero",
+            type: "component",
+            componentIdentifier: "Hero",
+            componentName: "Hero",
+          },
+        ],
+        exports: ["Hero"],
+      },
+      {
+        id: "code-file-card-local",
+        name: "Card.tsx",
+        path: "code/Card.tsx",
+        versionId: "v1",
+        source: "framer",
+        content: `
+          import * as React from "react";
+          export function Card(props: React.HTMLAttributes<HTMLDivElement>) {
+            return <div data-card-wrapper="true" {...props} />;
+          }
+        `,
+        contentHash: "card-local-hash",
+        contentByteLength: 170,
+        hasContent: true,
+        exportDetails: [
+          {
+            name: "Card",
+            type: "component",
+            componentIdentifier: "Card",
+            componentName: "Card",
+          },
+        ],
+        exports: ["Card"],
+      },
+    ],
+  };
+
+  const result = await runLocalExport({
+    outDir,
+    pluginCapture,
+    name: "IntegrationSmoke",
+    exportMode: "selection",
+    maxAttempts: 1,
+    targetFidelity: 0.92,
+  });
+
+  const heroFilePath = path.join(
+    result.exportDir,
+    "src",
+    "framer-generated-code",
+    "code",
+    "Hero.tsx",
+  );
+  const dependencyLicensePath = path.join(
+    result.exportDir,
+    "dependency-license-report.json",
+  );
+
+  assert.match(await fs.readFile(heroFilePath, "utf8"), /from '\.\/Card'/);
+  assert.match(await fs.readFile(dependencyLicensePath, "utf8"), /"name": "clsx"/);
 });
 
 test("component-focused improvement revisions write dependency-scoped invalidation entries", async () => {
@@ -574,11 +1513,25 @@ test("component-focused improvement revisions write dependency-scoped invalidati
   const invalidationPlan = JSON.parse(
     await fs.readFile(result.invalidationPlanPath!, "utf8"),
   ) as Record<string, unknown>;
+  const revisionManifest = JSON.parse(
+    await fs.readFile(result.revisionManifestPath!, "utf8"),
+  ) as Record<string, unknown>;
   const invalidated = Array.isArray(invalidationPlan.invalidated)
     ? (invalidationPlan.invalidated as Array<Record<string, unknown>>)
     : [];
 
   assert.equal(invalidationPlan.requestedFocus, "components");
+  assert.equal(Array.isArray(revisionManifest.reusedArtifactIds), true);
+  assert.equal(
+    Array.isArray(revisionManifest.invalidatedArtifacts),
+    true,
+  );
+  assert.equal(revisionManifest.parentInfoPath, "parent.json");
+  const parentInfo = JSON.parse(
+    await fs.readFile(path.join(result.exportDir, "parent.json"), "utf8"),
+  ) as Record<string, unknown>;
+  assert.equal(parentInfo.parentRevisionId, "revision_parent");
+  assert.equal(parentInfo.requestedFocus, "components");
   assert.equal(
     invalidated.some(
       (entry) =>
@@ -786,6 +1739,9 @@ test("component-focused improvements reuse the parent export when source artifac
   const nextReport = JSON.parse(
     await fs.readFile(next.reportPath, "utf8"),
   ) as Record<string, unknown>;
+  const nextBeforeAfter = JSON.parse(
+    await fs.readFile(next.beforeAfterReportPath!, "utf8"),
+  ) as Record<string, unknown>;
   const invalidationPlan = JSON.parse(
     await fs.readFile(next.invalidationPlanPath!, "utf8"),
   ) as Record<string, unknown>;
@@ -794,7 +1750,33 @@ test("component-focused improvements reuse the parent export when source artifac
   assert.equal(next.revisionCacheHit, false);
   assert.equal(nextManifest.parentRevisionId, initialManifest.revisionId);
   assert.equal(nextManifest.reusedBecause, "component-source-unchanged");
+  assert.equal(nextManifest.parentInfoPath, "parent.json");
+  assert.equal(Array.isArray(nextManifest.reusedArtifactIds), true);
   assert.equal(nextReport.reusedBecause, "component-source-unchanged");
+  assert.equal(nextBeforeAfter.parentRevisionId, initialManifest.revisionId);
+  assert.equal(Array.isArray(nextBeforeAfter.metrics), true);
+  assert.equal(
+    (nextBeforeAfter.metrics as Array<Record<string, unknown>>).some(
+      (metric) => metric.label === "Overall fidelity",
+    ),
+    true,
+  );
+  const nextParentInfo = JSON.parse(
+    await fs.readFile(path.join(next.exportDir, "parent.json"), "utf8"),
+  ) as Record<string, unknown>;
+  const nextStatus = JSON.parse(
+    await fs.readFile(path.join(next.exportDir, "status.json"), "utf8"),
+  ) as Record<string, unknown>;
+  assert.equal(nextParentInfo.parentRevisionId, initialManifest.revisionId);
+  assert.equal(nextParentInfo.requestedFocus, "components");
+  assert.equal(nextStatus.stage, "completed");
+  assert.equal(
+    Array.isArray(nextStatus.history) &&
+      nextStatus.history.some(
+        (entry: Record<string, unknown>) => entry.stage === "validating",
+      ),
+    true,
+  );
   assert.equal(
     (sourceDiff.changedCodeFileArtifactIds as Array<unknown>).length,
     0,
@@ -802,6 +1784,123 @@ test("component-focused improvements reuse the parent export when source artifac
   assert.equal(
     (sourceDiff.unchangedCodeFileArtifactIds as Array<unknown>).length,
     1,
+  );
+});
+
+test("component-focused improvements invalidate reused output when override semantics change without code-file content changes", async () => {
+  const rootDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-override-diff-"),
+  );
+  const outDirA = path.join(rootDir, "artifacts", "job-a");
+  const outDirB = path.join(rootDir, "artifacts", "job-b");
+  await fs.mkdir(outDirA, { recursive: true });
+  await fs.mkdir(outDirB, { recursive: true });
+
+  const initialCapture = createPluginCapture();
+  initialCapture.context = {
+    ...(initialCapture.context ?? {}),
+    codeFiles: [
+      {
+        id: "code-file-tabs",
+        name: "Tabs.tsx",
+        path: "code/Tabs.tsx",
+        versionId: "v1",
+        source: "framer",
+        content: 'export function Tabs(){ return <div>same</div> }',
+        contentHash: "tabs-same",
+        contentByteLength: 48,
+        hasContent: true,
+        exportDetails: [
+          { name: "Tabs", type: "component" },
+          {
+            name: "withTabsPrimary",
+            type: "override",
+            componentIdentifier: "TabsPrimary",
+          },
+        ],
+        exports: ["Tabs", "withTabsPrimary"],
+      },
+    ],
+  };
+
+  const initial = await runLocalExport({
+    outDir: outDirA,
+    pluginCapture: initialCapture,
+    name: "IntegrationSmoke",
+    exportMode: "selection",
+    maxAttempts: 1,
+    targetFidelity: 0.92,
+  });
+  const initialManifest = JSON.parse(
+    await fs.readFile(initial.revisionManifestPath!, "utf8"),
+  ) as { revisionId: string };
+
+  const nextCapture = createPluginCapture();
+  nextCapture.context = {
+    ...(nextCapture.context ?? {}),
+    codeFiles: [
+      {
+        id: "code-file-tabs",
+        name: "Tabs.tsx",
+        path: "code/Tabs.tsx",
+        versionId: "v1",
+        source: "framer",
+        content: 'export function Tabs(){ return <div>same</div> }',
+        contentHash: "tabs-same",
+        contentByteLength: 48,
+        hasContent: true,
+        exportDetails: [
+          { name: "Tabs", type: "component" },
+          {
+            name: "withTabsSecondary",
+            type: "override",
+            componentIdentifier: "TabsSecondary",
+          },
+        ],
+        exports: ["Tabs", "withTabsSecondary"],
+      },
+    ],
+  };
+
+  const next = await runLocalExport({
+    outDir: outDirB,
+    pluginCapture: nextCapture,
+    name: "IntegrationSmoke",
+    exportMode: "selection",
+    maxAttempts: 1,
+    targetFidelity: 0.92,
+    revisionRequest: {
+      kind: "improvement",
+      requestedFocus: "components",
+      parentRevisionId: initialManifest.revisionId,
+    },
+  });
+
+  const nextManifest = JSON.parse(
+    await fs.readFile(next.revisionManifestPath!, "utf8"),
+  ) as Record<string, unknown>;
+  const invalidationPlan = JSON.parse(
+    await fs.readFile(next.invalidationPlanPath!, "utf8"),
+  ) as Record<string, unknown>;
+  const sourceDiff = invalidationPlan.sourceDiff as Record<string, unknown>;
+  const invalidated = Array.isArray(invalidationPlan.invalidated)
+    ? (invalidationPlan.invalidated as Array<Record<string, unknown>>)
+    : [];
+
+  assert.equal(nextManifest.reusedBecause, undefined);
+  assert.equal(sourceDiff.overrideAssignmentsChanged, true);
+  assert.equal(
+    Array.isArray(sourceDiff.unchangedCodeFileArtifactIds) &&
+      (sourceDiff.unchangedCodeFileArtifactIds as Array<unknown>).length,
+    1,
+  );
+  assert.equal(
+    invalidated.some(
+      (entry) =>
+        entry.artifact === "source/override-assignments" &&
+        entry.reason === "override-assignment-refresh",
+    ),
+    true,
   );
 });
 
@@ -864,6 +1963,94 @@ test("runLocalExport reuses revision cache across different job output directori
   );
 });
 
+test("runLocalExport ignores a corrupted cached generated file but preserves healthy source artifacts", async () => {
+  const rootDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-corrupt-cache-regeneration-"),
+  );
+  const outDir = path.join(rootDir, "artifacts", "job-a");
+  await fs.mkdir(outDir, { recursive: true });
+
+  const pluginCapture = createPluginCapture();
+  pluginCapture.context = {
+    ...(pluginCapture.context ?? {}),
+    codeFiles: [
+      {
+        id: "code-file-hero",
+        name: "Hero.tsx",
+        path: "code/Hero.tsx",
+        versionId: "v1",
+        source: "framer",
+        content: 'export function Hero(){ return <section>Hero</section> }',
+        contentHash: "hero-v1",
+        contentByteLength: 54,
+        hasContent: true,
+        exports: ["Hero"],
+        exportDetails: [{ name: "Hero", type: "component" }],
+      },
+    ],
+  };
+
+  const input = {
+    outDir,
+    pluginCapture,
+    name: "IntegrationSmoke",
+    exportMode: "selection" as const,
+    maxAttempts: 1,
+    targetFidelity: 0.92,
+  };
+
+  const first = await runLocalExport(input);
+  const firstManifest = JSON.parse(
+    await fs.readFile(first.revisionManifestPath!, "utf8"),
+  ) as { revisionId: string };
+  const cacheExportDir = path.join(
+    rootDir,
+    "revision-cache",
+    firstManifest.revisionId,
+    "export",
+  );
+  const artifactIndex = JSON.parse(
+    await fs.readFile(path.join(cacheExportDir, "artifact-index.json"), "utf8"),
+  ) as {
+    entries: Array<{ path: string; artifactType?: string }>;
+  };
+  const generatedTsxPath = artifactIndex.entries.find(
+    (entry) =>
+      !entry.path.startsWith("source-artifacts/") &&
+      entry.path.endsWith(".tsx") &&
+      entry.artifactType === "source-tsx",
+  )?.path;
+  assert.ok(generatedTsxPath);
+
+  await fs.rm(path.join(cacheExportDir, generatedTsxPath), { force: true });
+
+  const second = await runLocalExport(input);
+  const sourceArtifacts = JSON.parse(
+    await fs.readFile(
+      path.join(second.exportDir, "source-artifacts", "manifest.json"),
+      "utf8",
+    ),
+  ) as {
+    codeFiles?: Array<{ name?: string; hasContent?: boolean; sourcePath?: string }>;
+  };
+
+  assert.equal(second.revisionCacheHit, false);
+  assert.equal(sourceArtifacts.codeFiles?.length, 1);
+  assert.equal(sourceArtifacts.codeFiles?.[0]?.name, "Hero.tsx");
+  assert.equal(sourceArtifacts.codeFiles?.[0]?.hasContent, true);
+  await fs.access(path.join(cacheExportDir, generatedTsxPath));
+  assert.match(
+    await fs.readFile(
+      path.join(
+        second.exportDir,
+        String(sourceArtifacts.codeFiles?.[0]?.sourcePath),
+      ),
+      "utf8",
+    ),
+    /export function Hero/,
+  );
+});
+
 test("runLocalExport can create a revalidate-only revision from a parent revision", async () => {
   const rootDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "coderelay-revalidate-revision-"),
@@ -918,11 +2105,20 @@ test("runLocalExport can create a revalidate-only revision from a parent revisio
   const revalidatedReport = JSON.parse(
     await fs.readFile(revalidated.reportPath, "utf8"),
   ) as Record<string, unknown>;
+  const revalidatedBeforeAfter = JSON.parse(
+    await fs.readFile(revalidated.beforeAfterReportPath!, "utf8"),
+  ) as Record<string, unknown>;
   const revalidatedInvalidation = JSON.parse(
     await fs.readFile(revalidated.invalidationPlanPath!, "utf8"),
   ) as Record<string, unknown>;
   const revalidatedArtifactIndex = JSON.parse(
     await fs.readFile(revalidated.artifactIndexPath!, "utf8"),
+  ) as Record<string, unknown>;
+  const revalidatedParentInfo = JSON.parse(
+    await fs.readFile(path.join(revalidated.exportDir, "parent.json"), "utf8"),
+  ) as Record<string, unknown>;
+  const revalidatedStatus = JSON.parse(
+    await fs.readFile(path.join(revalidated.exportDir, "status.json"), "utf8"),
   ) as Record<string, unknown>;
 
   assert.equal(revalidated.revisionCacheHit, false);
@@ -951,7 +2147,32 @@ test("runLocalExport can create a revalidate-only revision from a parent revisio
       revalidatedInvalidation.reused.includes("generated/project"),
     true,
   );
+  assert.equal(Array.isArray(revalidatedManifest.reusedArtifactIds), true);
+  assert.equal(revalidatedManifest.parentInfoPath, "parent.json");
+  assert.equal(revalidatedParentInfo.parentRevisionId, initialManifest.revisionId);
+  assert.equal(revalidatedParentInfo.requestedFocus, "revalidate");
+  assert.equal(revalidatedBeforeAfter.parentRevisionId, initialManifest.revisionId);
+  assert.equal(Array.isArray(revalidatedBeforeAfter.metrics), true);
+  assert.equal(revalidatedStatus.stage, "completed");
+  assert.equal(
+    Array.isArray(revalidatedStatus.history) &&
+      revalidatedStatus.history.some(
+        (entry: Record<string, unknown>) => entry.stage === "validating",
+      ) &&
+      revalidatedStatus.history.some(
+        (entry: Record<string, unknown>) => entry.stage === "completed",
+      ),
+    true,
+  );
   assert.equal(typeof revalidatedArtifactIndex.fileCount, "number");
+  assert.equal(
+    Array.isArray(revalidatedArtifactIndex.entries) &&
+      revalidatedArtifactIndex.entries.some(
+        (entry: { id?: string; path?: string }) =>
+          entry.id === "manifest/parent" && entry.path === "parent.json",
+      ),
+    true,
+  );
 });
 
 test("runLocalExport rejects revalidate-only revisions without a parent revision id", async () => {
@@ -974,6 +2195,73 @@ test("runLocalExport rejects revalidate-only revisions without a parent revision
     }),
     /Missing parentRevisionId/,
   );
+});
+
+test("runLocalExport writes source artifacts before runtime capture for fresh exports", async () => {
+  const outDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-source-artifacts-first-"),
+  );
+  const pluginCapture = createPluginCapture();
+  pluginCapture.context = {
+    ...(pluginCapture.context ?? {}),
+    codeFiles: [
+      {
+        id: "code-file-hero",
+        name: "Hero.tsx",
+        path: "code/Hero.tsx",
+        versionId: "v1",
+        source: "framer",
+        content: 'export function Hero(){ return <section>Hero</section> }',
+        contentHash: "hero-v1",
+        contentByteLength: 54,
+        hasContent: true,
+        exports: ["Hero"],
+        exportDetails: [{ name: "Hero", type: "component" }],
+      },
+    ],
+  };
+
+  await assert.rejects(
+    runLocalExport({
+      outDir,
+      url: "http://127.0.0.1:9/",
+      pluginCapture,
+      exportMode: "full-site",
+      maxAttempts: 1,
+      targetFidelity: 0.9,
+    }),
+  );
+
+  const runEntries = (await fs.readdir(outDir)).sort();
+  assert.equal(runEntries.length > 0, true);
+
+  const exportArtifactDir = path.join(outDir, runEntries.at(-1)!, "export");
+  const sourceArtifacts = JSON.parse(
+    await fs.readFile(
+      path.join(exportArtifactDir, "source-artifacts", "manifest.json"),
+      "utf8",
+    ),
+  ) as {
+    codeFiles?: Array<{ name?: string; hasContent?: boolean; sourcePath?: string }>;
+  };
+  const status = JSON.parse(
+    await fs.readFile(path.join(exportArtifactDir, "status.json"), "utf8"),
+  ) as { stage?: string };
+
+  assert.equal(sourceArtifacts.codeFiles?.length, 1);
+  assert.equal(sourceArtifacts.codeFiles?.[0]?.name, "Hero.tsx");
+  assert.equal(sourceArtifacts.codeFiles?.[0]?.hasContent, true);
+  assert.match(
+    await fs.readFile(
+      path.join(
+        exportArtifactDir,
+        String(sourceArtifacts.codeFiles?.[0]?.sourcePath),
+      ),
+      "utf8",
+    ),
+    /export function Hero/,
+  );
+  assert.equal(status.stage, "failed");
 });
 
 test("runLocalExport reconstructs plugin-only runtime nodes from framerTree when selected nodes are empty", async () => {
@@ -1166,6 +2454,169 @@ test("runLocalExport crawls, builds, and validates every full-site route", async
     );
     assert.match(revisionManifest.revisionId, /^revision_[0-9a-f]{16}$/);
     assert.equal(revisionManifest.summary.routeTemplates.length, 2);
+    const responsivePlan = JSON.parse(
+      await fs.readFile(
+        path.join(result.exportDir, "responsive-recapture-plan.json"),
+        "utf8",
+      ),
+    );
+    assert.equal(responsivePlan.templateCount, 2);
+    assert.deepEqual(responsivePlan.targetViewports, [
+      "laptop",
+      "tablet",
+      "mobile",
+    ]);
+    assert.equal(responsivePlan.templates[0]?.responsiveCapturePolicy, "all-viewports");
+    const artifactIndex = JSON.parse(
+      await fs.readFile(
+        path.join(result.exportDir, "artifact-index.json"),
+        "utf8",
+      ),
+    );
+    assert.equal(
+      artifactIndex.entries.some(
+        (entry: { id?: string }) =>
+          entry.id === "manifest/responsive-recapture",
+      ),
+      true,
+    );
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("responsive improvement plans recapture only representative CMS routes", async () => {
+  const requestCounts = new Map<string, number>();
+  const server = createServer((request, response) => {
+    const pathname = request.url?.split("?")[0] ?? "/";
+    requestCounts.set(pathname, (requestCounts.get(pathname) ?? 0) + 1);
+    const slug = request.url?.split("/").filter(Boolean).at(-1) ?? "first-post";
+    response.setHeader("content-type", "text/html; charset=utf-8");
+    response.end(`<!doctype html>
+      <html>
+        <head><title>${slug}</title></head>
+        <body style="margin:0">
+          <main style="min-height:100vh;background:#f8fafc">
+            <section style="padding:48px">
+              <h1 style="font-size:42px;color:#0f172a">Post ${slug}</h1>
+              <p style="font-size:18px">Route content for ${slug}</p>
+            </section>
+          </main>
+        </body>
+      </html>`);
+  });
+  await new Promise<void>((resolve) =>
+    server.listen(0, "127.0.0.1", resolve),
+  );
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const outDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-responsive-recapture-plan-"),
+  );
+  const pluginCapture: PluginCanvasCapture = {
+    mode: "framer-plugin",
+    capturedAt: "2026-07-01T00:00:00.000Z",
+    selectedNodes: [],
+    context: {
+      exportMode: "full-site",
+      captureMode: "runtime-first",
+      sitePages: [
+        {
+          name: "Blog post",
+          path: "/blog/:slug",
+          collectionId: "posts",
+        },
+      ],
+      cmsCollections: [
+        {
+          id: "posts",
+          name: "Posts",
+          fields: [],
+          items: [
+            { id: "alpha", slug: "first-post", fieldKeys: [] },
+            { id: "beta", slug: "second-post", fieldKeys: [] },
+          ],
+        },
+      ],
+    },
+  };
+
+  try {
+    const initial = await runLocalExport({
+      outDir,
+      url: `http://127.0.0.1:${address.port}/`,
+      exportMode: "full-site",
+      pluginCapture,
+      maxAttempts: 1,
+      targetFidelity: 0.9,
+    });
+    const initialManifest = JSON.parse(
+      await fs.readFile(
+        initial.revisionManifestPath ??
+          path.join(initial.exportDir, "revision-manifest.json"),
+        "utf8",
+      ),
+    );
+    const parentRevisionId = String(initialManifest.revisionId);
+    const firstRouteCountAfterInitial =
+      requestCounts.get("/blog/first-post") ?? 0;
+    const secondRouteCountAfterInitial =
+      requestCounts.get("/blog/second-post") ?? 0;
+    await fs.rm(
+      path.join(outDir, ".capture-cache", routeCacheFileName("/blog/first-post")),
+      { force: true },
+    );
+
+    const improved = await runLocalExport({
+      outDir,
+      url: `http://127.0.0.1:${address.port}/`,
+      exportMode: "full-site",
+      pluginCapture,
+      maxAttempts: 1,
+      targetFidelity: 0.9,
+      revisionRequest: {
+        kind: "improvement",
+        requestedFocus: "responsiveness",
+        parentRevisionId,
+      },
+    });
+
+    const responsivePlan = JSON.parse(
+      await fs.readFile(
+        path.join(improved.exportDir, "responsive-recapture-plan.json"),
+        "utf8",
+      ),
+    );
+    assert.equal(responsivePlan.kind, "improvement");
+    assert.equal(responsivePlan.requestedFocus, "responsiveness");
+    assert.equal(responsivePlan.templateCount, 1);
+    assert.equal(
+      responsivePlan.templates[0]?.responsiveCapturePolicy,
+      "representative-viewports",
+    );
+    assert.deepEqual(responsivePlan.templates[0]?.routesToCapture, [
+      "/blog/first-post",
+    ]);
+    assert.deepEqual(responsivePlan.templates[0]?.viewports, [
+      "laptop",
+      "tablet",
+      "mobile",
+    ]);
+    assert.equal(
+      (requestCounts.get("/blog/first-post") ?? 0) - firstRouteCountAfterInitial,
+      3,
+    );
+    assert.equal(
+      (requestCounts.get("/blog/second-post") ?? 0) - secondRouteCountAfterInitial,
+      0,
+    );
+    const invalidationPlan = JSON.parse(
+      await fs.readFile(
+        path.join(improved.exportDir, "invalidation-plan.json"),
+        "utf8",
+      ),
+    );
+    assert.equal(invalidationPlan.requestedFocus, "responsiveness");
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

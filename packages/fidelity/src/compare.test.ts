@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
+import { PNG } from "pngjs";
 import {
   aggregateComparisonDiagnostics,
   collectNodePropertyDiffs,
@@ -190,11 +191,74 @@ test("compareGeneratedPreview scores captured motion when screenshots are unavai
 
   assert.equal(fidelity.fidelity.motion, 100);
   assert.equal(fidelity.fidelity.desktop > 0, true);
+  assert.equal(fidelity.evidence.mode, "heuristic");
+  assert.equal(fidelity.evidence.reason, "No runtime screenshots were available for the source export.");
   assert.equal(typeof fidelity.previewValidation?.status, "string");
   assert.equal(fidelity.diagnostics?.viewport, "all");
   assert.equal((fidelity.diagnostics?.summary.nodesCompared ?? 0) > 0, true);
   assert.equal((fidelity.diagnostics?.summary.missingNodes ?? 0) > 0, true);
   await fs.access(path.join(attemptDir, "compare-diagnostics.json"));
+});
+
+test("compareGeneratedPreview labels screenshot-backed fidelity when screenshots are available", async () => {
+  const attemptDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-compare-screenshot-"),
+  );
+  const previewPath = path.join(attemptDir, "preview.html");
+  await fs.writeFile(
+    previewPath,
+    "<!doctype html><html><body style=\"margin:0;background:#fff\"></body></html>\n",
+  );
+  for (const [viewport, size] of Object.entries({
+    desktop: { width: 1440, height: 900 },
+    laptop: { width: 1280, height: 900 },
+    tablet: { width: 768, height: 1024 },
+    mobile: { width: 390, height: 844 },
+  }) as Array<[keyof ExportIR["runtimeCapture"]["viewports"], { width: number; height: number }]>) {
+    const png = new PNG({ width: size.width, height: size.height, fill: true });
+    png.data.fill(0xff);
+    await fs.writeFile(path.join(attemptDir, `${viewport}.png`), PNG.sync.write(png));
+  }
+
+  const fidelity = await compareGeneratedPreview({
+    ir: {
+      ...createIr(),
+      runtimeCapture: {
+        ...createIr().runtimeCapture,
+        viewports: {
+          desktop: {
+            screenshotPath: path.join(attemptDir, "desktop.png"),
+            width: 1440,
+            height: 900,
+          },
+          laptop: {
+            screenshotPath: path.join(attemptDir, "laptop.png"),
+            width: 1280,
+            height: 900,
+          },
+          tablet: {
+            screenshotPath: path.join(attemptDir, "tablet.png"),
+            width: 768,
+            height: 1024,
+          },
+          mobile: {
+            screenshotPath: path.join(attemptDir, "mobile.png"),
+            width: 390,
+            height: 844,
+          },
+        },
+        nodes: [],
+      },
+      exportTree: [],
+    },
+    previewHtmlPath: previewPath,
+    attemptDir,
+  });
+
+  assert.equal(fidelity.evidence.mode, "screenshot-backed");
+  assert.equal(fidelity.evidence.sourceScreenshotViewports.length, 4);
+  assert.equal(fidelity.evidence.generatedScreenshotViewports.length, 4);
+  assert.equal(fidelity.fidelity.overall > 99, true);
 });
 
 test("scorePreviewValidation rewards found styled nodes", () => {

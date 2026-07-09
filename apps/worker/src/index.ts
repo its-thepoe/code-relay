@@ -2,6 +2,11 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import fssync from "node:fs";
 import { runLocalExport } from "../../../packages/exporter-core/src/local-export.js";
+import {
+  createCompletedOutcomeCopy,
+  readExportHealth,
+} from "../../../packages/shared/src/export-health.js";
+import { createPredictedArtifacts } from "./artifacts.js";
 
 type LocalJobStatus = "queued" | "running" | "completed" | "failed";
 type LocalExportMode = "selection" | "components" | "full-site";
@@ -39,10 +44,17 @@ type LocalExportJob = {
     zipPath?: string;
     reportPath?: string;
     previewPath?: string;
+    resolvedRequestPath?: string;
+    statusPath?: string;
+    capabilityReportPath?: string;
+    codeCompatibilityReportPath?: string;
+    beforeAfterReportPath?: string;
+    parentInfoPath?: string;
     revisionManifestPath?: string;
     validationPath?: string;
     invalidationPlanPath?: string;
     artifactIndexPath?: string;
+    responsiveRecapturePlanPath?: string;
   };
 };
 
@@ -84,6 +96,15 @@ async function readJobFile(filePath: string): Promise<LocalExportJob | null> {
   try {
     const raw = await fs.readFile(filePath, "utf8");
     return JSON.parse(raw) as LocalExportJob;
+  } catch {
+    return null;
+  }
+}
+
+async function readJsonIfExists(filePath?: string) {
+  if (!filePath) return null;
+  try {
+    return JSON.parse(await fs.readFile(filePath, "utf8")) as Record<string, unknown>;
   } catch {
     return null;
   }
@@ -132,6 +153,11 @@ async function claimNextJob(): Promise<LocalExportJob | null> {
 async function processJob(job: LocalExportJob) {
   const outDir = path.join(artifactsDir, job.id);
   await fs.mkdir(outDir, { recursive: true });
+  job.artifacts = {
+    ...job.artifacts,
+    ...createPredictedArtifacts(outDir),
+  };
+  await writeJob(job);
   const heartbeat = setInterval(() => {
     if (job.status === "running") {
       void writeJob(job).catch(() => undefined);
@@ -183,6 +209,9 @@ async function processJob(job: LocalExportJob) {
         exportMode: job.exportMode,
         exportDir: result.exportDir,
         zipPath: result.zipPath,
+        exportHealth: readExportHealth(
+          await readJsonIfExists(result.reportPath),
+        ),
         validation: result.validation,
       }),
     );
@@ -192,10 +221,17 @@ async function processJob(job: LocalExportJob) {
       zipPath: result.zipPath,
       reportPath: result.reportPath,
       previewPath: result.previewPath,
+      resolvedRequestPath: result.resolvedRequestPath,
+      statusPath: result.statusPath,
+      capabilityReportPath: result.capabilityReportPath,
+      codeCompatibilityReportPath: result.codeCompatibilityReportPath,
+      beforeAfterReportPath: result.beforeAfterReportPath,
+      parentInfoPath: result.parentInfoPath,
       revisionManifestPath: result.revisionManifestPath,
       validationPath: path.join(result.exportDir, "generated-validation.json"),
       invalidationPlanPath: result.invalidationPlanPath,
       artifactIndexPath: result.artifactIndexPath,
+      responsiveRecapturePlanPath: result.responsiveRecapturePlanPath,
     };
     job.errorMessage = undefined;
     job.progress = { stage: "Completed" };
@@ -230,8 +266,16 @@ async function main() {
     // eslint-disable-next-line no-console
     console.log(`[worker] processing ${job.id} (${job.sourceUrl ?? "no-url"})`);
     await processJob(job);
+    const completedReport = await readJsonIfExists(job.artifacts?.reportPath);
+    const completedStatusLabel =
+      job.status === "completed"
+        ? createCompletedOutcomeCopy({
+            report: completedReport,
+            surface: "worker-log",
+          })
+        : job.status;
     // eslint-disable-next-line no-console
-    console.log(`[worker] ${job.status} ${job.id}`);
+    console.log(`[worker] ${completedStatusLabel} ${job.id}`);
   }
 }
 

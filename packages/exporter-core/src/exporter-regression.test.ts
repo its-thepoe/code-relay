@@ -528,6 +528,15 @@ test("buildIntermediateRepresentation preserves code file source and variant met
             content: "export const Button = () => <button />",
             source: "canvas-code-file",
             exports: ["Button"],
+            exportDetails: [
+              {
+                name: "ButtonOverride",
+                type: "override",
+                insertURL: "https://framer.com/m/button-override.js",
+                componentIdentifier: "Button",
+                componentName: "Button",
+              },
+            ],
           },
         ],
       },
@@ -543,6 +552,12 @@ test("buildIntermediateRepresentation preserves code file source and variant met
   assert.equal(ir.componentFamilies?.[0]?.primaryVariantId, "button-primary");
   assert.equal(ir.componentFamilies?.[0]?.variants[0]?.gesture, "tap");
   assert.equal(ir.componentFamilies?.[0]?.provenance, "plugin");
+  assert.equal(ir.overrideAssignments?.[0]?.exportName, "ButtonOverride");
+  assert.equal(ir.overrideAssignments?.[0]?.assignmentStatus, "unresolved");
+  assert.equal(
+    ir.overrideAssignments?.[0]?.unresolvedReason,
+    "plugin-assignment-not-exposed",
+  );
   assert.equal(ir.codeFiles?.[0]?.versionId, "version-1");
   assert.equal(ir.codeFiles?.[0]?.content, "export const Button = () => <button />");
 });
@@ -982,6 +997,89 @@ test("runtime capture does not fail when a webfont never finishes loading", asyn
   }
 });
 
+test("runtime capture records safe interaction replay without submitting blocked actions", async () => {
+  let mutationRequests = 0;
+  const server = createServer((request, response) => {
+    if (request.method === "POST") {
+      mutationRequests += 1;
+      response.statusCode = 204;
+      response.end();
+      return;
+    }
+    response.setHeader("content-type", "text/html; charset=utf-8");
+    response.end(`<!doctype html>
+      <html>
+        <body>
+          <main>
+            <button
+              id="toggle"
+              type="button"
+              aria-expanded="false"
+              onclick="this.setAttribute('aria-expanded', this.getAttribute('aria-expanded') === 'true' ? 'false' : 'true'); document.getElementById('panel').textContent = this.getAttribute('aria-expanded') === 'true' ? 'Open panel' : 'Closed panel';"
+            >
+              Toggle panel
+            </button>
+            <div id="panel">Closed panel</div>
+            <form method="post" action="/submit">
+              <button type="submit">Submit form</button>
+            </form>
+          </main>
+        </body>
+      </html>`);
+  });
+  await new Promise<void>((resolve) =>
+    server.listen(0, "127.0.0.1", resolve),
+  );
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const workDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-safe-replay-"),
+  );
+
+  try {
+    const capture = await captureRuntimeRoutes({
+      originUrl: `http://127.0.0.1:${address.port}/`,
+      routes: [{ path: "/", title: "Replay" }],
+      workDir,
+    });
+    const replay = capture.routeCaptures?.[0]?.interactionReplay ?? [];
+    const clickRecord = replay.find(
+      (record) =>
+        record.action === "click" &&
+        record.target.text?.includes("Toggle panel"),
+    );
+    const keyboardRecord = replay.find(
+      (record) =>
+        record.action === "keyboard-enter" &&
+        record.target.text?.includes("Toggle panel"),
+    );
+    const blockedRecord = replay.find(
+      (record) =>
+        record.action === "blocked-click" &&
+        record.target.text?.includes("Submit form"),
+    );
+
+    assert.equal(replay.length >= 3, true);
+    assert.equal(clickRecord?.allowed, true);
+    assert.equal(clickRecord?.stateChanged, true);
+    assert.equal(
+      clickRecord?.networkActivity.blockedMutationRequests ?? 0,
+      0,
+    );
+    assert.equal(keyboardRecord?.allowed, true);
+    assert.equal(keyboardRecord?.stateChanged, true);
+    assert.equal(blockedRecord?.allowed, false);
+    assert.equal(blockedRecord?.blockedReason, "inside-form");
+    assert.equal(mutationRequests, 0);
+    await fs.access(clickRecord?.beforeScreenshotPath ?? "");
+    await fs.access(clickRecord?.afterScreenshotPath ?? "");
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await fs.rm(workDir, { recursive: true, force: true });
+  }
+});
+
 test("runtime capture retries an aborted document navigation", async () => {
   let aborted = false;
   const server = createServer((request, response) => {
@@ -1054,6 +1152,71 @@ test("full-site capture resumes completed routes from its durable cache", async 
     assert.ok(requestsAfterFirstCapture > 0);
     assert.equal(requests, requestsAfterFirstCapture);
     assert.equal(second.nodes.length, first.nodes.length);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await fs.rm(parentDir, { recursive: true, force: true });
+  }
+});
+
+test("full-site route cache ignores legacy entries without viewport validation", async () => {
+  let requests = 0;
+  const server = createServer((_request, response) => {
+    requests += 1;
+    response.setHeader("content-type", "text/html; charset=utf-8");
+    response.end("<main><h1>Fresh route</h1></main>");
+  });
+  await new Promise<void>((resolve) =>
+    server.listen(0, "127.0.0.1", resolve),
+  );
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const parentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-route-cache-legacy-"),
+  );
+  const cacheDir = path.join(parentDir, "cache");
+  await fs.mkdir(cacheDir, { recursive: true });
+  await fs.writeFile(
+    path.join(cacheDir, "home.json"),
+    `${JSON.stringify(
+      {
+        schemaVersion: 4,
+        sourceUrl: `http://127.0.0.1:${address.port}/`,
+        capture: {
+          url: `http://127.0.0.1:${address.port}/`,
+          title: "Legacy",
+          mode: "page",
+          routePath: "/",
+          viewports: {
+            desktop: {
+              screenshotPath: "/tmp/desktop.png",
+              width: 1440,
+              height: 900,
+            },
+          },
+          nodes: [],
+          captureDiagnostics: {
+            breakpointsCaptured: ["desktop"],
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  try {
+    const capture = await captureRuntimeRoutes({
+      originUrl: `http://127.0.0.1:${address.port}/`,
+      routes: [{ path: "/", title: "Home" }],
+      cacheDir,
+      workDir: path.join(parentDir, "fresh"),
+    });
+    assert.ok(requests > 0);
+    assert.equal(
+      capture.captureDiagnostics?.viewportValidation?.desktop?.valid,
+      true,
+    );
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -1297,6 +1460,101 @@ test("full-site page generation does not reuse the entire export tree for every 
   );
 });
 
+test("full-site app generation includes redirect route handling", async () => {
+  const base = buildIntermediateRepresentation({
+    url: "https://example.com",
+    name: "RedirectSite",
+    exportMode: "full-site",
+    captureMode: "runtime-first",
+    runtimeCapture: createRuntimeCapture(),
+    pluginCapture: createPluginCapture(),
+    nodeMatches: createNodeMatches(),
+  });
+  const projectDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-redirect-pages-"),
+  );
+  const pageIr = {
+    ...base,
+    sitePages: [
+      {
+        componentName: "Home",
+        routePath: "/",
+        title: "Home",
+        templateId: "/",
+        templatePath: "/",
+        templateKind: "static" as const,
+        nodes: [
+          {
+            ...base.component.nodes[0]!,
+            id: "home",
+            text: "Home only",
+          },
+        ],
+      },
+      {
+        componentName: "Twitter",
+        routePath: "/twitter",
+        title: "Twitter",
+        templateId: "/twitter",
+        templatePath: "/twitter",
+        templateKind: "utility" as const,
+        redirectTo: "https://twitter.com/coderelay",
+        redirectStatus: 302,
+        nodes: [
+          {
+            ...base.component.nodes[0]!,
+            id: "twitter",
+            text: "Twitter redirect",
+          },
+        ],
+      },
+      {
+        componentName: "DocsRedirect",
+        routePath: "/docs",
+        title: "Docs",
+        templateId: "/docs",
+        templatePath: "/docs",
+        templateKind: "redirect" as const,
+        redirectTo: "/learn",
+        redirectStatus: 302,
+        nodes: [
+          {
+            ...base.component.nodes[0]!,
+            id: "docs",
+            text: "Docs redirect",
+          },
+        ],
+      },
+    ],
+  };
+
+  await generateNextProject({
+    ir: pageIr,
+    projectDir,
+    strategy: {
+      id: "runtime-routes",
+      structuredLayout: true,
+      compactSpacing: false,
+      aggressiveMobileStacking: false,
+      preserveImageAspectRatio: true,
+    },
+  });
+
+  const app = await fs.readFile(path.join(projectDir, "src", "App.tsx"), "utf8");
+  const routeManifest = JSON.parse(
+    await fs.readFile(path.join(projectDir, "route-manifest.json"), "utf8"),
+  );
+
+  assert.match(app, /redirectTo/);
+  assert.match(app, /window\.location\.replace/);
+  assert.match(app, /navigateTo\(currentPage\.redirectTo, \{ replace: true \}\)/);
+  assert.match(app, /Redirecting…/);
+  assert.equal(routeManifest[1]?.templateKind, "utility");
+  assert.equal(routeManifest[1]?.redirectTo, "https://twitter.com/coderelay");
+  assert.equal(routeManifest[2]?.templateKind, "redirect");
+  assert.equal(routeManifest[2]?.redirectTo, "/learn");
+});
+
 test("full-site page generation shares template modules for repeated template groups", async () => {
   const base = buildIntermediateRepresentation({
     url: "https://example.com",
@@ -1416,6 +1674,125 @@ test("full-site page generation shares template modules for repeated template gr
   assert.match(betaPage, /PostAlphaTemplate/);
   assert.match(alphaData, /Alpha only/);
   assert.match(betaData, /Beta only/);
+});
+
+test("shared route templates preserve component family mounts inside route runtime data", async () => {
+  const projectDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-shared-template-family-"),
+  );
+  const base = buildIntermediateRepresentation({
+    url: "https://example.com",
+    name: "FamilyTemplatePage",
+    exportMode: "full-site",
+    runtimeCapture: createRuntimeCapture(),
+    pluginCapture: createPluginCapture(),
+    nodeMatches: [],
+  });
+  const routeTree = [
+    {
+      id: "button-instance-1",
+      parentId: undefined,
+      childIds: [],
+      name: "Button",
+      kind: "component" as const,
+      tag: "section",
+      styles: {},
+      attributes: {
+        dataFramerName: "Button",
+      },
+      source: {
+        pluginNodeId: "button-instance-1",
+      },
+      children: [],
+    },
+  ];
+  const pageIr = {
+    ...base,
+    componentFamilies: [
+      {
+        id: "Button",
+        name: "Button",
+        primaryVariantId: "button-default",
+        variants: [
+          {
+            id: "button-default",
+            name: "Button / Default",
+            variantName: "Default",
+          },
+        ],
+        instances: [
+          {
+            nodeId: "button-instance-1",
+            initialVariantId: "button-default",
+          },
+        ],
+        transitions: [],
+        provenance: "plugin" as const,
+      },
+    ],
+    sitePages: [
+      {
+        componentName: "FamilyAlpha",
+        routePath: "/family/alpha",
+        title: "Family Alpha",
+        nodes: [{ ...base.component.nodes[0]!, id: "family-alpha", text: "Family Alpha" }],
+        exportTree: routeTree,
+        templateId: "/family/:slug",
+        templatePath: "/family/:slug",
+        templateKind: "cms" as const,
+      },
+      {
+        componentName: "FamilyBeta",
+        routePath: "/family/beta",
+        title: "Family Beta",
+        nodes: [{ ...base.component.nodes[0]!, id: "family-beta", text: "Family Beta" }],
+        exportTree: routeTree,
+        templateId: "/family/:slug",
+        templatePath: "/family/:slug",
+        templateKind: "cms" as const,
+      },
+    ],
+    routeTemplates: [
+      {
+        templateId: "/family/:slug",
+        templatePath: "/family/:slug",
+        templateKind: "cms" as const,
+        representativeRoutePath: "/family/alpha",
+        routePaths: ["/family/alpha", "/family/beta"],
+        routeCount: 2,
+        sourceTextLength: 22,
+        nodeCount: 1,
+      },
+    ],
+    exportTree: routeTree,
+  };
+
+  await generateNextProject({
+    ir: pageIr,
+    projectDir,
+    strategy: {
+      id: "shared-template-family",
+      structuredLayout: false,
+      compactSpacing: false,
+      aggressiveMobileStacking: false,
+      preserveImageAspectRatio: true,
+    },
+  });
+
+  const templateRuntime = await fs.readFile(
+    path.join(projectDir, "src", "framer-data", "route-template-runtime.tsx"),
+    "utf8",
+  );
+  const alphaData = await fs.readFile(
+    path.join(projectDir, "src", "framer-data", "routes", "FamilyAlphaRouteData.ts"),
+    "utf8",
+  );
+
+  assert.match(templateRuntime, /FramerComponentFamilyStateMachine/);
+  assert.match(templateRuntime, /placement="route"/);
+  assert.match(alphaData, /componentFamilyId/);
+  assert.match(alphaData, /Button/);
+  assert.match(alphaData, /button-default/);
 });
 
 test("generateNextProject writes non-empty css and imports it from the component", async () => {
@@ -1543,7 +1920,7 @@ test("generateNextProject writes non-empty css and imports it from the component
   assert.match(cmsCollections, /"pluginData": \{/);
   assert.doesNotMatch(app, /FramerCmsAutoSections/);
   assert.doesNotMatch(app, /FramerComponentRegistryPreview/);
-  assert.doesNotMatch(app, /FramerCodeFileList/);
+  assert.match(app, /FramerCodeFileList/);
   assert.match(previewHtml, /Framer CMS/);
   assert.match(previewHtml, /Blog Posts/);
   assert.match(previewHtml, /Hello world/);
@@ -1581,7 +1958,10 @@ test("generateNextProject writes non-empty css and imports it from the component
   assert.match(framerDataCmsSections, /export const framerCmsSectionRegistry =/);
   assert.match(framerDataCmsSections, /export function FramerCmsAutoSections/);
   assert.match(framerDataCmsSections, /FramerCmsCollectionList/);
-  assert.match(framerDataCodeFiles, /export const framerCodeFiles =/);
+  assert.match(
+    framerDataCodeFiles,
+    /export const framerCodeFiles(?::\s*ReadonlyArray<FramerCodeFileMeta>)?\s*=/,
+  );
   assert.match(framerDataCodeFiles, /getFramerCodeFileByName/);
   assert.match(framerDataCodeFilesRuntime, /export function FramerCodeFilePreview/);
   assert.match(framerDataCodeFilesRuntime, /export function FramerCodeFileList/);
@@ -1597,6 +1977,437 @@ test("generateNextProject writes non-empty css and imports it from the component
   await fs.access(compareDiagnosticsPath).catch(() => {
     // compare diagnostics are only generated in full compare runs, not direct codegen-only regression checks
   });
+});
+
+test("generateNextProject surfaces unadapted code-file fallbacks in framer data previews", async () => {
+  const ir = buildIntermediateRepresentation({
+    url: "framer://project/code-file-fallback",
+    name: "CodeFileFallback",
+    exportMode: "selection",
+    runtimeCapture: createRuntimeCapture(),
+    pluginCapture: createPluginCapture(),
+    nodeMatches: createNodeMatches(),
+  });
+  ir.codeFiles = [
+    {
+      id: "code-file-unsupported",
+      name: "Unsupported.tsx",
+      path: "code/Unsupported.tsx",
+      source: "framer",
+      content: 'import Card from "@/components/ui/card"; export function Unsupported(){ return <Card /> }',
+      contentHash: "unsupportedhash",
+      contentByteLength: 88,
+      hasContent: true,
+      exports: ["Unsupported"],
+      exportDetails: [{ name: "Unsupported", type: "component" }],
+    },
+  ];
+  const projectDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-code-file-fallback-"),
+  );
+
+  await generateNextProject({
+    ir,
+    projectDir,
+    strategy: {
+      id: "code-file-fallback",
+      structuredLayout: false,
+      compactSpacing: false,
+      aggressiveMobileStacking: false,
+      preserveImageAspectRatio: true,
+    },
+    codeCompatibilityReport: {
+      files: [
+        {
+          codeFileId: "code-file-unsupported",
+          name: "Unsupported.tsx",
+          path: "code/Unsupported.tsx",
+          compatibility: "unsupported",
+          reasons: ["uses-unresolved-project-aliases"],
+          dependencyNames: [],
+        },
+      ],
+    },
+    unadaptedCodeFiles: [
+      {
+        codeFileId: "code-file-unsupported",
+        name: "Unsupported.tsx",
+        compatibility: "unsupported",
+        reasons: ["uses-unresolved-project-aliases"],
+        sourcePath: "unadapted-components/unsupportedhash.tsx",
+        metadataPath: "unadapted-components/unsupportedhash.json",
+      },
+    ],
+  });
+
+  const framerDataCodeFiles = await fs.readFile(
+    path.join(projectDir, "src", "framer-data", "code-files.ts"),
+    "utf8",
+  );
+  const framerDataCodeFilesRuntime = await fs.readFile(
+    path.join(projectDir, "src", "framer-data", "code-files-runtime.tsx"),
+    "utf8",
+  );
+
+  assert.match(framerDataCodeFiles, /compatibility: 'unsupported'/);
+  assert.match(framerDataCodeFiles, /unadapted-components\/unsupportedhash\.tsx/);
+  assert.match(
+    framerDataCodeFilesRuntime,
+    /This Framer code file could not be adapted automatically\./,
+  );
+  assert.match(
+    framerDataCodeFilesRuntime,
+    /data-framer-code-file-fallback-path=/,
+  );
+});
+
+test("generateNextProject adapts portable code-file components into executable previews", async () => {
+  const ir = buildIntermediateRepresentation({
+    url: "framer://project/code-file-adapter",
+    name: "CodeFileAdapter",
+    exportMode: "selection",
+    runtimeCapture: createRuntimeCapture(),
+    pluginCapture: createPluginCapture(),
+    nodeMatches: createNodeMatches(),
+  });
+  ir.codeFiles = [
+    {
+      id: "code-file-adapter",
+      name: "Hero.tsx",
+      path: "code/Hero.tsx",
+      source: "framer",
+      content: `
+        import * as React from "react";
+        import { RenderTarget, addPropertyControls } from "framer";
+        export function Hero() {
+          return <div data-render-target={RenderTarget.current()}>Hero preview</div>;
+        }
+        addPropertyControls(Hero, {});
+      `,
+      contentHash: "heroadapterhash",
+      contentByteLength: 228,
+      hasContent: true,
+      exports: ["Hero"],
+      exportDetails: [{ name: "Hero", type: "component" }],
+    },
+  ];
+  const projectDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-code-file-adapter-"),
+  );
+
+  await generateNextProject({
+    ir,
+    projectDir,
+    strategy: {
+      id: "code-file-adapter",
+      structuredLayout: false,
+      compactSpacing: false,
+      aggressiveMobileStacking: false,
+      preserveImageAspectRatio: true,
+    },
+    codeCompatibilityReport: {
+      files: [
+        {
+          codeFileId: "code-file-adapter",
+          name: "Hero.tsx",
+          path: "code/Hero.tsx",
+          compatibility: "portable-with-adapter",
+          reasons: ["uses-rendertarget", "uses-property-controls"],
+          dependencyNames: [],
+          exportedComponents: ["Hero"],
+          localComponentImports: [],
+          cssImports: [],
+        },
+      ],
+    },
+  });
+
+  const adapterRuntime = await fs.readFile(
+    path.join(projectDir, "src", "framer-data", "framer-adapter.tsx"),
+    "utf8",
+  );
+  const executablesRuntime = await fs.readFile(
+    path.join(projectDir, "src", "framer-data", "code-file-executables.tsx"),
+    "utf8",
+  );
+  const adaptedFile = await fs.readFile(
+    path.join(projectDir, "src", "framer-generated-code", "code", "Hero.tsx"),
+    "utf8",
+  );
+  const codeFilesRuntime = await fs.readFile(
+    path.join(projectDir, "src", "framer-data", "code-files-runtime.tsx"),
+    "utf8",
+  );
+  const packageJson = await fs.readFile(
+    path.join(projectDir, "package.json"),
+    "utf8",
+  );
+
+  assert.match(adapterRuntime, /export const RenderTarget =/);
+  assert.match(adapterRuntime, /export function addPropertyControls/);
+  assert.match(executablesRuntime, /FramerExecutableCodeFilePreview/);
+  assert.match(executablesRuntime, /FramerAdapterProvider target="preview"/);
+  assert.match(executablesRuntime, /'Hero\.tsx'/);
+  assert.match(executablesRuntime, /exportName: 'Hero'/);
+  assert.match(adaptedFile, /from '\.\.\/\.\.\/framer-data\/framer-adapter'/);
+  assert.match(adaptedFile, /data-render-target/);
+  assert.match(codeFilesRuntime, /Executable preview:/);
+  assert.match(codeFilesRuntime, /FramerExecutableCodeFilePreview/);
+  assert.match(packageJson, /"framer-motion"/);
+});
+
+test("generateNextProject adapts local code-file import chains and writes dependency license reports", async () => {
+  const ir = buildIntermediateRepresentation({
+    url: "framer://project/code-file-local-imports",
+    name: "CodeFileLocalImports",
+    exportMode: "selection",
+    runtimeCapture: createRuntimeCapture(),
+    pluginCapture: createPluginCapture(),
+    nodeMatches: createNodeMatches(),
+  });
+  ir.codeFiles = [
+    {
+      id: "code-file-hero-local",
+      name: "Hero.tsx",
+      path: "code/Hero.tsx",
+      source: "framer",
+      content: `
+        import * as React from "react";
+        import clsx from "clsx";
+        import { Card } from "./Card";
+        export function Hero() {
+          return <Card className={clsx("hero-card")}>Hero preview</Card>;
+        }
+      `,
+      contentHash: "hero-local-hash",
+      contentByteLength: 208,
+      hasContent: true,
+      exports: ["Hero"],
+      exportDetails: [{ name: "Hero", type: "component" }],
+    },
+    {
+      id: "code-file-card-local",
+      name: "Card.tsx",
+      path: "code/Card.tsx",
+      source: "framer",
+      content: `
+        import * as React from "react";
+        export function Card(props: React.HTMLAttributes<HTMLDivElement>) {
+          return <div data-card-wrapper="true" {...props} />;
+        }
+      `,
+      contentHash: "card-local-hash",
+      contentByteLength: 170,
+      hasContent: true,
+      exports: ["Card"],
+      exportDetails: [{ name: "Card", type: "component" }],
+    },
+  ];
+  const projectDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-code-file-local-imports-"),
+  );
+
+  await generateNextProject({
+    ir,
+    projectDir,
+    strategy: {
+      id: "code-file-local-imports",
+      structuredLayout: false,
+      compactSpacing: false,
+      aggressiveMobileStacking: false,
+      preserveImageAspectRatio: true,
+    },
+    codeCompatibilityReport: {
+      files: [
+        {
+          codeFileId: "code-file-hero-local",
+          name: "Hero.tsx",
+          path: "code/Hero.tsx",
+          compatibility: "portable-with-dependencies",
+          reasons: ["uses-external-npm-dependencies"],
+          dependencyNames: ["clsx"],
+          exportedComponents: ["Hero"],
+          localComponentImports: ["./Card"],
+          cssImports: [],
+        },
+        {
+          codeFileId: "code-file-card-local",
+          name: "Card.tsx",
+          path: "code/Card.tsx",
+          compatibility: "portable",
+          reasons: [],
+          dependencyNames: [],
+          exportedComponents: ["Card"],
+          localComponentImports: [],
+          cssImports: [],
+        },
+      ],
+    },
+  });
+
+  const heroFile = await fs.readFile(
+    path.join(projectDir, "src", "framer-generated-code", "code", "Hero.tsx"),
+    "utf8",
+  );
+  const cardFile = await fs.readFile(
+    path.join(projectDir, "src", "framer-generated-code", "code", "Card.tsx"),
+    "utf8",
+  );
+  const packageJson = await fs.readFile(
+    path.join(projectDir, "package.json"),
+    "utf8",
+  );
+  const dependencyLicenseReport = await fs.readFile(
+    path.join(projectDir, "dependency-license-report.json"),
+    "utf8",
+  );
+
+  assert.match(heroFile, /from 'clsx'/);
+  assert.match(heroFile, /from '\.\/Card'/);
+  assert.match(cardFile, /data-card-wrapper/);
+  assert.match(packageJson, /"clsx": "2\.1\.1"/);
+  assert.match(dependencyLicenseReport, /"name": "clsx"/);
+  assert.match(dependencyLicenseReport, /"license": "MIT"/);
+});
+
+test("generateNextProject emits component family runtime modules and preview hooks", async () => {
+  const ir = buildIntermediateRepresentation({
+    url: "framer://project/component-family-smoke",
+    name: "FamilyCard",
+    exportMode: "selection",
+    runtimeCapture: createRuntimeCapture(),
+    pluginCapture: createPluginCapture(),
+    nodeMatches: createNodeMatches(),
+  });
+  ir.componentFamilies = [
+    {
+      id: "Button",
+      name: "Button",
+      primaryVariantId: "button-default",
+      variants: [
+        {
+          id: "button-default",
+          name: "Button / Default",
+          gesture: "click",
+          variantName: "Default",
+        },
+        {
+          id: "button-open",
+          name: "Button / Open",
+          inheritsFromId: "button-default",
+          gesture: "click",
+          variantName: "Open",
+        },
+      ],
+      instances: [
+        {
+          nodeId: "button-instance-1",
+          controls: { label: "Open menu" },
+          initialVariantId: "button-default",
+        },
+      ],
+      transitions: [
+        {
+          fromVariantId: "button-default",
+          toVariantId: "button-open",
+          trigger: "click",
+          confidence: 0.72,
+          provenance: "plugin",
+        },
+      ],
+      provenance: "plugin",
+    },
+  ];
+  ir.exportTree = [
+    {
+      id: "button-instance-1",
+      parentId: undefined,
+      childIds: [],
+      name: "Button",
+      kind: "component",
+      tag: "section",
+      styles: {},
+      attributes: {
+        dataFramerName: "Button",
+      },
+      source: {
+        pluginNodeId: "button-instance-1",
+      },
+      children: [],
+    },
+  ];
+  const projectDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-component-family-"),
+  );
+
+  await generateNextProject({
+    ir,
+    projectDir,
+    strategy: {
+      id: "semantic-layout",
+      structuredLayout: false,
+      compactSpacing: false,
+      aggressiveMobileStacking: false,
+      preserveImageAspectRatio: true,
+    },
+  });
+
+  const componentPath = path.join(projectDir, "components", "FamilyCard.tsx");
+  const dtsPath = path.join(projectDir, "components", "FamilyCard.d.ts");
+  const appPath = path.join(projectDir, "src", "App.tsx");
+  const framerDataIndexPath = path.join(
+    projectDir,
+    "src",
+    "framer-data",
+    "index.ts",
+  );
+  const familiesDataPath = path.join(
+    projectDir,
+    "src",
+    "framer-data",
+    "component-families.ts",
+  );
+  const familiesRuntimePath = path.join(
+    projectDir,
+    "src",
+    "framer-data",
+    "component-families-runtime.tsx",
+  );
+
+  const component = await fs.readFile(componentPath, "utf8");
+  const dts = await fs.readFile(dtsPath, "utf8");
+  const app = await fs.readFile(appPath, "utf8");
+  const framerDataIndex = await fs.readFile(framerDataIndexPath, "utf8");
+  const familiesData = await fs.readFile(familiesDataPath, "utf8");
+  const familiesRuntime = await fs.readFile(familiesRuntimePath, "utf8");
+
+  assert.doesNotMatch(component, /FramerComponentFamilyGallery/);
+  assert.doesNotMatch(dts, /includeFramerComponentFamilies\?: boolean/);
+  assert.match(component, /FramerComponentFamilyStateMachine/);
+  assert.match(component, /familyId="Button"/);
+  assert.match(component, /placement="route"/);
+  assert.match(app, /FramerComponentFamilyGallery/);
+  assert.match(app, /Component families/);
+  assert.match(app, /Framer variant state/);
+  assert.match(
+    familiesData,
+    /export const framerComponentFamilies: ReadonlyArray<FramerComponentFamilyMeta> =/,
+  );
+  assert.match(familiesData, /button-open/);
+  assert.match(familiesRuntime, /FramerComponentFamilyStateMachine/);
+  assert.match(familiesRuntime, /React\.useState/);
+  assert.match(familiesRuntime, /Current variant:/);
+  assert.match(familiesRuntime, /labelForTrigger/);
+  assert.match(familiesRuntime, /Click/);
+  assert.match(familiesRuntime, /data-framer-current-variant=/);
+  assert.match(familiesRuntime, /data-framer-variant-button=/);
+  assert.match(familiesRuntime, /data-framer-component-family-placement=/);
+  assert.match(familiesRuntime, /data-framer-transition-trigger=/);
+  assert.match(familiesRuntime, /data-framer-transition-target=/);
+  assert.match(
+    framerDataIndex,
+    /FramerComponentFamilyGallery,\s+FramerComponentFamilyStateMachine,\s+hasFramerComponentFamilies/s,
+  );
 });
 
 test("tree codegen preserves nested rich-text children", async () => {
