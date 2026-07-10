@@ -29,6 +29,7 @@ type CaptureInput = {
   routePath?: string;
   viewportNames?: ViewportName[];
   baseCapture?: RuntimeCapture | RuntimeRouteCapture;
+  interactionReplayTimeoutMs?: number;
 };
 
 type RouteCaptureInput = {
@@ -44,6 +45,7 @@ type RouteCaptureInput = {
   cacheDir?: string;
   viewportNames?: ViewportName[];
   baseCapturesByRoute?: Record<string, RuntimeRouteCapture | undefined>;
+  interactionReplayTimeoutMs?: number;
   onProgress?: (progress: {
     completed: number;
     total: number;
@@ -63,6 +65,7 @@ const viewports: Record<ViewportName, { width: number; height: number }> =
   FULL_SITE_VIEWPORTS;
 
 const ROUTE_CAPTURE_TIMEOUT_MS = 3 * 60_000;
+const INTERACTION_REPLAY_TIMEOUT_MS = 20_000;
 const ROUTE_CAPTURE_CACHE_SCHEMA_VERSION = 5;
 
 const MOTION_STYLE_PROPERTIES = [
@@ -243,6 +246,7 @@ export async function captureRuntimeRoutes(
                 routePath: route.path,
                 viewportNames: input.viewportNames,
                 baseCapture,
+                interactionReplayTimeoutMs: input.interactionReplayTimeoutMs,
               }),
               ROUTE_CAPTURE_TIMEOUT_MS,
               `Route capture exceeded ${ROUTE_CAPTURE_TIMEOUT_MS / 60_000} minutes: ${route.path}`,
@@ -679,92 +683,108 @@ async function captureViewport(
 ) {
   const viewport = viewports[viewportName];
   const page = await createPageWithViewport(browser, viewport);
-
-  await navigateForCapture(page, input.url);
-  const finalUrl = page.url();
-  if (isExternalRedirect(input.url, finalUrl)) {
-    const safeUrl = escapeHtml(finalUrl);
-    await showExternalRedirect(page, safeUrl);
-  } else {
-    await page
-      .waitForLoadState("domcontentloaded", { timeout: 15_000 })
-      .catch(() => undefined);
-    await page.waitForLoadState("load", { timeout: 15_000 }).catch(() => {
-      // Modern Framer sites can keep loading analytics/fonts; capture renderable DOM.
-    });
-    const settledUrl = page.url();
-    if (isExternalRedirect(input.url, settledUrl)) {
-      const safeUrl = escapeHtml(settledUrl);
+  try {
+    await navigateForCapture(page, input.url);
+    const finalUrl = page.url();
+    if (isExternalRedirect(input.url, finalUrl)) {
+      const safeUrl = escapeHtml(finalUrl);
       await showExternalRedirect(page, safeUrl);
+    } else {
+      await page
+        .waitForLoadState("domcontentloaded", { timeout: 15_000 })
+        .catch(() => undefined);
+      await page.waitForLoadState("load", { timeout: 15_000 }).catch(() => {
+        // Modern Framer sites can keep loading analytics/fonts; capture renderable DOM.
+      });
+      const settledUrl = page.url();
+      if (isExternalRedirect(input.url, settledUrl)) {
+        const safeUrl = escapeHtml(settledUrl);
+        await showExternalRedirect(page, safeUrl);
+      }
     }
-  }
-  await waitForRenderableContent(page, input.selector);
-  const fontsReady = await waitForFonts(page);
+    await waitForRenderableContent(page, input.selector);
+    const fontsReady = await waitForFonts(page);
 
-  const screenshotPath = path.join(captureDir, `${viewportName}.png`);
+    const screenshotPath = path.join(captureDir, `${viewportName}.png`);
 
-  if (input.selector) {
-    const rootHandle = await resolveRootHandle(page, input.selector);
-    const clip = await getClip(rootHandle, viewport);
-    try {
-      await captureScreenshot(page, screenshotPath, fontsReady, clip);
-    } finally {
-      await rootHandle.dispose();
+    if (input.selector) {
+      const rootHandle = await resolveRootHandle(page, input.selector);
+      const clip = await getClip(rootHandle, viewport);
+      try {
+        await captureScreenshot(page, screenshotPath, fontsReady, clip);
+      } finally {
+        await rootHandle.dispose();
+      }
+    } else {
+      await captureScreenshot(page, screenshotPath, fontsReady);
     }
-  } else {
-    await captureScreenshot(page, screenshotPath, fontsReady);
+
+    const nodes = await extractNodes(page, input.selector, input.routePath ?? "/");
+    const rootStyles = await extractRootStyles(page, input.selector);
+    const nodesWithInteractions =
+      viewportName === "desktop"
+        ? await collectInteractionStyles(page, nodes)
+        : nodes;
+    const stylesheets = await extractStylesheets(page);
+    const framerStyleCss =
+      viewportName === "desktop"
+        ? await downloadStylesheets(stylesheets, input.url)
+        : "";
+    const title = await page.title();
+    const imageSize = await getPngSize(screenshotPath).catch(() => viewport);
+    const observedViewport = await readObservedViewport(page);
+    const interactionReplay =
+      viewportName === "desktop"
+        ? await withTimeout(
+            collectSafeInteractionReplay(
+              page,
+              input.selector,
+              captureDir,
+              input.routePath ?? "/",
+              viewportName,
+            ),
+            input.interactionReplayTimeoutMs ?? INTERACTION_REPLAY_TIMEOUT_MS,
+            `Interaction replay exceeded ${(input.interactionReplayTimeoutMs ?? INTERACTION_REPLAY_TIMEOUT_MS) / 1_000} seconds`,
+          ).catch((error) => {
+            console.warn(
+              "[coderelay:capture:interaction-replay-skipped]",
+              JSON.stringify({
+                routePath: input.routePath ?? "/",
+                viewport: viewportName,
+                reason: formatError(error),
+              }),
+            );
+            return [];
+          })
+        : undefined;
+    const viewportValidation = createViewportValidation(
+      viewport,
+      observedViewport,
+      imageSize,
+    );
+
+    return {
+      viewportName,
+      title,
+      nodes: nodesWithInteractions,
+      rootStyles,
+      viewport: {
+        screenshotPath,
+        width: imageSize.width,
+        height: imageSize.height,
+        requested: viewport,
+        observed: observedViewport,
+        valid: viewportValidation.valid,
+      },
+      viewportValidation,
+      fontsReady,
+      framerStyleCss,
+      stylesheetUrls: stylesheets,
+      interactionReplay,
+    };
+  } finally {
+    await page.close().catch(() => undefined);
   }
-
-  const nodes = await extractNodes(page, input.selector, input.routePath ?? "/");
-  const rootStyles = await extractRootStyles(page, input.selector);
-  const nodesWithInteractions =
-    viewportName === "desktop"
-      ? await collectInteractionStyles(page, nodes)
-      : nodes;
-  const stylesheets = await extractStylesheets(page);
-  const framerStyleCss =
-    viewportName === "desktop"
-      ? await downloadStylesheets(stylesheets, input.url)
-      : "";
-  const interactionReplay =
-    viewportName === "desktop"
-      ? await collectSafeInteractionReplay(
-          page,
-          input.selector,
-          captureDir,
-          input.routePath ?? "/",
-          viewportName,
-        )
-      : undefined;
-  const title = await page.title();
-  const imageSize = await getPngSize(screenshotPath).catch(() => viewport);
-  const observedViewport = await readObservedViewport(page);
-  await page.close();
-  const viewportValidation = createViewportValidation(
-    viewport,
-    observedViewport,
-    imageSize,
-  );
-
-  return {
-    viewportName,
-    title,
-    nodes: nodesWithInteractions,
-    rootStyles,
-    viewport: {
-      screenshotPath,
-      width: imageSize.width,
-      height: imageSize.height,
-      requested: viewport,
-      observed: observedViewport,
-      valid: viewportValidation.valid,
-    },
-    viewportValidation,
-    fontsReady,
-    framerStyleCss,
-    stylesheetUrls: stylesheets,
-    interactionReplay,
-  };
 }
 
 async function createPageWithViewport(

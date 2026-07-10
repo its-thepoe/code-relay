@@ -1163,6 +1163,43 @@ test("runtime capture records safe interaction replay without submitting blocked
   }
 });
 
+test("interaction replay timeout preserves mandatory full-site evidence", async () => {
+  const server = createServer((_request, response) => {
+    response.setHeader("content-type", "text/html; charset=utf-8");
+    response.end(`<!doctype html>
+      <html><body><main><h1>Mandatory evidence survives</h1>
+      <button type="button" onclick="this.textContent = 'Changed'">Change</button>
+      </main></body></html>`);
+  });
+  await new Promise<void>((resolve) =>
+    server.listen(0, "127.0.0.1", resolve),
+  );
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const workDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-replay-timeout-"),
+  );
+
+  try {
+    const capture = await captureRuntimeRoutes({
+      originUrl: `http://127.0.0.1:${address.port}/`,
+      routes: [{ path: "/", title: "Replay timeout" }],
+      workDir,
+      interactionReplayTimeoutMs: 1,
+    });
+    await validateFullSiteCapture({ routes: [{ path: "/" }], capture });
+    assert.deepEqual(capture.routeCaptures?.[0]?.interactionReplay, []);
+    assert.equal(
+      capture.nodes.some((node) => node.text === "Mandatory evidence survives"),
+      true,
+    );
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await fs.rm(workDir, { recursive: true, force: true });
+  }
+});
+
 test("full-site capture validation requires every route and all four exact viewports", async () => {
   const workDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "coderelay-full-site-evidence-"),
