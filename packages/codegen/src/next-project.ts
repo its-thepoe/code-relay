@@ -70,6 +70,17 @@ const SUPPORTED_CODE_FILE_DEPENDENCIES = {
   },
 } as const;
 
+export const generatedProjectVersions = {
+  framerMotion: "12.42.0",
+  react: "19.2.7",
+  reactDom: "19.2.7",
+  typesReact: "19.2.17",
+  typesReactDom: "19.2.3",
+  vite: "8.1.0",
+  viteReact: "6.0.3",
+  typescript: "6.0.3",
+} as const;
+
 type CodeCompatibilityMeta =
   NonNullable<GenerateInput["codeCompatibilityReport"]>["files"][number];
 
@@ -1315,8 +1326,7 @@ function createComponent(
     includeDataPreviews && (ir.componentModules?.length ?? 0) > 0;
   const hasComponentFamilies =
     includeDataPreviews && (ir.componentFamilies?.length ?? 0) > 0;
-  const hasInlineComponentFamilies =
-    hasComponentFamilies && hasInlineComponentFamilyMount(ir);
+  const hasInlineComponentFamilies = hasInlineComponentFamilyMount(ir);
   const hasCodeFiles = includeDataPreviews && (ir.codeFiles?.length ?? 0) > 0;
   const content = hasUsableExportTree(ir)
     ? renderExportTreeForReact(ir)
@@ -3308,17 +3318,17 @@ function createPackageJson(ir: ExportIR, executableCodeFiles: ExecutableCodeFile
       preview: "vite preview --host 0.0.0.0",
     },
     dependencies: {
-      "framer-motion": "12.42.0",
-      react: "19.2.7",
-      "react-dom": "19.2.7",
+      "framer-motion": generatedProjectVersions.framerMotion,
+      react: generatedProjectVersions.react,
+      "react-dom": generatedProjectVersions.reactDom,
       ...dependencyEntries,
     },
     devDependencies: {
-      "@types/react": "19.2.17",
-      "@types/react-dom": "19.2.3",
-      "@vitejs/plugin-react": "6.0.3",
-      typescript: "6.0.3",
-      vite: "8.1.0",
+      "@types/react": generatedProjectVersions.typesReact,
+      "@types/react-dom": generatedProjectVersions.typesReactDom,
+      "@vitejs/plugin-react": generatedProjectVersions.viteReact,
+      typescript: generatedProjectVersions.typescript,
+      vite: generatedProjectVersions.vite,
     },
   };
 }
@@ -3406,15 +3416,31 @@ function createComponentRegistryModule(modules: FramerComponentModule[]) {
     })
     .join("\n");
 
-  return `${imports}
+  return `import * as React from 'react'
+${imports}
+
+export type FramerComponentRegistryEntry = {
+  Component: React.ComponentType<any>
+  meta: {
+    source: string
+    isDefaultExport?: boolean
+    isVariant?: boolean
+    isPrimaryVariant?: boolean
+    gesture?: string
+    inheritsFromId?: string
+    breakpoint?: string
+    variantName?: string
+  }
+}
 
 export const framerComponentRegistry = {
 ${registryEntries}
-} as const
+} as const satisfies Record<string, FramerComponentRegistryEntry>
 
 export type FramerComponentRegistryKey = keyof typeof framerComponentRegistry
+export type FramerComponentRegistryValue = (typeof framerComponentRegistry)[FramerComponentRegistryKey]
 
-export function getFramerRegisteredComponent(name: string) {
+export function getFramerRegisteredComponent(name: string): FramerComponentRegistryEntry | undefined {
   return framerComponentRegistry[name as FramerComponentRegistryKey]
 }
 `;
@@ -3423,7 +3449,11 @@ export function getFramerRegisteredComponent(name: string) {
 function createComponentRuntimeModule(modules: FramerComponentModule[]) {
   const hasModules = modules.length > 0;
   return `import * as React from 'react'
-import { framerComponentRegistry, getFramerRegisteredComponent } from './component-registry'
+import {
+  framerComponentRegistry,
+  getFramerRegisteredComponent,
+  type FramerComponentRegistryEntry,
+} from './component-registry'
 
 export function FramerRegisteredComponentPreview(props: {
   name: string
@@ -3436,7 +3466,9 @@ export function FramerRegisteredComponentPreview(props: {
 }
 
 export function FramerComponentRegistryPreview() {
-  const entries = Object.entries(framerComponentRegistry)
+  const entries = Object.entries(framerComponentRegistry) as Array<
+    [string, FramerComponentRegistryEntry]
+  >
 
   if (entries.length === 0) {
     return <div style={{ opacity: 0.64 }}>No Framer component modules detected.</div>
@@ -4373,6 +4405,7 @@ export function FramerCmsImage(props: {
   item?: { fieldData?: Record<string, unknown> }
   field: string
   altField?: string
+  alt?: string
   fallback?: React.ReactNode
 } & Omit<React.ImgHTMLAttributes<HTMLImageElement>, 'src' | 'alt'>) {
   const src = getFramerCmsImageUrl(props.item, props.field)
@@ -4456,7 +4489,7 @@ export function FramerCmsCollectionPreview(props: {
                     <FramerCmsField
                       item={item}
                       field={field.id}
-                      labelField={field.type === 'link' ? 'title' : undefined}
+                      labelField={(field.type as string | undefined) === 'link' ? 'title' : undefined}
                       fallback={<span style={{ opacity: 0.56 }}>No value</span>}
                     />
                   </dd>
@@ -4654,12 +4687,12 @@ export function FramerCmsAutoSections() {
       Component: getFramerCmsSectionComponent(name),
       itemCount: getFramerCmsItems({ name }).length,
     }))
-    .filter((entry) => entry.Component && entry.itemCount > 0)
+    .filter((entry) => entry.itemCount > 0)
 
   return (
     <div style={{ display: 'grid', gap: '1.5rem' }}>
       {collections.map((entry) => {
-        const Component = entry.Component!
+        const Component = entry.Component
         return <Component key={entry.name} />
       })}
     </div>

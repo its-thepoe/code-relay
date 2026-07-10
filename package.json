@@ -13,6 +13,7 @@
     "build:test": "tsc -p tsconfig.test.json && node scripts/write-test-package-json.cjs",
     "test": "npm run test:exporter",
     "test:exporter": "npm run build:test && node scripts/run-compiled-tests.cjs",
+    "benchmark:framer": "tsx scripts/benchmark-framer-fixtures.ts",
     "check:compiled-runtime": "npm run build && node scripts/check-compiled-runtime.mjs",
     "typecheck": "tsc --noEmit",
     "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",

@@ -25,6 +25,7 @@ import type {
   FidelityScores,
   FramerCodeFile,
   PluginCanvasCapture,
+  PluginCaptureDiagnostics,
   PreviewValidationResult,
   RuntimeCapture,
   RuntimeNode,
@@ -35,6 +36,7 @@ import {
   captureRuntime,
   captureRuntimeRoutes,
   createSimulatedPluginCapture,
+  validateFullSiteCapture,
 } from "./capture.js";
 import {
   buildIntermediateRepresentation,
@@ -153,6 +155,39 @@ export type GeneratedProjectValidation = {
     }>;
   }>;
 };
+
+export function assertPluginCaptureIntegrity(input: {
+  exportMode?: ExportMode;
+  pluginCapture: PluginCanvasCapture;
+}): void {
+  const diagnostics: PluginCaptureDiagnostics | undefined =
+    input.pluginCapture.context?.captureDiagnostics;
+  if (!diagnostics?.truncated) return;
+
+  const summariesById = new Map(
+    diagnostics.rootSummaries.map((summary) => [summary.rootId, summary]),
+  );
+  const truncatedPageRootIds = diagnostics.truncatedRootIds.filter(
+    (rootId) => summariesById.get(rootId)?.rootKind === "page",
+  );
+  const cannotProvePageCompleteness =
+    input.exportMode === "full-site" &&
+    diagnostics.captureSource === "full-site" &&
+    diagnostics.rootSummaries.length === 0;
+
+  if (
+    input.exportMode === "full-site" &&
+    (truncatedPageRootIds.length > 0 || cannotProvePageCompleteness)
+  ) {
+    const affectedRoots =
+      truncatedPageRootIds.join(", ") ||
+      diagnostics.truncatedRootIds.join(", ") ||
+      "unknown";
+    throw new Error(
+      `Full-site export blocked: plugin capture was truncated for page roots (${affectedRoots}) after ${diagnostics.capturedNodeCount} nodes.`,
+    );
+  }
+}
 
 type DebugArtifactsManifest = {
   manifestPath: string;
@@ -376,6 +411,10 @@ export async function runLocalExport(
     input.exportMode === "full-site"
       ? { ...capturedPluginPayload, selectedNodes: [] }
       : capturedPluginPayload;
+  assertPluginCaptureIntegrity({
+    exportMode: input.exportMode,
+    pluginCapture,
+  });
   console.log(
     "[coderelay:core:input]",
     JSON.stringify({
@@ -442,6 +481,10 @@ export async function runLocalExport(
         : "Building plugin-only runtime approximation.",
     });
 
+    const requestedFullSiteRoutes =
+      input.exportMode === "full-site"
+        ? readFullSiteRouteManifest(pluginCapture)
+        : [];
     const runtimeCapture = canCaptureFromUrl
     ? input.exportMode === "full-site"
       ? mergeRuntimeCaptures(
@@ -464,13 +507,20 @@ export async function runLocalExport(
           workDir,
           selector: input.selector,
         })
-    : createRuntimeCaptureFromPluginContext(pluginCapture);
-  console.log(
+      : createRuntimeCaptureFromPluginContext(pluginCapture);
+    if (input.exportMode === "full-site" && canCaptureFromUrl) {
+      await validateFullSiteCapture({
+        routes: requestedFullSiteRoutes,
+        capture: runtimeCapture,
+      });
+    }
+    console.log(
     "[coderelay:core:capture]",
     JSON.stringify({
       captureMode: canCaptureFromUrl ? "runtime-first" : "plugin-only",
       runtimeNodeCount: runtimeCapture.nodes.length,
       viewportNodeCounts: runtimeCapture.captureDiagnostics?.nodeCount,
+      viewportValidation: runtimeCapture.captureDiagnostics?.viewportValidation,
       routeCount: runtimeCapture.routeCaptures?.length ?? 1,
       framerStyleCssBytes: Buffer.byteLength(
         runtimeCapture.framerStyleCss ?? "",
@@ -1840,10 +1890,13 @@ export async function validateGeneratedProject(
   const startedAt = Date.now();
   try {
     const packageManager = await resolvePackageManager(projectDir);
+    const hasPackageLock = await fileExists(path.join(projectDir, "package-lock.json"));
     const installArgs =
       packageManager === "pnpm"
         ? ["install", "--config.dangerouslyAllowAllBuilds=true"]
-        : ["install", "--ignore-scripts", "--no-audit", "--no-fund"];
+        : hasPackageLock
+          ? ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]
+          : ["install", "--ignore-scripts", "--no-audit", "--no-fund"];
     const install = await runCommand(
       packageManager,
       installArgs,
@@ -1855,6 +1908,7 @@ export async function validateGeneratedProject(
       JSON.stringify({
         exitCode: install.exitCode,
         packageManager,
+        command: installArgs.join(" "),
         durationMs: install.durationMs,
         stdout: tail(install.stdout, 2_000),
         stderr: tail(install.stderr, 2_000),
@@ -3520,6 +3574,7 @@ function createReport(
     revisionCacheHit,
     revisionRequest: revisionRequest ?? null,
     sourceEvidence,
+    captureDiagnostics: ir.pluginCapture.context?.captureDiagnostics ?? null,
     fidelityEvidence: bestAttempt.fidelityEvidence ?? null,
     runtimeInteractionReplay,
     unsupportedBehavior,
@@ -3686,6 +3741,10 @@ function createReport(
     runtimeCapture: {
       breakpointsCaptured:
         ir.runtimeCapture.captureDiagnostics?.breakpointsCaptured ?? [],
+      viewportValidation:
+        ir.runtimeCapture.captureDiagnostics?.viewportValidation,
+      captureProvenance:
+        revisionRequest?.kind === "improvement" ? "mixed" : "fresh",
       stylesheetCount: ir.runtimeCapture.captureDiagnostics?.stylesheetCount,
       nodeCount: ir.runtimeCapture.captureDiagnostics?.nodeCount,
       fontsReady: ir.runtimeCapture.captureDiagnostics?.fontReadiness,
@@ -3696,6 +3755,9 @@ function createReport(
         nodeCount: capture.captureDiagnostics?.nodeCount,
         stylesheetCount: capture.captureDiagnostics?.stylesheetCount,
         fontsReady: capture.captureDiagnostics?.fontReadiness,
+        viewportValidation: capture.captureDiagnostics?.viewportValidation,
+        captureProvenance:
+          revisionRequest?.kind === "improvement" ? "mixed" : "fresh",
       })),
     },
     previewValidation: bestAttempt.previewValidation,
@@ -6279,7 +6341,7 @@ ${ir.sourceUrl}
 ## Run locally
 
 \`\`\`bash
-npm install
+npm ci
 npm run dev
 \`\`\`
 

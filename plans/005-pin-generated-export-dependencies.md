@@ -7,6 +7,7 @@
 
 ## Status
 
+- **Implementation status**: DONE
 - **Priority**: P2
 - **Effort**: S
 - **Risk**: LOW

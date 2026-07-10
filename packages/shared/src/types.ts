@@ -394,6 +394,25 @@ export type PluginContextSnapshot = {
   selectionCount?: number;
   permissions?: Record<string, unknown>;
   capabilities?: Record<string, unknown>;
+  captureDiagnostics?: PluginCaptureDiagnostics;
+};
+
+export type PluginCaptureRootSummary = {
+  rootId: string;
+  rootName?: string;
+  rootKind: "page" | "component" | "canvas-root";
+  capturedCount: number;
+  stoppedBecause?: "complete" | "limit" | "read-failure" | "unknown";
+};
+
+export type PluginCaptureDiagnostics = {
+  captureSource?: "full-site" | "component-catalog" | "canvas-selection";
+  totalMaxNodes?: number;
+  maxNodesPerRoot?: number;
+  capturedNodeCount: number;
+  truncated: boolean;
+  truncatedRootIds: string[];
+  rootSummaries: PluginCaptureRootSummary[];
 };
 
 export type PluginCanvasCapture = {
