@@ -1,5 +1,13 @@
 # Plan 003: Detect and report full-site plugin capture truncation instead of silently exporting partial trees
 
+**Implementation status: DONE**
+
+RCA outcome: the historical 3,000-node cap described below is not present at the
+current implementation. Full-site exports intentionally send no selected plugin
+nodes and use published-runtime route capture. The completed fix adds an explicit
+diagnostics contract and a completion gate so a legacy or future truncated payload
+cannot be accepted silently.
+
 > **Executor instructions**: Follow this plan step by step. Run every verification command and confirm the expected result before moving to the next step. If anything in "STOP conditions" occurs, stop and report. When done, update the status row for this plan in `plans/README.md`.
 >
 > **Drift check (run first)**: `git diff --stat 2948374..HEAD -- apps/plugin/src/App.tsx packages/exporter-core/src/ir.ts packages/exporter-core/src/local-export.ts packages/exporter-core/src/exporter-regression.test.ts packages/shared/src/types.ts`
@@ -16,12 +24,17 @@
 
 ## Why this matters
 
-The failing full-site job had exactly `3000` selected nodes, which matches the plugin hard cap. A partial tree can never preserve full-site layout correctly, but today the export proceeds and only later produces a bad page. The exporter should either avoid silent truncation or mark the job/report with an explicit blocking diagnostic.
+The historical failing full-site job had exactly `3000` selected nodes, which matched
+an older cap. A partial tree can never preserve full-site layout correctly. The
+current runtime-first path no longer reproduces that cap, but it previously had no
+typed propagation or completion guard for a truncation marker. The exporter now
+reports and enforces that invariant.
 
 ## Current state
 
 - `apps/plugin/src/App.tsx` captures full-site roots from page roots plus component roots.
-- `captureSelectionMetadata` hard-caps capture at 3000 total nodes and 24-260 nodes per root.
+- The old `captureSelectionMetadata` cap is absent at current HEAD; its chunk size is progress batching, not a node limit.
+- Full-site exports intentionally set `selectedNodes` to an empty array and capture published routes at required viewports.
 - Captured nodes carry useful metadata like `rootId`, `rootKind`, `parentId`, `path`, `childIds`, and `styles`.
 - The Framer plugin skill confirms canvas reads like `framer.getNodesWithType`, `framer.getCanvasRoot`, `framer.getSelection`, and `framer.getChildren` are normal plugin SDK APIs. Do not replace them with Framer code-component APIs.
 
@@ -97,12 +110,13 @@ git switch -c codex/003-diagnose-capture-truncation
 
 ### Step 1: Add capture diagnostics to plugin payload context
 
-In `apps/plugin/src/App.tsx`, extend `captureSelectionMetadata` so it returns both nodes and diagnostics.
+In `apps/plugin/src/App.tsx`, attach explicit diagnostics to the plugin context. The
+current uncapped/runtime-first path reports `truncated: false`; the contract is also
+accepted by the exporter for older or future bounded capture implementations.
 
 Required diagnostics:
 
-- `totalMaxNodes`
-- `maxNodesPerRoot`
+- `totalMaxNodes` and `maxNodesPerRoot` are optional because the current path has no cap.
 - `capturedNodeCount`
 - `truncated`: boolean
 - `truncatedRootIds`
@@ -161,13 +175,13 @@ Use synthetic plugin payloads; do not require live Framer.
 
 ## Done criteria
 
-- [ ] Plugin payload contains explicit capture diagnostics.
-- [ ] Exact cap hits are not silent.
-- [ ] Full-site page truncation prevents a successful completed ZIP.
-- [ ] Report/message explains why export was blocked.
-- [ ] `npm run typecheck` exits 0.
-- [ ] `npm run test:exporter` exits 0.
-- [ ] `plans/README.md` row for Plan 003 is updated.
+- [x] Plugin payload contains explicit capture diagnostics.
+- [x] Exact cap hits are not silent.
+- [x] Full-site page truncation prevents a successful completed ZIP.
+- [x] Report/message explains why export was blocked.
+- [x] `npm run typecheck` exits 0.
+- [x] `npm run test:exporter` exits 0.
+- [x] `plans/README.md` row for Plan 003 is updated.
 
 ## STOP conditions
 

@@ -1,31 +1,17 @@
 import type { NextConfig } from "next";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  outputFileTracingRoot: __dirname,
+  outputFileTracingRoot: repoRoot,
   turbopack: {
-    root: __dirname,
+    root: repoRoot,
   },
-  outputFileTracingExcludes: {
-    "*": [
-      ".coderelay/**/*",
-      "../../.coderelay/**/*",
-      "**/.coderelay/**/*",
-      "**/debug/source/**/*",
-      "**/debug/attempts/**/*",
-    ],
-  },
-  webpack(config) {
-    config.watchOptions = {
-      ...(config.watchOptions ?? {}),
-      ignored: [
-        "**/.coderelay/**",
-        "**/node_modules/**",
-        "**/.next/**",
-      ],
-    };
-    return config;
+  experimental: {
+    externalDir: true,
   },
 };
 

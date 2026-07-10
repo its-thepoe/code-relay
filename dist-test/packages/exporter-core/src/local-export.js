@@ -9,11 +9,28 @@ import { PNG } from "pngjs";
 import { generateNextProject } from "../../codegen/src/next-project.js";
 import { compareGeneratedPreview } from "../../fidelity/src/compare.js";
 import { matchPluginNodesToDom } from "../../matcher/src/match.js";
-import { captureRuntime, captureRuntimeRoutes, createSimulatedPluginCapture, } from "./capture.js";
+import { captureRuntime, captureRuntimeRoutes, createSimulatedPluginCapture, validateFullSiteCapture, } from "./capture.js";
 import { buildIntermediateRepresentation, buildPluginSourceSnapshot, } from "./ir.js";
 import { zipDirectory } from "./package.js";
 import { applyAttemptPlan, baselineStrategy, buildAttemptPlan, detectAttemptPlateau, } from "./attempt-planner.js";
 import { analyzeCodeFilesCompatibility } from "./code-compatibility.js";
+export function assertPluginCaptureIntegrity(input) {
+    const diagnostics = input.pluginCapture.context?.captureDiagnostics;
+    if (!diagnostics?.truncated)
+        return;
+    const summariesById = new Map(diagnostics.rootSummaries.map((summary) => [summary.rootId, summary]));
+    const truncatedPageRootIds = diagnostics.truncatedRootIds.filter((rootId) => summariesById.get(rootId)?.rootKind === "page");
+    const cannotProvePageCompleteness = input.exportMode === "full-site" &&
+        diagnostics.captureSource === "full-site" &&
+        diagnostics.rootSummaries.length === 0;
+    if (input.exportMode === "full-site" &&
+        (truncatedPageRootIds.length > 0 || cannotProvePageCompleteness)) {
+        const affectedRoots = truncatedPageRootIds.join(", ") ||
+            diagnostics.truncatedRootIds.join(", ") ||
+            "unknown";
+        throw new Error(`Full-site export blocked: plugin capture was truncated for page roots (${affectedRoots}) after ${diagnostics.capturedNodeCount} nodes.`);
+    }
+}
 const ARTIFACT_INDEX_SCHEMA_VERSION = 2;
 const REVISION_MANIFEST_SCHEMA_VERSION = 2;
 export async function runLocalExport(input) {
@@ -36,6 +53,10 @@ export async function runLocalExport(input) {
     const pluginCapture = input.exportMode === "full-site"
         ? { ...capturedPluginPayload, selectedNodes: [] }
         : capturedPluginPayload;
+    assertPluginCaptureIntegrity({
+        exportMode: input.exportMode,
+        pluginCapture,
+    });
     console.log("[coderelay:core:input]", JSON.stringify({
         url: input.url,
         selector: input.selector,
@@ -92,6 +113,9 @@ export async function runLocalExport(input) {
                 ? "Capturing runtime and plugin evidence."
                 : "Building plugin-only runtime approximation.",
         });
+        const requestedFullSiteRoutes = input.exportMode === "full-site"
+            ? readFullSiteRouteManifest(pluginCapture)
+            : [];
         const runtimeCapture = canCaptureFromUrl
             ? input.exportMode === "full-site"
                 ? mergeRuntimeCaptures(responsiveSelectiveReuse?.parentRuntimeCapture, await captureRuntimeRoutes({
@@ -110,10 +134,17 @@ export async function runLocalExport(input) {
                     selector: input.selector,
                 })
             : createRuntimeCaptureFromPluginContext(pluginCapture);
+        if (input.exportMode === "full-site" && canCaptureFromUrl) {
+            await validateFullSiteCapture({
+                routes: requestedFullSiteRoutes,
+                capture: runtimeCapture,
+            });
+        }
         console.log("[coderelay:core:capture]", JSON.stringify({
             captureMode: canCaptureFromUrl ? "runtime-first" : "plugin-only",
             runtimeNodeCount: runtimeCapture.nodes.length,
             viewportNodeCounts: runtimeCapture.captureDiagnostics?.nodeCount,
+            viewportValidation: runtimeCapture.captureDiagnostics?.viewportValidation,
             routeCount: runtimeCapture.routeCaptures?.length ?? 1,
             framerStyleCssBytes: Buffer.byteLength(runtimeCapture.framerStyleCss ?? ""),
         }));
@@ -1116,13 +1147,17 @@ export async function validateGeneratedProject(projectDir) {
     const startedAt = Date.now();
     try {
         const packageManager = await resolvePackageManager(projectDir);
+        const hasPackageLock = await fileExists(path.join(projectDir, "package-lock.json"));
         const installArgs = packageManager === "pnpm"
             ? ["install", "--config.dangerouslyAllowAllBuilds=true"]
-            : ["install", "--ignore-scripts", "--no-audit", "--no-fund"];
+            : hasPackageLock
+                ? ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]
+                : ["install", "--ignore-scripts", "--no-audit", "--no-fund"];
         const install = await runCommand(packageManager, installArgs, projectDir, 180_000);
         console.log("[coderelay:core:install]", JSON.stringify({
             exitCode: install.exitCode,
             packageManager,
+            command: installArgs.join(" "),
             durationMs: install.durationMs,
             stdout: tail(install.stdout, 2_000),
             stderr: tail(install.stderr, 2_000),
@@ -2391,6 +2426,7 @@ function createReport(ir, attempts, bestAttempt, debugArtifacts, validation, rev
         revisionCacheHit,
         revisionRequest: revisionRequest ?? null,
         sourceEvidence,
+        captureDiagnostics: ir.pluginCapture.context?.captureDiagnostics ?? null,
         fidelityEvidence: bestAttempt.fidelityEvidence ?? null,
         runtimeInteractionReplay,
         unsupportedBehavior,
@@ -2534,6 +2570,8 @@ function createReport(ir, attempts, bestAttempt, debugArtifacts, validation, rev
         routeTemplates: ir.routeTemplates ?? [],
         runtimeCapture: {
             breakpointsCaptured: ir.runtimeCapture.captureDiagnostics?.breakpointsCaptured ?? [],
+            viewportValidation: ir.runtimeCapture.captureDiagnostics?.viewportValidation,
+            captureProvenance: revisionRequest?.kind === "improvement" ? "mixed" : "fresh",
             stylesheetCount: ir.runtimeCapture.captureDiagnostics?.stylesheetCount,
             nodeCount: ir.runtimeCapture.captureDiagnostics?.nodeCount,
             fontsReady: ir.runtimeCapture.captureDiagnostics?.fontReadiness,
@@ -2544,6 +2582,8 @@ function createReport(ir, attempts, bestAttempt, debugArtifacts, validation, rev
                 nodeCount: capture.captureDiagnostics?.nodeCount,
                 stylesheetCount: capture.captureDiagnostics?.stylesheetCount,
                 fontsReady: capture.captureDiagnostics?.fontReadiness,
+                viewportValidation: capture.captureDiagnostics?.viewportValidation,
+                captureProvenance: revisionRequest?.kind === "improvement" ? "mixed" : "fresh",
             })),
         },
         previewValidation: bestAttempt.previewValidation,
@@ -4523,7 +4563,7 @@ ${ir.sourceUrl}
 ## Run locally
 
 \`\`\`bash
-npm install
+npm ci
 npm run dev
 \`\`\`
 

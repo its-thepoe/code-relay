@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { createCompletedOutcomeCopy } from "../../../../packages/shared/src/export-health.js";
 import { buildImprovementPreviewsForJob } from "../../../lib/improvement-preview";
+import { createCompletedOutcomeCopy } from "../../../lib/export-health";
 import { buildJobSignature } from "../../../lib/job-signature";
 import { createReportBreakdown } from "../../../lib/report-breakdown";
 import {

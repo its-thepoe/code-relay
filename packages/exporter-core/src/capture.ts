@@ -52,12 +52,15 @@ type RouteCaptureInput = {
   }) => void | Promise<void>;
 };
 
-const viewports: Record<ViewportName, { width: number; height: number }> = {
+export const FULL_SITE_VIEWPORTS = {
   desktop: { width: 1440, height: 900 },
   laptop: { width: 1280, height: 900 },
   tablet: { width: 768, height: 1024 },
   mobile: { width: 390, height: 844 },
-};
+} as const;
+
+const viewports: Record<ViewportName, { width: number; height: number }> =
+  FULL_SITE_VIEWPORTS;
 
 const ROUTE_CAPTURE_TIMEOUT_MS = 3 * 60_000;
 const ROUTE_CAPTURE_CACHE_SCHEMA_VERSION = 5;
@@ -343,6 +346,73 @@ export async function captureRuntimeRoutes(
     framerStyleCss,
     routeCaptures,
   };
+}
+
+export async function validateFullSiteCapture(input: {
+  routes: Array<{ path: string }>;
+  capture: RuntimeCapture;
+}) {
+  const expectedRoutes = new Set(input.routes.map((route) => normalizeRoutePath(route.path)));
+  const capturedRoutes = new Map(
+    (input.capture.routeCaptures ?? []).map((capture) => [
+      normalizeRoutePath(capture.routePath),
+      capture,
+    ]),
+  );
+
+  for (const routePath of expectedRoutes) {
+    const capture = capturedRoutes.get(routePath);
+    if (!capture) {
+      throw new Error(`Full-site capture incomplete: route ${routePath} was not captured.`);
+    }
+    const breakpoints = capture.captureDiagnostics?.breakpointsCaptured ?? [];
+    const observedWidths = new Set<number>();
+    for (const viewportName of Object.keys(FULL_SITE_VIEWPORTS) as ViewportName[]) {
+      const expected = FULL_SITE_VIEWPORTS[viewportName];
+      const validation = capture.captureDiagnostics?.viewportValidation?.[viewportName];
+      const viewport = capture.viewports[viewportName];
+      if (!breakpoints.includes(viewportName) || !validation || !viewport) {
+        throw new Error(
+          `Full-site capture incomplete: route ${routePath} is missing ${viewportName} evidence.`,
+        );
+      }
+      if (!validation.valid) {
+        throw new Error(
+          `Full-site capture invalid: route ${routePath} at ${viewportName} (${validation.reason ?? "viewport validation failed"}).`,
+        );
+      }
+      if (
+        validation.requestedWidth !== expected.width ||
+        validation.observedInnerWidth !== expected.width ||
+        Math.abs(validation.screenshotWidth - expected.width) > 1
+      ) {
+        throw new Error(
+          `Full-site capture width mismatch: route ${routePath} at ${viewportName} requested=${validation.requestedWidth}, observed=${validation.observedInnerWidth}, screenshot=${validation.screenshotWidth}.`,
+        );
+      }
+      if (!viewport.screenshotPath) {
+        throw new Error(
+          `Full-site capture incomplete: route ${routePath} at ${viewportName} has no screenshot path.`,
+        );
+      }
+      await fs.stat(viewport.screenshotPath).catch(() => {
+        throw new Error(
+          `Full-site capture incomplete: route ${routePath} at ${viewportName} screenshot does not exist (${viewport.screenshotPath}).`,
+        );
+      });
+      if (observedWidths.has(validation.observedInnerWidth)) {
+        throw new Error(
+          `Full-site capture invalid: route ${routePath} has duplicate observed viewport width ${validation.observedInnerWidth}.`,
+        );
+      }
+      observedWidths.add(validation.observedInnerWidth);
+    }
+  }
+  for (const routePath of capturedRoutes.keys()) {
+    if (!expectedRoutes.has(routePath)) {
+      throw new Error(`Full-site capture returned an unexpected route ${routePath}.`);
+    }
+  }
 }
 
 async function captureRuntimeWithBrowser(

@@ -5,9 +5,10 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { createServer } from "node:http";
 import { buildIntermediateRepresentation } from "./ir.js";
+import { assertPluginCaptureIntegrity } from "./local-export.js";
 import { generateNextProject } from "../../codegen/src/next-project.js";
 import { inspectGeneratedPreviewNodes } from "../../fidelity/src/compare.js";
-import { captureRuntimeRoutes } from "./capture.js";
+import { captureRuntimeRoutes, validateFullSiteCapture } from "./capture.js";
 function createPluginCapture() {
     return {
         mode: "framer-plugin",
@@ -158,6 +159,73 @@ function createPluginCapture() {
         },
     };
 }
+test("Plan 003 blocks full-site exports when a page root is truncated", () => {
+    const diagnostics = {
+        captureSource: "full-site",
+        capturedNodeCount: 3000,
+        truncated: true,
+        truncatedRootIds: ["page-home"],
+        rootSummaries: [
+            {
+                rootId: "page-home",
+                rootName: "Home",
+                rootKind: "page",
+                capturedCount: 260,
+                stoppedBecause: "limit",
+            },
+        ],
+    };
+    assert.throws(() => assertPluginCaptureIntegrity({
+        exportMode: "full-site",
+        pluginCapture: {
+            ...createPluginCapture(),
+            context: { captureDiagnostics: diagnostics },
+        },
+    }), /Full-site export blocked: plugin capture was truncated/);
+});
+test("Plan 003 allows component-only truncation", () => {
+    const diagnostics = {
+        captureSource: "full-site",
+        capturedNodeCount: 3000,
+        truncated: true,
+        truncatedRootIds: ["component-card"],
+        rootSummaries: [
+            {
+                rootId: "component-card",
+                rootName: "Card",
+                rootKind: "component",
+                capturedCount: 260,
+                stoppedBecause: "limit",
+            },
+        ],
+    };
+    const pluginCapture = {
+        ...createPluginCapture(),
+        context: { captureDiagnostics: diagnostics },
+    };
+    assert.doesNotThrow(() => assertPluginCaptureIntegrity({
+        exportMode: "full-site",
+        pluginCapture,
+    }));
+    const ir = buildIntermediateRepresentation({
+        url: "https://example.com",
+        exportMode: "full-site",
+        runtimeCapture: createRuntimeCapture(),
+        pluginCapture,
+        nodeMatches: [],
+    });
+    assert.deepEqual(ir.warnings.find((warning) => warning.type === "capture_truncated"), {
+        type: "capture_truncated",
+        severity: "warning",
+        message: "Plugin capture was truncated after 3000 nodes; affected roots: component-card",
+    });
+});
+test("Plan 003 leaves non-truncated captures unchanged", () => {
+    assert.doesNotThrow(() => assertPluginCaptureIntegrity({
+        exportMode: "full-site",
+        pluginCapture: createPluginCapture(),
+    }));
+});
 function createRuntimeCapture() {
     return {
         url: "framer://project/styled-smoke",
@@ -937,6 +1005,69 @@ test("runtime capture records safe interaction replay without submitting blocked
         await fs.rm(workDir, { recursive: true, force: true });
     }
 });
+test("full-site capture validation requires every route and all four exact viewports", async () => {
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-full-site-evidence-"));
+    const widths = { desktop: 1440, laptop: 1280, tablet: 768, mobile: 390 };
+    const heights = { desktop: 900, laptop: 900, tablet: 1024, mobile: 844 };
+    const viewportNames = Object.keys(widths);
+    const viewports = Object.fromEntries(viewportNames.map((name) => {
+        const screenshotPath = path.join(workDir, `${name}.png`);
+        return [
+            name,
+            {
+                screenshotPath,
+                width: widths[name],
+                height: heights[name],
+                requested: { width: widths[name], height: heights[name] },
+                observed: {
+                    innerWidth: widths[name],
+                    innerHeight: heights[name],
+                    clientWidth: widths[name],
+                    devicePixelRatio: 1,
+                },
+                valid: true,
+            },
+        ];
+    }));
+    await Promise.all(viewportNames.map((name) => fs.writeFile(viewports[name].screenshotPath, "png")));
+    const capture = {
+        ...createRuntimeCapture(),
+        mode: "page",
+        routeCaptures: [
+            {
+                ...createRuntimeCapture(),
+                routePath: "/",
+                viewports,
+                captureDiagnostics: {
+                    breakpointsCaptured: viewportNames,
+                    viewportValidation: Object.fromEntries(viewportNames.map((name) => [
+                        name,
+                        {
+                            requestedWidth: widths[name],
+                            requestedHeight: heights[name],
+                            observedInnerWidth: widths[name],
+                            observedInnerHeight: heights[name],
+                            observedClientWidth: widths[name],
+                            screenshotWidth: widths[name],
+                            screenshotHeight: heights[name],
+                            valid: true,
+                        },
+                    ])),
+                },
+            },
+        ],
+    };
+    try {
+        await validateFullSiteCapture({ routes: [{ path: "/" }], capture });
+        await assert.rejects(validateFullSiteCapture({ routes: [{ path: "/" }, { path: "/missing" }], capture }), /route \/missing was not captured/);
+        const invalidCapture = structuredClone(capture);
+        invalidCapture.routeCaptures[0].captureDiagnostics.viewportValidation.mobile.observedInnerWidth = 768;
+        await assert.rejects(validateFullSiteCapture({ routes: [{ path: "/" }], capture: invalidCapture }), /duplicate observed viewport width|width mismatch/);
+    }
+    finally {
+        await fs.rm(workDir, { recursive: true, force: true });
+    }
+});
 test("runtime capture retries an aborted document navigation", async () => {
     let aborted = false;
     const server = createServer((request, response) => {
@@ -1533,6 +1664,97 @@ test("shared route templates preserve component family mounts inside route runti
     assert.match(alphaData, /Button/);
     assert.match(alphaData, /button-default/);
 });
+test("full-site page generation keeps inline component-family imports on page components", async () => {
+    const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-family-page-import-"));
+    const base = buildIntermediateRepresentation({
+        url: "https://example.com",
+        name: "FamilyPage",
+        exportMode: "full-site",
+        runtimeCapture: createRuntimeCapture(),
+        pluginCapture: createPluginCapture(),
+        nodeMatches: [],
+    });
+    const routeTree = [
+        {
+            id: "button-instance-1",
+            parentId: undefined,
+            childIds: [],
+            name: "Button",
+            kind: "component",
+            tag: "section",
+            styles: {},
+            attributes: {
+                dataFramerName: "Button",
+            },
+            source: {
+                pluginNodeId: "button-instance-1",
+            },
+            children: [],
+        },
+    ];
+    const pageIr = {
+        ...base,
+        componentFamilies: [
+            {
+                id: "Button",
+                name: "Button",
+                primaryVariantId: "button-default",
+                variants: [
+                    {
+                        id: "button-default",
+                        name: "Button / Default",
+                        variantName: "Default",
+                    },
+                ],
+                instances: [
+                    {
+                        nodeId: "button-instance-1",
+                        initialVariantId: "button-default",
+                    },
+                ],
+                transitions: [],
+                provenance: "plugin",
+            },
+        ],
+        sitePages: [
+            {
+                componentName: "About",
+                routePath: "/about",
+                title: "About",
+                nodes: [{ ...base.component.nodes[0], id: "about", text: "About" }],
+                exportTree: routeTree,
+            },
+        ],
+        routeTemplates: [
+            {
+                templateId: "/about",
+                templatePath: "/about",
+                templateKind: "static",
+                representativeRoutePath: "/about",
+                routePaths: ["/about"],
+                routeCount: 1,
+                sourceTextLength: 5,
+                nodeCount: 1,
+            },
+        ],
+        exportTree: routeTree,
+    };
+    await generateNextProject({
+        ir: pageIr,
+        projectDir,
+        strategy: {
+            id: "family-page-import",
+            structuredLayout: false,
+            compactSpacing: false,
+            aggressiveMobileStacking: false,
+            preserveImageAspectRatio: true,
+        },
+    });
+    const aboutPage = await fs.readFile(path.join(projectDir, "pages", "About.tsx"), "utf8");
+    assert.match(aboutPage, /FramerComponentFamilyStateMachine/);
+    assert.match(aboutPage, /familyId="Button"/);
+    assert.match(aboutPage, /placement="route"/);
+});
 test("generateNextProject writes non-empty css and imports it from the component", async () => {
     const ir = buildIntermediateRepresentation({
         url: "framer://project/styled-smoke",
@@ -1682,6 +1904,7 @@ test("generateNextProject writes non-empty css and imports it from the component
     assert.match(framerDataCmsRuntime, /export function FramerCmsRichText/);
     assert.match(framerDataCmsRuntime, /export function FramerCmsImage/);
     assert.match(framerDataCmsRuntime, /export function FramerCmsLink/);
+    assert.match(framerDataCmsRuntime, /alt\?: string/);
     assert.match(framerDataCmsRuntime, /useFramerCmsCollection/);
     assert.match(framerDataCmsSections, /export function BlogPostsCollectionSection/);
     assert.match(framerDataCmsSections, /export const framerCmsSectionRegistry =/);
@@ -1697,12 +1920,66 @@ test("generateNextProject writes non-empty css and imports it from the component
     assert.match(framerDataModules, /export const framerComponentModules =/);
     assert.match(framerDataModules, /getFramerComponentModuleByName/);
     assert.match(framerDataRegistry, /export const framerComponentRegistry =/);
+    assert.match(framerDataRegistry, /export type FramerComponentRegistryEntry =/);
+    assert.match(framerDataRegistry, /satisfies Record<string, FramerComponentRegistryEntry>/);
+    assert.match(framerDataRegistry, /getFramerRegisteredComponent\([\s\S]*name: string,[\s\S]*\): FramerComponentRegistryEntry \| undefined/);
     assert.match(framerDataRegistry, /getFramerRegisteredComponent/);
     assert.match(framerDataComponentRuntime, /export function FramerRegisteredComponentPreview/);
     assert.match(framerDataComponentRuntime, /export function FramerComponentRegistryPreview/);
+    assert.match(framerDataComponentRuntime, /Object\.entries\(framerComponentRegistry\) as Array<\s+\[string, FramerComponentRegistryEntry\]\s+>/s);
     await fs.access(compareDiagnosticsPath).catch(() => {
         // compare diagnostics are only generated in full compare runs, not direct codegen-only regression checks
     });
+});
+test("generateNextProject keeps link-field label inference type-safe in cms sections", async () => {
+    const ir = buildIntermediateRepresentation({
+        url: "framer://project/cms-link-fixture",
+        name: "CmsLinkFixture",
+        exportMode: "selection",
+        runtimeCapture: createRuntimeCapture(),
+        pluginCapture: createPluginCapture(),
+        nodeMatches: createNodeMatches(),
+    });
+    ir.cmsCollections = [
+        {
+            id: "collection-link",
+            name: "Link Posts",
+            managed: true,
+            fields: [
+                { id: "title", name: "Title", type: "string" },
+                { id: "link", name: "Link", type: "link" },
+                { id: "cover", name: "Cover", type: "image" },
+            ],
+            items: [
+                {
+                    id: "post-1",
+                    fieldKeys: ["title", "link", "cover"],
+                    fieldData: {
+                        title: { type: "string", value: "Link item" },
+                        link: { type: "link", value: "https://example.com/link-item" },
+                        cover: { type: "image", value: "https://example.com/cover.png" },
+                    },
+                },
+            ],
+        },
+    ];
+    const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-cms-link-fixture-"));
+    await generateNextProject({
+        ir,
+        projectDir,
+        strategy: {
+            id: "cms-link-fixture",
+            structuredLayout: false,
+            compactSpacing: false,
+            aggressiveMobileStacking: false,
+            preserveImageAspectRatio: true,
+        },
+    });
+    const framerDataCmsRuntime = await fs.readFile(path.join(projectDir, "src", "framer-data", "cms-runtime.tsx"), "utf8");
+    const framerDataCmsSections = await fs.readFile(path.join(projectDir, "src", "framer-data", "cms-sections.tsx"), "utf8");
+    assert.match(framerDataCmsRuntime, /alt\?: string/);
+    assert.match(framerDataCmsSections, /FramerCmsField/);
+    assert.match(framerDataCmsSections, /FramerCmsLink/);
 });
 test("generateNextProject surfaces unadapted code-file fallbacks in framer data previews", async () => {
     const ir = buildIntermediateRepresentation({

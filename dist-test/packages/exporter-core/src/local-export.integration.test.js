@@ -1683,6 +1683,27 @@ test("runLocalExport crawls, builds, and validates every full-site route", async
                         { name: "Home", path: "/" },
                         { name: "Pricing", path: "/pricing" },
                     ],
+                    cmsCollections: [
+                        {
+                            id: "posts",
+                            name: "Posts",
+                            fields: [
+                                { id: "title", name: "Title", type: "string" },
+                                { id: "link", name: "Link", type: "link" },
+                                { id: "cover", name: "Cover", type: "image" },
+                            ],
+                            items: [
+                                {
+                                    id: "post-1",
+                                    fieldData: {
+                                        title: { type: "string", value: "A generated post" },
+                                        link: { type: "link", value: "https://example.com/post" },
+                                        cover: { type: "image", value: "https://example.com/post.png" },
+                                    },
+                                },
+                            ],
+                        },
+                    ],
                 },
             },
             maxAttempts: 1,
@@ -1694,6 +1715,12 @@ test("runLocalExport crawls, builds, and validates every full-site route", async
         assert.match(await fs.readFile(path.join(result.exportDir, "pages", "Pricing.tsx"), "utf8"), /Choose a plan/);
         const rawRuntime = JSON.parse(await fs.readFile(path.join(result.exportDir, "raw-runtime-capture.json"), "utf8"));
         assert.equal(rawRuntime.routeCaptures.length, 2);
+        assert.deepEqual(result.validation.routes[0]?.viewportChecks.map((check) => [check.viewport, check.innerWidth]), [["desktop", 1440], ["laptop", 1280], ["tablet", 768], ["mobile", 390]]);
+        const packageJson = JSON.parse(await fs.readFile(path.join(result.exportDir, "package.json"), "utf8"));
+        const packageLock = JSON.parse(await fs.readFile(path.join(result.exportDir, "package-lock.json"), "utf8"));
+        assert.equal(packageLock.name, packageJson.name);
+        assert.equal(packageLock.lockfileVersion, 3);
+        assert.equal(JSON.stringify(packageJson).includes("latest"), false);
         const revisionManifest = JSON.parse(await fs.readFile(result.revisionManifestPath ??
             path.join(result.exportDir, "revision-manifest.json"), "utf8"));
         assert.match(revisionManifest.revisionId, /^revision_[0-9a-f]{16}$/);
@@ -1710,6 +1737,46 @@ test("runLocalExport crawls, builds, and validates every full-site route", async
         assert.equal(artifactIndex.entries.some((entry) => entry.id === "manifest/responsive-recapture"), true);
     }
     finally {
+        await new Promise((resolve) => server.close(() => resolve()));
+    }
+});
+test("runLocalExport rejects a full-site export when one route capture is skipped", async () => {
+    const server = createServer((request, response) => {
+        if (request.url === "/missing") {
+            request.socket.destroy();
+            return;
+        }
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end("<!doctype html><html><body><main><h1>Healthy route</h1></main></body></html>");
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const outDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-full-site-missing-route-"));
+    try {
+        await assert.rejects(runLocalExport({
+            outDir,
+            url: `http://127.0.0.1:${address.port}/`,
+            exportMode: "full-site",
+            pluginCapture: {
+                mode: "framer-plugin",
+                capturedAt: "2026-07-10T00:00:00.000Z",
+                selectedNodes: [],
+                context: {
+                    exportMode: "full-site",
+                    captureMode: "runtime-first",
+                    sitePages: [
+                        { name: "Home", path: "/" },
+                        { name: "Missing", path: "/missing" },
+                    ],
+                },
+            },
+            maxAttempts: 1,
+            targetFidelity: 0.9,
+        }), /Full-site capture incomplete: route \/missing was not captured/);
+    }
+    finally {
+        server.closeAllConnections();
         await new Promise((resolve) => server.close(() => resolve()));
     }
 });

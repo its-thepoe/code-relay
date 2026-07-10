@@ -3,6 +3,16 @@ export function buildIntermediateRepresentation(input) {
     const contentNodes = promoteFallbackHeading(pickContentNodes(input.runtimeCapture.nodes));
     const componentName = toComponentName(input.name ?? inferName(input.runtimeCapture.title, contentNodes));
     const warnings = [];
+    const captureDiagnostics = input.pluginCapture.context?.captureDiagnostics;
+    if (captureDiagnostics?.truncated) {
+        const truncatedRootIds = captureDiagnostics.truncatedRootIds.join(", ");
+        const pageRootTruncated = captureDiagnostics.truncatedRootIds.some((rootId) => captureDiagnostics.rootSummaries.some((summary) => summary.rootId === rootId && summary.rootKind === "page"));
+        warnings.push({
+            type: "capture_truncated",
+            severity: pageRootTruncated ? "error" : "warning",
+            message: `Plugin capture was truncated after ${captureDiagnostics.capturedNodeCount} nodes${truncatedRootIds ? `; affected roots: ${truncatedRootIds}` : "."}`,
+        });
+    }
     const lowConfidenceMatches = input.nodeMatches.filter((match) => match.confidence < 0.45);
     if (lowConfidenceMatches.length > 0 && input.exportMode !== "full-site") {
         warnings.push({

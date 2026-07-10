@@ -452,6 +452,7 @@ export function App() {
         sitePages: fullSiteRoots?.pages ?? [],
         sourceUrl: sourceUrl.trim(),
         resolvedSourceUrl,
+        capturedNodeCount: richSelectedNodes.length,
       });
       log("info", "Collected context", context);
 
@@ -1361,6 +1362,7 @@ async function collectPluginContext(input: {
   sitePages?: CapturableNode[];
   sourceUrl?: string;
   resolvedSourceUrl?: string;
+  capturedNodeCount?: number;
 }) {
   const selectedComponents = input.components
     .filter((node) => input.selectedComponentIds.includes(node.id))
@@ -1423,6 +1425,26 @@ async function collectPluginContext(input: {
     managedCollections: managedCollections.ok ? managedCollections.value : [],
     collections: collections.ok ? collections.value : [],
   });
+  const diagnosticRoots =
+    input.captureSource === "full-site"
+      ? input.sitePages ?? []
+      : input.selection;
+  const captureDiagnostics = {
+    captureSource: input.captureSource,
+    capturedNodeCount: input.capturedNodeCount ?? input.selection.length,
+    truncated: false,
+    truncatedRootIds: [],
+    rootSummaries: diagnosticRoots.map((root) => ({
+      rootId: root.id,
+      rootName: root.name,
+      rootKind: input.captureSource === "full-site" ? "page" : "canvas-root",
+      capturedCount:
+        input.captureSource === "full-site"
+          ? 0
+          : input.capturedNodeCount ?? input.selection.length,
+      stoppedBecause: "complete",
+    })),
+  } as const;
 
   return {
     capturedAt: new Date().toISOString(),
@@ -1448,6 +1470,7 @@ async function collectPluginContext(input: {
     cmsCollections,
     sitePages: (input.sitePages ?? []).map((node) => sanitizeNode(node)),
     selectionSnapshot,
+    captureDiagnostics,
     selectionCount: input.selection.length,
     componentCount: input.components.length,
     permissions: {
