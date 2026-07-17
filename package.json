@@ -13,6 +13,8 @@
     "build:test": "tsc -p tsconfig.test.json && node scripts/write-test-package-json.cjs",
     "test": "npm run test:exporter",
     "test:exporter": "npm run build:test && node scripts/run-compiled-tests.cjs",
+    "test:export-e2e": "npm run build:test && node scripts/run-export-e2e.cjs",
+    "proof:portfolio-repeat": "tsx scripts/run-portfolio-repeat-proof.ts",
     "benchmark:framer": "tsx scripts/benchmark-framer-fixtures.ts",
     "check:compiled-runtime": "npm run build && node scripts/check-compiled-runtime.mjs",
     "typecheck": "tsc --noEmit",

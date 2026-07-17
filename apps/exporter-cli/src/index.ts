@@ -1,6 +1,6 @@
-import { mkdirp } from "fs-extra";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { mkdir } from "node:fs/promises";
 import { runLocalExport } from "../../../packages/exporter-core/src/local-export.js";
 import { parseCliArgs } from "../../../packages/shared/src/cli.js";
 
@@ -35,7 +35,7 @@ function parseInstallArgs(args: string[]) {
 }
 
 async function unzip(zipPath: string, targetDir: string) {
-  await mkdirp(targetDir);
+  await mkdir(targetDir, { recursive: true });
   await new Promise<void>((resolve, reject) => {
     const child = spawn("unzip", ["-o", zipPath, "-d", targetDir], {
       stdio: "inherit",
@@ -82,7 +82,7 @@ async function main() {
   }
 
   const outputRoot = path.resolve(args.outDir ?? ".coderelay/exports");
-  await mkdirp(outputRoot);
+  await mkdir(outputRoot, { recursive: true });
 
   console.log(
     "[coderelay:cli:runLocalExport]",

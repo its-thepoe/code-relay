@@ -78,6 +78,12 @@ const viewports: Record<ViewportName, { width: number; height: number }> = {
   mobile: { width: 390, height: 844 },
 };
 const PREVIEW_INSPECTION_NODE_LIMIT = 120;
+const PREVIEW_INTERACTION_INSPECTION_NODE_LIMIT = 8;
+const GENERATED_PREVIEW_GOTO_TIMEOUT_MS = 20_000;
+const GENERATED_PREVIEW_SCREENSHOT_TIMEOUT_MS = 15_000;
+const GENERATED_PREVIEW_PAGE_CLOSE_TIMEOUT_MS = 5_000;
+const GENERATED_PREVIEW_BROWSER_CLOSE_TIMEOUT_MS = 5_000;
+const GENERATED_PREVIEW_INTERACTION_SETTLE_MS = 160;
 
 export async function compareGeneratedPreview(
   input: CompareInput,
@@ -128,14 +134,20 @@ export async function compareGeneratedPreview(
     };
   }
 
-  const generated = await withTimeout(
-    captureGeneratedPreview(input.previewHtmlPath, input.attemptDir, input.ir).catch(
-      () => null,
+  const previewCapture = await withTimeout(
+    captureGeneratedPreviewWithDiagnostics(
+      input.previewHtmlPath,
+      input.attemptDir,
+      input.ir,
     ),
     60_000,
-    null,
+    { generated: null, error: "Generated preview capture timed out." },
   );
+  const generated = previewCapture.generated;
   if (!generated) {
+    const previewCaptureReason = previewCapture.error
+      ? ` Generated preview capture error: ${previewCapture.error}`
+      : "";
     return {
       fidelity: scoreWithoutGeneratedScreens(
         input.ir,
@@ -143,7 +155,7 @@ export async function compareGeneratedPreview(
         previewValidation,
       ),
       evidence: createHeuristicEvidence({
-        reason: "Generated preview screenshots could not be captured.",
+        reason: `Generated preview screenshots could not be captured.${previewCaptureReason}`,
         sourceScreenshotViewports: activeViewports,
         generatedScreenshotViewports: [],
         comparedViewports: [],
@@ -480,36 +492,69 @@ async function captureGeneratedPreview(
       [ViewportName, { width: number; height: number }]
     >) {
       const page = await browser.newPage({ viewport });
-      await page.goto(`file://${previewHtmlPath}`, {
-        waitUntil: "domcontentloaded",
-        timeout: 20_000,
-      });
-      await waitForPreviewReady(page);
-      if (ir.runtimeCapture.mode === "page") {
-        await page.screenshot({
-          path: output[name],
-          fullPage: true,
-          animations: "disabled",
+      try {
+        await page.goto(`file://${previewHtmlPath}`, {
+          waitUntil: "domcontentloaded",
+          timeout: GENERATED_PREVIEW_GOTO_TIMEOUT_MS,
         });
-      } else {
-        await page.screenshot({
-          path: output[name],
-          clip: {
+        await waitForPreviewReady(page);
+        if (ir.runtimeCapture.mode === "page") {
+          await writeGeneratedPreviewScreenshot(page, output[name]);
+        } else {
+          await writeGeneratedPreviewScreenshot(page, output[name], {
             x: 0,
             y: 0,
             width: ir.runtimeCapture.viewports[name].width,
             height: ir.runtimeCapture.viewports[name].height,
-          },
-          animations: "disabled",
-        });
+          });
+        }
+      } finally {
+        await Promise.race([
+          page.close(),
+          new Promise<void>((resolve) =>
+            setTimeout(resolve, GENERATED_PREVIEW_PAGE_CLOSE_TIMEOUT_MS),
+          ),
+        ]).catch(() => undefined);
       }
-      await page.close();
     }
   } finally {
-    await browser.close();
+    await closeBrowserWithTimeout(browser);
   }
 
   return output;
+}
+
+async function captureGeneratedPreviewWithDiagnostics(
+  previewHtmlPath: string,
+  attemptDir: string,
+  ir: ExportIR,
+): Promise<{
+  generated: Record<ViewportName, string> | null;
+  error?: string;
+}> {
+  try {
+    return {
+      generated: await captureGeneratedPreview(previewHtmlPath, attemptDir, ir),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await fs.writeFile(
+      path.join(attemptDir, "generated-preview-capture-error.json"),
+      `${JSON.stringify(
+        {
+          generatedAt: new Date().toISOString(),
+          previewHtmlPath,
+          error: message,
+        },
+        null,
+        2,
+      )}\n`,
+    ).catch(() => undefined);
+    return {
+      generated: null,
+      error: message,
+    };
+  }
 }
 
 async function collectComparisonDiagnostics(
@@ -526,6 +571,11 @@ async function collectComparisonDiagnostics(
       nodeClasses: sourceNodes.map((node) => ({
         nodeId: node.id,
         className: treeNodeClass(node),
+        inspectInteraction:
+          hasMotionStyles(node.motionByViewport?.[viewport] ?? node.motion) ||
+          hasInteractionStateStyles(
+            node.interactionStylesByViewport?.[viewport] ?? node.interactionStyles,
+          ),
       })),
       browser,
     });
@@ -577,14 +627,18 @@ async function collectComparisonDiagnostics(
       nodes: diagnosticNodes,
     };
   } finally {
-    await browser.close();
+    await closeBrowserWithTimeout(browser);
   }
 }
 
 export async function inspectGeneratedPreviewNodes(input: {
   previewHtmlPath: string;
   viewport: ViewportName;
-  nodeClasses: Array<{ nodeId: string; className: string }>;
+  nodeClasses: Array<{
+    nodeId: string;
+    className: string;
+    inspectInteraction?: boolean;
+  }>;
   browser?: Awaited<ReturnType<typeof chromium.launch>>;
 }): Promise<GeneratedPreviewNodeInspection[]> {
   const ownsBrowser = !input.browser;
@@ -597,6 +651,7 @@ export async function inspectGeneratedPreviewNodes(input: {
     });
     await waitForPreviewReady(page);
     const nodes: GeneratedPreviewNodeInspection[] = [];
+    let inspectedInteractionNodes = 0;
     for (const entry of input.nodeClasses) {
       const locator = page.locator(`.${entry.className}`).first();
       const found = await locator.count().then((count) => count > 0);
@@ -611,7 +666,15 @@ export async function inspectGeneratedPreviewNodes(input: {
         continue;
       }
       const styles = await readPreviewStyles(locator);
-      const interactionStyles = await readPreviewInteractionStyles(page, locator, styles);
+      const shouldInspectInteraction =
+        entry.inspectInteraction !== false &&
+        inspectedInteractionNodes < PREVIEW_INTERACTION_INSPECTION_NODE_LIMIT;
+      const interactionStyles = shouldInspectInteraction
+        ? await readPreviewInteractionStyles(page, locator, styles)
+        : null;
+      if (shouldInspectInteraction) {
+        inspectedInteractionNodes += 1;
+      }
       nodes.push({
         nodeId: entry.nodeId,
         className: entry.className,
@@ -620,12 +683,89 @@ export async function inspectGeneratedPreviewNodes(input: {
         interactionStyles,
       });
     }
-    await page.close();
+    await closePageWithTimeout(page);
     return nodes;
   } finally {
     if (ownsBrowser) {
-      await browser.close();
+      await closeBrowserWithTimeout(browser);
     }
+  }
+}
+
+async function closePageWithTimeout(page: Page) {
+  await Promise.race([
+    page.close(),
+    new Promise<void>((resolve) =>
+      setTimeout(resolve, GENERATED_PREVIEW_PAGE_CLOSE_TIMEOUT_MS),
+    ),
+  ]).catch(() => undefined);
+}
+
+async function closeBrowserWithTimeout(
+  browser: Awaited<ReturnType<typeof chromium.launch>>,
+) {
+  await Promise.race([
+    browser.close(),
+    new Promise<void>((resolve) =>
+      setTimeout(resolve, GENERATED_PREVIEW_BROWSER_CLOSE_TIMEOUT_MS),
+    ),
+  ]).catch(() => undefined);
+}
+
+async function writeGeneratedPreviewScreenshot(
+  page: Page,
+  screenshotPath: string,
+  clip?: { x: number; y: number; width: number; height: number },
+) {
+  try {
+    await captureGeneratedPreviewScreenshotWithCdp(page, screenshotPath, clip);
+  } catch (error) {
+    console.warn(
+      "[coderelay:fidelity:preview-screenshot-fallback]",
+      JSON.stringify({
+        url: page.url(),
+        reason: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    await page.screenshot({
+      path: screenshotPath,
+      ...(clip ? { clip } : { fullPage: true }),
+      animations: "disabled",
+      timeout: GENERATED_PREVIEW_SCREENSHOT_TIMEOUT_MS,
+    });
+  }
+}
+
+async function captureGeneratedPreviewScreenshotWithCdp(
+  page: Page,
+  screenshotPath: string,
+  clip?: { x: number; y: number; width: number; height: number },
+) {
+  const session = await page.context().newCDPSession(page);
+  try {
+    const dimensions =
+      clip ??
+      (await page.evaluate(() => ({
+        x: 0,
+        y: 0,
+        width: Math.max(
+          document.documentElement.scrollWidth,
+          document.body?.scrollWidth ?? 0,
+        ),
+        height: Math.max(
+          document.documentElement.scrollHeight,
+          document.body?.scrollHeight ?? 0,
+        ),
+      })));
+    const result = await session.send("Page.captureScreenshot", {
+      format: "png",
+      captureBeyondViewport: true,
+      fromSurface: true,
+      clip: { ...dimensions, scale: 1 },
+    });
+    await fs.writeFile(screenshotPath, Buffer.from(result.data, "base64"));
+  } finally {
+    await session.detach().catch(() => undefined);
   }
 }
 
@@ -672,11 +812,12 @@ async function readPreviewInteractionStyles(
 ) {
   if (!baseStyles) return null;
   const interactionStyles: NonNullable<GeneratedPreviewNodeInspection["interactionStyles"]> = {};
+  const settleMs = computeInteractionSettleMs(baseStyles);
 
   await page.mouse.move(0, 0).catch(() => {});
   const hovered = await locator.hover({ force: true, timeout: 1500 }).then(
     async () => {
-      await page.waitForTimeout(380);
+      await page.waitForTimeout(settleMs);
       return readPreviewStyles(locator);
     },
     () => null,
@@ -691,7 +832,7 @@ async function readPreviewInteractionStyles(
 
   const focused = await locator.focus().then(
     async () => {
-      await page.waitForTimeout(380);
+      await page.waitForTimeout(settleMs);
       return readPreviewStyles(locator);
     },
     () => null,
@@ -709,6 +850,40 @@ async function readPreviewInteractionStyles(
   }
 
   return Object.keys(interactionStyles).length > 0 ? interactionStyles : null;
+}
+
+function computeInteractionSettleMs(baseStyles: Record<string, string>) {
+  const transitionDurations = parseCssTimeList(baseStyles.transitionDuration);
+  const maxTransitionDuration = transitionDurations.reduce(
+    (max, value) => Math.max(max, value),
+    0,
+  );
+  return Math.min(
+    400,
+    Math.max(
+      GENERATED_PREVIEW_INTERACTION_SETTLE_MS,
+      maxTransitionDuration + 32,
+    ),
+  );
+}
+
+function parseCssTimeList(value: string | undefined) {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .map((entry) => {
+      if (entry.endsWith("ms")) {
+        const parsed = Number(entry.slice(0, -2));
+        return Number.isFinite(parsed) ? parsed : 0;
+      }
+      if (entry.endsWith("s")) {
+        const parsed = Number(entry.slice(0, -1));
+        return Number.isFinite(parsed) ? parsed * 1000 : 0;
+      }
+      return 0;
+    })
+    .filter((entry) => entry > 0);
 }
 
 function diffGeneratedStateStyles(
@@ -736,6 +911,11 @@ async function collectPreviewValidationForViewport(
     nodeClasses: sourceNodes.map((node) => ({
       nodeId: node.id,
       className: treeNodeClass(node),
+      inspectInteraction:
+        hasMotionStyles(node.motionByViewport?.[viewport] ?? node.motion) ||
+        hasInteractionStateStyles(
+          node.interactionStylesByViewport?.[viewport] ?? node.interactionStyles,
+        ),
     })),
   });
   const foundNodes = inspectedNodes.filter((node) => node.found && node.styles).length;

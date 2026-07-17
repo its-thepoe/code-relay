@@ -1,4 +1,3 @@
-import { mkdirp } from "fs-extra";
 import crypto from "node:crypto";
 import {
   chromium,
@@ -13,20 +12,36 @@ import path from "node:path";
 import { PNG } from "pngjs";
 import fs from "node:fs/promises";
 import type {
+  ExportRouteDestinationKind,
+  ExportRouteKind,
+  ExportRouteTemplate,
   PluginCanvasCapture,
   Rect,
   RuntimeCapture,
   RuntimeInteractionReplayRecord,
   RuntimeNode,
   RuntimeRouteCapture,
+  RouteCaptureEvidenceClass,
+  RouteCapturePhaseName,
+  RouteCapturePhaseRecord,
+  RouteCapturePhaseStatus,
+  RouteCaptureProgressSummary,
   ViewportName,
 } from "../../shared/src/types.js";
+import { resolveExportRouteMetadata } from "../../shared/src/route-contract.js";
 
 type CaptureInput = {
   url: string;
   workDir: string;
   selector?: string;
   routePath?: string;
+  route?: {
+    routeKind?: ExportRouteKind;
+    templateKind?: RuntimeRouteCapture["templateKind"];
+    destination?: string;
+    destinationKind?: ExportRouteDestinationKind;
+    redirectTo?: string;
+  };
   viewportNames?: ViewportName[];
   baseCapture?: RuntimeCapture | RuntimeRouteCapture;
   interactionReplayTimeoutMs?: number;
@@ -39,12 +54,19 @@ type RouteCaptureInput = {
     title?: string;
     templateId?: string;
     templatePath?: string;
+    routeKind?: ExportRouteKind;
+    template?: ExportRouteTemplate;
     templateKind?: "static" | "cms" | "component" | "redirect" | "utility";
+    destination?: string;
+    destinationKind?: ExportRouteDestinationKind;
+    redirectTo?: string;
+    redirectStatus?: number;
   }>;
   workDir: string;
   cacheDir?: string;
   viewportNames?: ViewportName[];
   baseCapturesByRoute?: Record<string, RuntimeRouteCapture | undefined>;
+  freshRoutePaths?: string[];
   interactionReplayTimeoutMs?: number;
   onProgress?: (progress: {
     completed: number;
@@ -53,6 +75,387 @@ type RouteCaptureInput = {
     failed: number;
   }) => void | Promise<void>;
 };
+
+type CapturedRedirect = {
+  redirectTo: string;
+  templateKind: "redirect" | "utility";
+};
+
+type RouteCaptureProgressArtifact = {
+  schemaVersion: number;
+  sourceUrl: string;
+  compatibilityKey?: string;
+  routePath: string;
+  routeTitle?: string;
+  templateId?: string;
+  templatePath?: string;
+  routeKind?: ExportRouteKind;
+  template?: ExportRouteTemplate;
+  templateKind?: RuntimeRouteCapture["templateKind"];
+  destination?: string;
+  destinationKind?: ExportRouteDestinationKind;
+  status: "partial" | "complete" | "failed";
+  phases: RouteCapturePhaseRecord[];
+  capturedViewports: ViewportName[];
+  evidenceClasses: RouteCaptureEvidenceClass[];
+  warnings: string[];
+  reusedFromCache?: boolean;
+  reusedFromProgress?: boolean;
+  failedPhase?: RouteCapturePhaseName;
+  failureReason?: string;
+  capture?: RuntimeRouteCapture;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const INTERACTION_REPLAY_TIMEOUT_MS = 20_000;
+const INTERACTION_STYLE_COLLECTION_TIMEOUT_MS = 5_000;
+const ROUTE_CAPTURE_CACHE_SCHEMA_VERSION = 7;
+const ROUTE_PROGRESS_SCHEMA_VERSION = 3;
+const ROUTE_TRANSIENT_RETRY_LIMIT = 3;
+const NETWORK_UNAVAILABLE_CONFIRMATION_THRESHOLD = 3;
+const NETWORK_AVAILABILITY_PROBE_TIMEOUT_MS = 5_000;
+const ROUTE_PHASE_BUDGETS_MS: Record<RouteCapturePhaseName, number> = {
+  navigate: 30_000,
+  stabilize: 45_000,
+  "capture-desktop": 75_000,
+  "capture-laptop": 60_000,
+  "capture-tablet": 60_000,
+  "capture-mobile": 60_000,
+  "extract-dom": 20_000,
+  "extract-stylesheets": 20_000,
+  "interaction-replay": 12_000,
+  "route-finalize": 15_000,
+};
+const INTERACTION_REPLAY_MIN_RESET_BUDGET_MS = 500;
+
+let captureFailureTestMode: "normal" | "fail-after-tablet-progress" = "normal";
+let viewportDriftTestMode:
+  | "normal"
+  | "force-single-post-screenshot-mismatch"
+  | "force-persistent-post-screenshot-mismatch" = "normal";
+let viewportDriftInjected = false;
+let forcedNavigateNetworkFailureRoutePaths = new Set<string>();
+let interactionStyleCollectionTestMode: "normal" | "slow" = "normal";
+
+export function __setCaptureFailureTestMode(
+  mode: "normal" | "fail-after-tablet-progress",
+) {
+  captureFailureTestMode = mode;
+}
+
+export function __setViewportDriftTestMode(
+  mode:
+    | "normal"
+    | "force-single-post-screenshot-mismatch"
+    | "force-persistent-post-screenshot-mismatch",
+) {
+  viewportDriftTestMode = mode;
+  viewportDriftInjected = false;
+}
+
+export function __setForcedNavigateNetworkFailureRoutePaths(
+  routePaths: string[],
+) {
+  forcedNavigateNetworkFailureRoutePaths = new Set(
+    routePaths.map((routePath) => normalizeRoutePath(routePath)),
+  );
+}
+
+export function __setInteractionStyleCollectionTestMode(
+  mode: "normal" | "slow",
+) {
+  interactionStyleCollectionTestMode = mode;
+}
+
+class RouteCapturePhaseError extends Error {
+  constructor(
+    message: string,
+    public routePath: string,
+    public phase: RouteCapturePhaseName,
+    public required: boolean,
+    public progress?: RouteCaptureProgressArtifact,
+  ) {
+    super(message);
+    this.name = "RouteCapturePhaseError";
+  }
+}
+
+function routeStateDirectory(rootDir: string, routePath: string) {
+  return path.join(rootDir, routeDirectoryName(routePath));
+}
+
+function routeProgressPath(rootDir: string, routePath: string) {
+  return path.join(routeStateDirectory(rootDir, routePath), "route-progress.json");
+}
+
+function routeCacheArtifactPath(rootDir: string, routePath: string) {
+  return path.join(routeStateDirectory(rootDir, routePath), "route-cache.json");
+}
+
+function routeLegacyCachePath(cacheDir: string, routePath: string) {
+  return path.join(cacheDir, `${routeDirectoryName(routePath)}.json`);
+}
+
+function createRouteCaptureCompatibilityKey(input: {
+  sourceUrl: string;
+  routePath: string;
+  viewportNames: ViewportName[];
+  templateId?: string;
+  templatePath?: string;
+  routeKind?: ExportRouteKind;
+  template?: ExportRouteTemplate;
+  templateKind?: RouteCaptureInput["routes"][number]["templateKind"];
+  destination?: string;
+  destinationKind?: ExportRouteDestinationKind;
+  redirectTo?: string;
+  redirectStatus?: number;
+  interactionReplayTimeoutMs?: number;
+}) {
+  return JSON.stringify({
+    sourceUrl: input.sourceUrl,
+    routePath: normalizeRoutePath(input.routePath),
+    viewportNames: [...input.viewportNames],
+    templateId: input.templateId ?? null,
+    templatePath: input.templatePath ?? null,
+    routeKind: input.routeKind ?? null,
+    template: input.template ?? null,
+    templateKind: input.templateKind ?? null,
+    destination: input.destination ?? null,
+    destinationKind: input.destinationKind ?? null,
+    redirectTo: input.redirectTo ?? null,
+    redirectStatus: input.redirectStatus ?? null,
+    interactionReplayTimeoutMs: input.interactionReplayTimeoutMs ?? INTERACTION_REPLAY_TIMEOUT_MS,
+  });
+}
+
+async function writeJsonFileAtomic(filePath: string, value: unknown) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const tempPath = `${filePath}.${crypto.randomUUID()}.tmp`;
+  await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`);
+  await fs.rename(tempPath, filePath);
+}
+
+function toRouteProgressSummary(
+  routePath: string,
+  capture: RuntimeRouteCapture,
+  input: {
+    status: RouteCaptureProgressSummary["status"];
+    warningCount?: number;
+    failedPhase?: RouteCapturePhaseName;
+    failedReason?: string;
+    reusedFromCache?: boolean;
+    reusedFromProgress?: boolean;
+  },
+): RouteCaptureProgressSummary {
+  return {
+    routePath,
+    status: input.status,
+    evidenceClasses: summarizeRouteEvidenceClasses(capture),
+    capturedViewports: (capture.captureDiagnostics?.breakpointsCaptured ?? []) as ViewportName[],
+    warningCount: input.warningCount ?? 0,
+    failedPhase: input.failedPhase,
+    failedReason: input.failedReason,
+    reusedFromCache: input.reusedFromCache,
+    reusedFromProgress: input.reusedFromProgress,
+  };
+}
+
+function summarizeRouteEvidenceClasses(capture: RuntimeRouteCapture) {
+  const evidence = new Set<RouteCaptureEvidenceClass>();
+  if (capture.redirectTo) {
+    evidence.add("redirect-backed");
+  }
+  const breakpoints = capture.captureDiagnostics?.breakpointsCaptured ?? [];
+  const validations = capture.captureDiagnostics?.viewportValidation ?? {};
+  if (
+    breakpoints.length > 0 &&
+    breakpoints.every((viewportName) => validations[viewportName]?.valid)
+  ) {
+    evidence.add("screenshot-backed");
+  } else if (breakpoints.length > 0) {
+    evidence.add("heuristic-backed");
+  }
+  if ((capture.nodes?.length ?? 0) > 0) {
+    evidence.add("dom-backed");
+  }
+  if ((capture.interactionReplay?.length ?? 0) > 0) {
+    evidence.add("replay-backed");
+  }
+  if (evidence.size === 0) {
+    evidence.add("invalid");
+  }
+  return Array.from(evidence);
+}
+
+function createRouteProgressArtifact(input: {
+  sourceUrl: string;
+  compatibilityKey?: string;
+  routePath: string;
+  routeTitle?: string;
+  templateId?: string;
+  templatePath?: string;
+  routeKind?: ExportRouteKind;
+  template?: ExportRouteTemplate;
+  templateKind?: RuntimeRouteCapture["templateKind"];
+  destination?: string;
+  destinationKind?: ExportRouteDestinationKind;
+  status: RouteCaptureProgressArtifact["status"];
+  phases?: RouteCapturePhaseRecord[];
+  capturedViewports?: ViewportName[];
+  evidenceClasses?: RouteCaptureEvidenceClass[];
+  warnings?: string[];
+  reusedFromCache?: boolean;
+  reusedFromProgress?: boolean;
+  failedPhase?: RouteCapturePhaseName;
+  failureReason?: string;
+  capture?: RuntimeRouteCapture;
+  createdAt?: string;
+}) {
+  const now = new Date().toISOString();
+  return {
+    schemaVersion: ROUTE_PROGRESS_SCHEMA_VERSION,
+    sourceUrl: input.sourceUrl,
+    compatibilityKey: input.compatibilityKey,
+    routePath: input.routePath,
+    routeTitle: input.routeTitle,
+    templateId: input.templateId,
+    templatePath: input.templatePath,
+    routeKind: input.routeKind,
+    template: input.template,
+    templateKind: input.templateKind,
+    destination: input.destination,
+    destinationKind: input.destinationKind,
+    status: input.status,
+    phases: input.phases ?? [],
+    capturedViewports: input.capturedViewports ?? [],
+    evidenceClasses: input.evidenceClasses ?? [],
+    warnings: input.warnings ?? [],
+    reusedFromCache: input.reusedFromCache,
+    reusedFromProgress: input.reusedFromProgress,
+    failedPhase: input.failedPhase,
+    failureReason: input.failureReason,
+    capture: input.capture,
+    createdAt: input.createdAt ?? now,
+    updatedAt: now,
+  } satisfies RouteCaptureProgressArtifact;
+}
+
+async function readRouteCaptureProgress(
+  stateDir: string,
+  routePath: string,
+  sourceUrl: string,
+  compatibilityKey?: string,
+) {
+  const progressPath = routeProgressPath(stateDir, routePath);
+  try {
+    const raw = await fs.readFile(progressPath, "utf8");
+    const parsed = JSON.parse(raw) as Partial<RouteCaptureProgressArtifact> & {
+      schemaVersion?: number;
+      sourceUrl?: string;
+      compatibilityKey?: string;
+      routePath?: string;
+    };
+    if (
+      parsed.schemaVersion !== ROUTE_PROGRESS_SCHEMA_VERSION ||
+      parsed.sourceUrl !== sourceUrl ||
+      (compatibilityKey && parsed.compatibilityKey !== compatibilityKey) ||
+      normalizeRoutePath(parsed.routePath ?? "") !== routePath
+    ) {
+      return null;
+    }
+    return parsed as RouteCaptureProgressArtifact;
+  } catch {
+    return null;
+  }
+}
+
+async function writeRouteCaptureProgress(
+  stateDirs: string[],
+  progress: RouteCaptureProgressArtifact,
+) {
+  const uniqueDirs = Array.from(
+    new Set(stateDirs.filter((dir): dir is string => Boolean(dir))),
+  );
+  await Promise.all(
+    uniqueDirs.map(async (dir) => {
+      const progressPath = routeProgressPath(dir, progress.routePath);
+      await writeJsonFileAtomic(progressPath, progress);
+    }),
+  );
+}
+
+async function readRouteCacheArtifact(
+  cacheDir: string,
+  routePath: string,
+  sourceUrl: string,
+  compatibilityKey?: string,
+) {
+  const modernPath = routeCacheArtifactPath(cacheDir, routePath);
+  try {
+    const raw = await fs.readFile(modernPath, "utf8");
+    const cached = JSON.parse(raw) as {
+      schemaVersion?: number;
+      sourceUrl?: string;
+      compatibilityKey?: string;
+      capture?: RuntimeRouteCapture;
+    };
+    if (
+      cached.schemaVersion === ROUTE_CAPTURE_CACHE_SCHEMA_VERSION &&
+      cached.sourceUrl === sourceUrl &&
+      (!compatibilityKey || cached.compatibilityKey === compatibilityKey) &&
+      (await fs.stat(routeLegacyCachePath(cacheDir, routePath)).then(
+        () => true,
+        () => false,
+      )) &&
+      cached.capture
+    ) {
+      return cached.capture;
+    }
+  } catch {
+    // fall back to the legacy flat-file cache path below
+  }
+
+  try {
+    const raw = await fs.readFile(routeLegacyCachePath(cacheDir, routePath), "utf8");
+    const cached = JSON.parse(raw) as {
+      schemaVersion?: number;
+      sourceUrl?: string;
+      compatibilityKey?: string;
+      capture?: RuntimeRouteCapture;
+    };
+    return cached.schemaVersion === ROUTE_CAPTURE_CACHE_SCHEMA_VERSION &&
+      cached.sourceUrl === sourceUrl &&
+      (!compatibilityKey || cached.compatibilityKey === compatibilityKey) &&
+      cached.capture
+      ? cached.capture
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeRouteCacheArtifact(
+  cacheDir: string,
+  routePath: string,
+  sourceUrl: string,
+  compatibilityKey: string,
+  capture: RuntimeRouteCapture,
+) {
+  const payload = {
+    schemaVersion: ROUTE_CAPTURE_CACHE_SCHEMA_VERSION,
+    sourceUrl,
+    compatibilityKey,
+    templateId: capture.templateId,
+    capture,
+  };
+  const modernPath = routeCacheArtifactPath(cacheDir, routePath);
+  await fs.mkdir(path.dirname(modernPath), { recursive: true });
+  await writeJsonFileAtomic(modernPath, payload);
+  await writeJsonFileAtomic(routeLegacyCachePath(cacheDir, routePath), payload).catch(
+    () => undefined,
+  );
+}
 
 export const FULL_SITE_VIEWPORTS = {
   desktop: { width: 1440, height: 900 },
@@ -63,10 +466,6 @@ export const FULL_SITE_VIEWPORTS = {
 
 const viewports: Record<ViewportName, { width: number; height: number }> =
   FULL_SITE_VIEWPORTS;
-
-const ROUTE_CAPTURE_TIMEOUT_MS = 3 * 60_000;
-const INTERACTION_REPLAY_TIMEOUT_MS = 20_000;
-const ROUTE_CAPTURE_CACHE_SCHEMA_VERSION = 5;
 
 const MOTION_STYLE_PROPERTIES = [
   "transitionProperty",
@@ -178,7 +577,7 @@ export async function captureRuntime(
 export async function captureRuntimeRoutes(
   input: RouteCaptureInput,
 ): Promise<RuntimeCapture> {
-  await mkdirp(input.workDir);
+  await fs.mkdir(input.workDir, { recursive: true });
   const routes = unique(
       input.routes
       .map((route) => ({
@@ -186,7 +585,13 @@ export async function captureRuntimeRoutes(
         title: route.title,
         templateId: route.templateId,
         templatePath: route.templatePath,
+        routeKind: route.routeKind,
+        template: route.template,
         templateKind: route.templateKind,
+        destination: route.destination,
+        destinationKind: route.destinationKind,
+        redirectTo: route.redirectTo,
+        redirectStatus: route.redirectStatus,
       }))
       .filter((route) => route.path),
     (route) => route.path,
@@ -197,131 +602,383 @@ export async function captureRuntimeRoutes(
       title: undefined,
       templateId: "/",
       templatePath: "/",
+      routeKind: "page",
+      template: "static",
       templateKind: "static",
+      destination: undefined,
+      destinationKind: undefined,
+      redirectTo: undefined,
+      redirectStatus: undefined,
     });
   }
 
-  const browser = await chromium.launch({ headless: true });
   const routeCaptures: RuntimeRouteCapture[] = [];
-  const routeFailures: Array<{ routePath: string; error: string }> = [];
+  const routeFailures: Array<{
+    routePath: string;
+    error: string;
+    phase?: RouteCapturePhaseName;
+    required?: boolean;
+    reused?: boolean;
+  }> = [];
+  const routeProgressSummaries: RouteCaptureProgressSummary[] = [];
   let consecutiveNetworkFailures = 0;
-  if (input.cacheDir) await mkdirp(input.cacheDir);
+  if (input.cacheDir) await fs.mkdir(input.cacheDir, { recursive: true });
+  const freshRoutePaths = new Set(
+    (input.freshRoutePaths ?? []).map((routePath) => normalizeRoutePath(routePath)),
+  );
+  const requestedViewportNames =
+    input.viewportNames && input.viewportNames.length > 0
+      ? input.viewportNames
+      : (Object.keys(viewports) as ViewportName[]);
 
-  try {
-    // Published Framer origins can abort bursts of simultaneous document requests.
-    // Each route already captures four responsive viewports, so process routes serially.
-    const concurrency = 1;
-    for (let index = 0; index < routes.length; index += concurrency) {
-      const batch = routes.slice(index, index + concurrency);
-      const captures = await Promise.all(
-        batch.map(async (route) => {
-          const url = new URL(route.path, input.originUrl).toString();
-          const baseCapture = input.baseCapturesByRoute?.[route.path];
-          const cached = input.cacheDir
-            ? await readCachedRouteCapture(input.cacheDir, route.path, url)
-            : null;
-          if (cached) {
-            console.log(
-              "[coderelay:capture:route-cache-hit]",
-              JSON.stringify({ routePath: route.path }),
-            );
-            consecutiveNetworkFailures = 0;
-            return cached;
-          }
-          const routeWorkDir = path.join(
-            input.workDir,
-            "routes",
-            routeDirectoryName(route.path),
-          );
-          console.log(
-            "[coderelay:capture:route]",
-            JSON.stringify({ routePath: route.path, url }),
-          );
-          const context = await browser.newContext();
-          try {
-            const capture = await withTimeout(
-              captureRuntimeWithBrowser(context, {
-                url,
-                workDir: routeWorkDir,
-                routePath: route.path,
-                viewportNames: input.viewportNames,
-                baseCapture,
-                interactionReplayTimeoutMs: input.interactionReplayTimeoutMs,
-              }),
-              ROUTE_CAPTURE_TIMEOUT_MS,
-              `Route capture exceeded ${ROUTE_CAPTURE_TIMEOUT_MS / 60_000} minutes: ${route.path}`,
-            );
-            const result: RuntimeRouteCapture = {
-              ...capture,
-              title: route.title?.trim() || capture.title,
-              routePath: route.path,
-              templateId: route.templateId,
-              templatePath: route.templatePath,
-              templateKind: route.templateKind,
-            };
-            consecutiveNetworkFailures = 0;
-            if (input.cacheDir) {
-              await writeCachedRouteCapture(
-                input.cacheDir,
-                route.path,
-                url,
-                result,
-              );
-            }
-            return result;
-          } catch (error) {
-            if (/ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED/i.test(formatError(error))) {
-              consecutiveNetworkFailures += 1;
-            } else {
-              consecutiveNetworkFailures = 0;
-            }
-            routeFailures.push({
-              routePath: route.path,
-              error: formatError(error),
-            });
-            console.warn(
-              "[coderelay:capture:route-skipped]",
-              JSON.stringify({ routePath: route.path, error: formatError(error) }),
-            );
-            return null;
-          } finally {
-            await context.close().catch(() => undefined);
-          }
-        }),
+  // Published Framer routes are captured serially. Recycle the browser between
+  // routes so long crawls do not inherit renderer state, CDP sessions, or
+  // page-level hooks from earlier routes.
+  for (let index = 0; index < routes.length; index += 1) {
+    const route = routes[index]!;
+    const url = new URL(route.path, input.originUrl).toString();
+    const compatibilityKey = createRouteCaptureCompatibilityKey({
+      sourceUrl: url,
+      routePath: route.path,
+      viewportNames: requestedViewportNames,
+      templateId: route.templateId,
+      templatePath: route.templatePath,
+      routeKind: route.routeKind,
+      template: route.template,
+      templateKind: route.templateKind,
+      destination: route.destination,
+      destinationKind: route.destinationKind,
+      redirectTo: route.redirectTo,
+      redirectStatus: route.redirectStatus,
+      interactionReplayTimeoutMs: input.interactionReplayTimeoutMs,
+    });
+    const baseCapture = input.baseCapturesByRoute?.[route.path];
+    const routeWorkDir = path.join(
+      input.workDir,
+      "routes",
+      routeDirectoryName(route.path),
+    );
+    const forceFreshCapture = freshRoutePaths.has(route.path);
+    const cached =
+      input.cacheDir && !forceFreshCapture
+        ? await readRouteCacheArtifact(
+            input.cacheDir,
+            route.path,
+            url,
+            compatibilityKey,
+          )
+        : null;
+    const reusableCachedViewportNames = cached
+      ? await listReusableViewportNames(cached, requestedViewportNames)
+      : new Set<ViewportName>();
+    const progressSource =
+      input.cacheDir && !forceFreshCapture
+        ? await readRouteCaptureProgress(
+            input.cacheDir,
+            route.path,
+            url,
+            compatibilityKey,
+          )
+        : null;
+    let capture: RuntimeRouteCapture | null = null;
+    let progress: RouteCaptureProgressArtifact | null = progressSource;
+
+    if (cached && reusableCachedViewportNames.size === requestedViewportNames.length) {
+      console.log(
+        "[coderelay:capture:route-cache-hit]",
+        JSON.stringify({ routePath: route.path }),
       );
-      routeCaptures.push(
-        ...captures.filter(
-          (capture): capture is RuntimeRouteCapture => capture !== null,
-        ),
+      consecutiveNetworkFailures = 0;
+      const cachedRouteMetadata = resolveExportRouteMetadata(
+        {
+          routeKind: cached.routeKind ?? route.routeKind,
+          destination:
+            cached.destination ?? route.destination,
+          destinationKind:
+            cached.destinationKind ?? route.destinationKind,
+          redirectTo: cached.redirectTo ?? route.redirectTo,
+          redirectStatus:
+            typeof cached.redirectStatus === "number"
+              ? cached.redirectStatus
+              : route.redirectStatus,
+          templateKind: cached.templateKind ?? route.templateKind,
+        },
+        {
+          observedRedirectTo: cached.redirectTo,
+        },
       );
-      const completed = Math.min(index + batch.length, routes.length);
-      await fs.writeFile(
-        path.join(input.workDir, "capture-progress.json"),
-        `${JSON.stringify(
-          {
-            completed,
-            total: routes.length,
-            captured: routeCaptures.map((capture) => capture.routePath),
-            failures: routeFailures,
-          },
-          null,
-          2,
-        )}\n`,
-      );
-      await input.onProgress?.({
-        completed,
-        total: routes.length,
-        routePath: batch.at(-1)?.path ?? "/",
-        failed: routeFailures.length,
+      capture = {
+        ...cached,
+        title: route.title?.trim() || cached.title,
+        routePath: route.path,
+        templateId: route.templateId,
+        templatePath: route.templatePath,
+        routeKind: cachedRouteMetadata.routeKind,
+        template: cached.template ?? route.template,
+        templateKind:
+          cachedRouteMetadata.templateKind ??
+          cached.templateKind ??
+          route.templateKind,
+        destination: cachedRouteMetadata.destination,
+        destinationKind: cachedRouteMetadata.destinationKind,
+        ...(cachedRouteMetadata.redirectTo
+          ? { redirectTo: cachedRouteMetadata.redirectTo }
+          : {}),
+        ...(typeof cachedRouteMetadata.redirectStatus === "number"
+          ? { redirectStatus: cachedRouteMetadata.redirectStatus }
+          : {}),
+        captureDiagnostics: {
+          ...(cached.captureDiagnostics ?? {
+            breakpointsCaptured: Object.keys(cached.viewports) as ViewportName[],
+          }),
+          phaseHistory: cached.captureDiagnostics?.phaseHistory ?? [],
+        },
+      };
+      const routeSummary = toRouteProgressSummary(route.path, capture, {
+        status: "reused",
+        warningCount: 0,
+        reusedFromCache: true,
       });
-      if (consecutiveNetworkFailures >= 3) {
-        throw new Error(
-          "Network unavailable for three consecutive routes. Capture stopped safely; restart the job when connectivity returns to resume from the route cache.",
+      routeProgressSummaries.push(routeSummary);
+    } else {
+      if (cached && reusableCachedViewportNames.size > 0) {
+        console.log(
+          "[coderelay:capture:route-cache-partial-reuse]",
+          JSON.stringify({
+            routePath: route.path,
+            reusableViewports: Array.from(reusableCachedViewportNames),
+            requestedViewports: requestedViewportNames,
+          }),
+        );
+      }
+      try {
+        let routeCaptureResult:
+          | Awaited<ReturnType<typeof captureRuntimeRouteWithResume>>
+          | undefined;
+        let lastError: unknown;
+        for (
+          let transientAttempt = 1;
+          transientAttempt <= ROUTE_TRANSIENT_RETRY_LIMIT;
+          transientAttempt += 1
+        ) {
+          try {
+            routeCaptureResult = await captureRuntimeRouteWithResume({
+              originUrl: input.originUrl,
+              route,
+              url,
+              routeWorkDir,
+              cacheDir: input.cacheDir ?? undefined,
+              viewportNames: input.viewportNames,
+              baseCapture: cached ?? baseCapture,
+              progress,
+              interactionReplayTimeoutMs: input.interactionReplayTimeoutMs,
+              compatibilityKey,
+            });
+            break;
+          } catch (error) {
+            lastError = error;
+            const phaseError =
+              error instanceof RouteCapturePhaseError ? error : null;
+            progress = phaseError?.progress ?? progress;
+            if (
+              transientAttempt >= ROUTE_TRANSIENT_RETRY_LIMIT ||
+              !isTransientNetworkError(error)
+            ) {
+              throw error;
+            }
+            console.warn(
+              "[coderelay:capture:route-transient-retry]",
+              JSON.stringify({
+                routePath: route.path,
+                attempt: transientAttempt,
+                nextAttempt: transientAttempt + 1,
+                phase: phaseError?.phase,
+                reason: formatError(error),
+                reusedFromProgress: progress?.reusedFromProgress ?? false,
+              }),
+            );
+            await new Promise((resolve) =>
+              setTimeout(resolve, 750 * transientAttempt),
+            );
+          }
+        }
+        if (!routeCaptureResult) {
+          throw lastError ?? new Error(`Route ${route.path} capture failed.`);
+        }
+        const capturedRouteMetadata = resolveExportRouteMetadata(
+          {
+            routeKind:
+              routeCaptureResult.capture.routeKind ?? route.routeKind,
+            destination:
+              routeCaptureResult.capture.destination ?? route.destination,
+            destinationKind:
+              routeCaptureResult.capture.destinationKind ?? route.destinationKind,
+            redirectTo:
+              routeCaptureResult.capture.redirectTo ?? route.redirectTo,
+            redirectStatus:
+              typeof routeCaptureResult.capture.redirectStatus === "number"
+                ? routeCaptureResult.capture.redirectStatus
+                : route.redirectStatus,
+            templateKind:
+              routeCaptureResult.capture.templateKind ?? route.templateKind,
+          },
+          {
+            observedRedirectTo: routeCaptureResult.capture.redirectTo,
+          },
+        );
+        capture = {
+          ...routeCaptureResult.capture,
+          title: route.title?.trim() || routeCaptureResult.capture.title,
+          routePath: route.path,
+          templateId: route.templateId,
+          templatePath: route.templatePath,
+          routeKind: capturedRouteMetadata.routeKind,
+          template:
+            routeCaptureResult.capture.template ?? route.template,
+          templateKind:
+            capturedRouteMetadata.templateKind ??
+            routeCaptureResult.capture.templateKind ??
+            route.templateKind,
+          destination: capturedRouteMetadata.destination,
+          destinationKind: capturedRouteMetadata.destinationKind,
+          ...(capturedRouteMetadata.redirectTo
+            ? { redirectTo: capturedRouteMetadata.redirectTo }
+            : {}),
+          ...(typeof capturedRouteMetadata.redirectStatus === "number"
+            ? { redirectStatus: capturedRouteMetadata.redirectStatus }
+            : {}),
+        };
+        progress = routeCaptureResult.progress;
+        consecutiveNetworkFailures = 0;
+        if (input.cacheDir && capture) {
+          await writeRouteCacheArtifact(
+            input.cacheDir,
+            route.path,
+            url,
+            compatibilityKey,
+            capture,
+          );
+        }
+        if (capture && progress) {
+          routeProgressSummaries.push(
+            toRouteProgressSummary(route.path, capture, {
+              status: progress.reusedFromProgress ? "retried" : "fresh",
+              warningCount: progress.warnings.length,
+              reusedFromProgress: progress.reusedFromProgress,
+            }),
+          );
+        }
+      } catch (error) {
+        const phaseError =
+          error instanceof RouteCapturePhaseError ? error : null;
+        progress = phaseError?.progress ?? progress;
+        const formatted = formatError(error);
+        if (isTransientNetworkError(error)) {
+          consecutiveNetworkFailures += 1;
+        } else {
+          consecutiveNetworkFailures = 0;
+        }
+        routeFailures.push({
+          routePath: route.path,
+          error: formatted,
+          phase: phaseError?.phase,
+          required: phaseError?.required,
+        });
+        routeProgressSummaries.push(
+          progress
+            ? {
+                routePath: route.path,
+                status: "failed",
+                evidenceClasses: progress.evidenceClasses,
+                capturedViewports: progress.capturedViewports,
+                warningCount: progress.warnings.length,
+                failedPhase: phaseError?.phase,
+                failedReason: formatted,
+                reusedFromProgress: progress.reusedFromProgress,
+              }
+            : {
+                routePath: route.path,
+                status: "failed",
+                evidenceClasses: ["invalid"],
+                capturedViewports: [],
+                warningCount: 0,
+                failedPhase: phaseError?.phase,
+                failedReason: formatted,
+              },
+        );
+        console.warn(
+          "[coderelay:capture:route-skipped]",
+          JSON.stringify({
+            routePath: route.path,
+            error: formatted,
+            phase: phaseError?.phase,
+          }),
         );
       }
     }
-  } finally {
-    await browser.close();
+
+    if (capture) {
+      routeCaptures.push(capture);
+      if (!routeProgressSummaries.some((entry) => entry.routePath === route.path)) {
+        routeProgressSummaries.push(
+          toRouteProgressSummary(route.path, capture, {
+            status: "fresh",
+            warningCount: 0,
+          }),
+        );
+      }
+    }
+    const completed = index + 1;
+    await writeJsonFileAtomic(path.join(input.workDir, "capture-progress.json"), {
+      schemaVersion: ROUTE_PROGRESS_SCHEMA_VERSION,
+      sourceUrl: input.originUrl,
+      completed,
+      total: routes.length,
+      captured: routeCaptures.map((entry) => entry.routePath),
+      failures: routeFailures,
+      routeProgress: routeProgressSummaries,
+      summary: {
+        reusedRoutes: routeProgressSummaries.filter(
+          (entry) => entry.status === "reused",
+        ).length,
+        retriedRoutes: routeProgressSummaries.filter(
+          (entry) => entry.status === "retried",
+        ).length,
+        failedRoutes: routeProgressSummaries.filter(
+          (entry) => entry.status === "failed",
+        ).length,
+        optionalDegradedRoutes: routeProgressSummaries.filter(
+          (entry) =>
+            entry.status !== "failed" &&
+            entry.evidenceClasses.includes("heuristic-backed"),
+        ).length,
+        firstBlockingRoute:
+          routeFailures[0]?.routePath ?? routeProgressSummaries[0]?.routePath,
+      },
+    });
+    await input.onProgress?.({
+      completed,
+      total: routes.length,
+      routePath: route.path,
+      failed: routeFailures.length,
+    });
+    if (consecutiveNetworkFailures >= NETWORK_UNAVAILABLE_CONFIRMATION_THRESHOLD) {
+      const originProbe = await probeOriginAvailability(input.originUrl);
+      if (!originProbe.reachable) {
+        throw new Error(
+          `Network unavailable for three consecutive routes. Origin probe ${originProbe.probeUrl} failed: ${originProbe.reason}. Capture stopped safely; restart the job when connectivity returns to resume from the route cache.`,
+        );
+      }
+      console.warn(
+        "[coderelay:capture:network-probe-recovered]",
+        JSON.stringify({
+          originUrl: input.originUrl,
+          probeUrl: originProbe.probeUrl,
+          consecutiveNetworkFailures,
+        }),
+      );
+      consecutiveNetworkFailures = 0;
+    }
   }
 
   if (routeCaptures.length === 0) {
@@ -348,6 +1005,13 @@ export async function captureRuntimeRoutes(
     ...primary,
     stylesheetUrls,
     framerStyleCss,
+    captureDiagnostics: {
+      ...(primary.captureDiagnostics ?? {
+        breakpointsCaptured: Object.keys(primary.viewports) as ViewportName[],
+      }),
+      routeFailures,
+      routeProgress: routeProgressSummaries,
+    },
     routeCaptures,
   };
 }
@@ -367,7 +1031,14 @@ export async function validateFullSiteCapture(input: {
   for (const routePath of expectedRoutes) {
     const capture = capturedRoutes.get(routePath);
     if (!capture) {
-      throw new Error(`Full-site capture incomplete: route ${routePath} was not captured.`);
+      const routeFailure = input.capture.captureDiagnostics?.routeFailures?.find(
+        (failure) => normalizeRoutePath(failure.routePath) === routePath,
+      );
+      throw new Error(
+        routeFailure
+          ? `Full-site capture incomplete: route ${routePath} was not captured (${routeFailure.error}).`
+          : `Full-site capture incomplete: route ${routePath} was not captured.`,
+      );
     }
     const breakpoints = capture.captureDiagnostics?.breakpointsCaptured ?? [];
     const observedWidths = new Set<number>();
@@ -419,12 +1090,485 @@ export async function validateFullSiteCapture(input: {
   }
 }
 
+type ViewportCaptureResult = Awaited<ReturnType<typeof captureViewport>>;
+type ObservedViewport = Awaited<ReturnType<typeof readObservedViewport>>;
+
+function createViewportCaptureSnapshotFromRouteCapture(
+  capture: RuntimeRouteCapture,
+  viewportName: ViewportName,
+): ViewportCaptureResult | null {
+  const viewport = capture.viewports[viewportName];
+  if (!viewport) return null;
+  const requested = viewport.requested ?? {
+    width: viewport.width,
+    height: viewport.height,
+  };
+  const observed = viewport.observed ?? {
+    innerWidth: viewport.width,
+    innerHeight: viewport.height,
+    clientWidth: viewport.width,
+    devicePixelRatio: 1,
+  };
+  const validation =
+    capture.captureDiagnostics?.viewportValidation?.[viewportName] ??
+    createViewportValidation(requested, observed, {
+      width: viewport.width,
+      height: viewport.height,
+    });
+  return {
+    viewportName,
+    title: capture.title,
+    nodes:
+      capture.nodesByViewport?.[viewportName] ??
+      (viewportName === "desktop" ? capture.nodes : []),
+    rootStyles:
+      capture.rootStylesByViewport?.[viewportName] ??
+      (viewportName === "desktop" ? capture.rootStyles ?? {} : {}),
+    viewportValidation: {
+      requestedWidth: validation.requestedWidth,
+      requestedHeight: validation.requestedHeight,
+      observedBeforeInnerWidth: validation.observedBeforeInnerWidth,
+      observedBeforeInnerHeight: validation.observedBeforeInnerHeight,
+      observedBeforeClientWidth: validation.observedBeforeClientWidth,
+      observedInnerWidth: validation.observedInnerWidth,
+      observedInnerHeight: validation.observedInnerHeight,
+      observedClientWidth: validation.observedClientWidth,
+      screenshotWidth: validation.screenshotWidth,
+      screenshotHeight: validation.screenshotHeight,
+      screenshotAttempts: validation.screenshotAttempts ?? 1,
+      valid: validation.valid,
+      reason: validation.reason,
+    },
+    fontsReady: capture.captureDiagnostics?.fontReadiness?.[viewportName] ?? true,
+    framerStyleCss:
+      viewportName === "desktop" ? capture.framerStyleCss ?? "" : "",
+    stylesheetUrls: capture.stylesheetUrls ?? [],
+    interactionReplay:
+      viewportName === "desktop" ? capture.interactionReplay : undefined,
+    redirect: capture.redirectTo
+      ? {
+          redirectTo: capture.redirectTo,
+          templateKind:
+            capture.templateKind === "utility" ? "utility" : "redirect",
+        }
+      : null,
+    phaseHistory: [],
+    warnings: [],
+    viewport: {
+      screenshotPath: viewport.screenshotPath,
+      width: viewport.width,
+      height: viewport.height,
+      requested,
+      observed,
+      valid: validation.valid,
+    },
+  };
+}
+
+function assembleRouteCapture(input: {
+  route: RouteCaptureInput["routes"][number];
+  url: string;
+  captures: ViewportCaptureResult[];
+  baseCapture?: RuntimeRouteCapture;
+}): RuntimeRouteCapture {
+  const baseCapture = input.baseCapture;
+  const desktop =
+    input.captures.find((capture) => capture.viewportName === "desktop") ??
+    readBaseViewportCapture(baseCapture, "desktop") ??
+    input.captures[0]!;
+  const stylesheetUrls = unique(
+    [
+      ...(baseCapture?.stylesheetUrls ?? []),
+      ...input.captures.flatMap((capture) => capture.stylesheetUrls),
+    ],
+  );
+  const viewportEntries = Object.fromEntries(
+    unique(
+      [
+        ...((baseCapture?.captureDiagnostics?.breakpointsCaptured ?? []) as ViewportName[]),
+        ...input.captures.map((capture) => capture.viewportName),
+      ],
+    ).map((viewportName) => [
+      viewportName,
+      input.captures.find((capture) => capture.viewportName === viewportName)
+        ?.viewport ?? baseCapture?.viewports[viewportName],
+    ]),
+  ) as RuntimeCapture["viewports"];
+  const nodesByViewport = Object.fromEntries(
+    unique(
+      [
+        ...((baseCapture?.captureDiagnostics?.breakpointsCaptured ?? []) as ViewportName[]),
+        ...input.captures.map((capture) => capture.viewportName),
+      ],
+    ).map((viewportName) => [
+      viewportName,
+      input.captures.find((capture) => capture.viewportName === viewportName)?.nodes ??
+        baseCapture?.nodesByViewport?.[viewportName] ??
+        (viewportName === "desktop" ? baseCapture?.nodes : undefined),
+    ]),
+  );
+  const rootStylesByViewport = Object.fromEntries(
+    unique(
+      [
+        ...((baseCapture?.captureDiagnostics?.breakpointsCaptured ?? []) as ViewportName[]),
+        ...input.captures.map((capture) => capture.viewportName),
+      ],
+    ).map((viewportName) => [
+      viewportName,
+      input.captures.find((capture) => capture.viewportName === viewportName)?.rootStyles ??
+        baseCapture?.rootStylesByViewport?.[viewportName] ??
+        (viewportName === "desktop" ? baseCapture?.rootStyles : undefined),
+    ]),
+  );
+  const breakpointsCaptured = unique(
+    [
+      ...((baseCapture?.captureDiagnostics?.breakpointsCaptured ?? []) as ViewportName[]),
+      ...input.captures.map((capture) => capture.viewportName),
+    ],
+  );
+  const redirect =
+    input.captures.find((capture) => capture.viewportName === "desktop")?.redirect ??
+    input.captures.find((capture) => capture.redirect)?.redirect;
+  const routeMetadata = resolveExportRouteMetadata(
+    {
+      routeKind: input.route.routeKind,
+      destination: input.route.destination,
+      destinationKind: input.route.destinationKind,
+      redirectTo: input.route.redirectTo,
+      redirectStatus: input.route.redirectStatus,
+      templateKind: input.route.templateKind,
+    },
+    {
+      observedRedirectTo: redirect?.redirectTo,
+    },
+  );
+
+  return {
+    url: input.url,
+    title: desktop.title,
+    mode: input.route.templateKind === "utility" ? "page" : "page",
+    viewports: viewportEntries,
+    nodes: desktop.nodes,
+    nodesByViewport,
+    rootStyles: desktop.rootStyles,
+    rootStylesByViewport,
+    captureDiagnostics: {
+      breakpointsCaptured,
+      viewportValidation: Object.fromEntries(
+        breakpointsCaptured.map((viewportName) => {
+          const fromCapture = input.captures.find(
+            (capture) => capture.viewportName === viewportName,
+          )?.viewportValidation;
+          const fromBase =
+            baseCapture?.captureDiagnostics?.viewportValidation?.[viewportName];
+          return [viewportName, fromCapture ?? fromBase];
+        }),
+      ),
+      fontReadiness: Object.fromEntries(
+        breakpointsCaptured.map((viewportName) => [
+          viewportName,
+          input.captures.find((capture) => capture.viewportName === viewportName)
+            ?.fontsReady ??
+            baseCapture?.captureDiagnostics?.fontReadiness?.[viewportName],
+        ]),
+      ),
+      stylesheetCount: Object.fromEntries(
+        breakpointsCaptured.map((viewportName) => [
+          viewportName,
+          input.captures.find((capture) => capture.viewportName === viewportName)
+            ?.stylesheetUrls.length ??
+            baseCapture?.captureDiagnostics?.stylesheetCount?.[viewportName] ??
+            0,
+        ]),
+      ),
+      nodeCount: Object.fromEntries(
+        breakpointsCaptured.map((viewportName) => [
+          viewportName,
+          input.captures.find((capture) => capture.viewportName === viewportName)
+            ?.nodes.length ??
+            baseCapture?.captureDiagnostics?.nodeCount?.[viewportName] ??
+            (viewportName === "desktop" ? baseCapture?.nodes.length : 0) ??
+            0,
+        ]),
+      ),
+      phaseHistory: input.captures.flatMap(
+        (capture) => capture.phaseHistory ?? [],
+      ),
+      routeProgress: [],
+    },
+    interactionReplay:
+      ("interactionReplay" in desktop
+        ? desktop.interactionReplay
+        : undefined) ??
+      baseCapture?.interactionReplay ??
+      [],
+    framerStyleCss: desktop.framerStyleCss || baseCapture?.framerStyleCss,
+    stylesheetUrls,
+    routePath: input.route.path,
+    templateId: input.route.templateId,
+    templatePath: input.route.templatePath,
+    routeKind: routeMetadata.routeKind,
+    template: input.route.template,
+    templateKind: routeMetadata.templateKind ?? input.route.templateKind,
+    destination: routeMetadata.destination,
+    destinationKind: routeMetadata.destinationKind,
+    ...(routeMetadata.redirectTo
+      ? { redirectTo: routeMetadata.redirectTo }
+      : {}),
+    ...(typeof routeMetadata.redirectStatus === "number"
+      ? { redirectStatus: routeMetadata.redirectStatus }
+      : {}),
+  };
+}
+
+async function captureRuntimeRouteWithResume(input: {
+  originUrl: string;
+  route: RouteCaptureInput["routes"][number];
+  url: string;
+  routeWorkDir: string;
+  cacheDir?: string;
+  viewportNames?: ViewportName[];
+  baseCapture?: RuntimeRouteCapture;
+  progress?: RouteCaptureProgressArtifact | null;
+  interactionReplayTimeoutMs?: number;
+  compatibilityKey?: string;
+}): Promise<{
+  capture: RuntimeRouteCapture;
+  progress: RouteCaptureProgressArtifact;
+}> {
+  const viewportNames =
+    input.viewportNames && input.viewportNames.length > 0
+      ? input.viewportNames
+      : ((Object.keys(viewports) as ViewportName[]));
+  const stateDirs = Array.from(
+    new Set(
+      [path.dirname(input.routeWorkDir), input.cacheDir].filter(
+        Boolean,
+      ) as string[],
+    ),
+  );
+  const stateDir = input.cacheDir
+    ? routeStateDirectory(input.cacheDir, input.route.path)
+    : input.routeWorkDir;
+  await fs.mkdir(stateDir, { recursive: true });
+  const browser = await chromium.launch({ headless: true });
+  const progressHistory = input.progress?.phases ? [...input.progress.phases] : [];
+  const warnings = input.progress?.warnings ? [...input.progress.warnings] : [];
+  const snapshotSeed =
+    alignCaptureWithProgressArtifact(input.progress, input.progress?.capture) ??
+    input.baseCapture;
+  const captures: ViewportCaptureResult[] = [];
+  const capturedViewports = new Set<ViewportName>();
+  let currentCapture = snapshotSeed ? structuredClone(snapshotSeed) : null;
+  let reusedFromProgress = Boolean(input.progress);
+
+  if (currentCapture) {
+    const reusableViewportNames = await listReusableViewportNames(
+      currentCapture,
+      viewportNames,
+    );
+    for (const viewportName of viewportNames) {
+      if (!reusableViewportNames.has(viewportName)) continue;
+      const validation =
+        currentCapture.captureDiagnostics?.viewportValidation?.[viewportName];
+      const viewport = currentCapture.viewports[viewportName];
+      if (viewport && validation?.valid) {
+        const snapshot = createViewportCaptureSnapshotFromRouteCapture(
+          currentCapture,
+          viewportName,
+        );
+        if (snapshot) {
+          captures.push(snapshot);
+          capturedViewports.add(viewportName);
+          progressHistory.push({
+            phase: `capture-${viewportName}`,
+            routePath: input.route.path,
+            required: true,
+            status: "reused",
+            startedAt: new Date().toISOString(),
+            finishedAt: new Date().toISOString(),
+            durationMs: 0,
+            viewportName,
+            reuseKind: "reused",
+          });
+        }
+      }
+    }
+  }
+
+  try {
+    for (const viewportName of viewportNames) {
+      if (capturedViewports.has(viewportName)) continue;
+      const viewportCapture = await captureViewport(
+        browser,
+        {
+          url: input.url,
+          workDir: stateDir,
+          routePath: input.route.path,
+          route: {
+            routeKind: input.route.routeKind,
+            templateKind: input.route.templateKind,
+            destination: input.route.destination,
+            destinationKind: input.route.destinationKind,
+            redirectTo: input.route.redirectTo,
+          },
+          viewportNames: [viewportName],
+          baseCapture: currentCapture ?? input.baseCapture,
+          interactionReplayTimeoutMs: input.interactionReplayTimeoutMs,
+        },
+        viewportName,
+        stateDir,
+      );
+      captures.push(viewportCapture);
+      capturedViewports.add(viewportName);
+      progressHistory.push(...(viewportCapture.phaseHistory ?? []));
+      warnings.push(...(viewportCapture.warnings ?? []));
+      currentCapture = assembleRouteCapture({
+        route: input.route,
+        url: input.url,
+        captures: [...captures],
+        baseCapture: input.baseCapture,
+      });
+      const partialProgress = createRouteProgressArtifact({
+        sourceUrl: input.url,
+        compatibilityKey: input.compatibilityKey,
+        routePath: input.route.path,
+        routeTitle: input.route.title,
+        templateId: input.route.templateId,
+        templatePath: input.route.templatePath,
+        routeKind: input.route.routeKind,
+        template: input.route.template,
+        templateKind: input.route.templateKind,
+        destination: input.route.destination,
+        destinationKind: input.route.destinationKind,
+        status: capturedViewports.size === viewportNames.length ? "complete" : "partial",
+        phases: progressHistory,
+        capturedViewports: Array.from(capturedViewports),
+        evidenceClasses: currentCapture
+          ? summarizeRouteEvidenceClasses(currentCapture)
+          : ["invalid"],
+        warnings,
+        reusedFromProgress,
+        capture: currentCapture ?? undefined,
+      });
+      await writeRouteCaptureProgress(stateDirs, partialProgress);
+      if (
+        captureFailureTestMode === "fail-after-tablet-progress" &&
+        viewportName === "tablet"
+      ) {
+        throw new RouteCapturePhaseError(
+          `Route ${input.route.path} phase capture-tablet failed at tablet: forced to fail after tablet progress for testing.`,
+          input.route.path,
+          "capture-tablet",
+          true,
+          partialProgress,
+        );
+      }
+    }
+
+    const finalCapture = currentCapture
+      ? {
+          ...currentCapture,
+          captureDiagnostics: {
+            ...(currentCapture.captureDiagnostics ?? {
+              breakpointsCaptured: viewportNames,
+            }),
+            phaseHistory: progressHistory,
+            routeProgress: [
+              toRouteProgressSummary(input.route.path, currentCapture, {
+                status: reusedFromProgress ? "retried" : "fresh",
+                warningCount: warnings.length,
+                reusedFromProgress,
+              }),
+            ],
+          },
+        }
+      : null;
+
+    if (!finalCapture) {
+      throw new RouteCapturePhaseError(
+        `Route capture produced no evidence for ${input.route.path}.`,
+        input.route.path,
+        "route-finalize",
+        true,
+      );
+    }
+
+    const finalProgress = createRouteProgressArtifact({
+      sourceUrl: input.url,
+      compatibilityKey: input.compatibilityKey,
+      routePath: input.route.path,
+      routeTitle: input.route.title,
+      templateId: input.route.templateId,
+      templatePath: input.route.templatePath,
+      routeKind: input.route.routeKind,
+      template: input.route.template,
+      templateKind: input.route.templateKind,
+      destination: input.route.destination,
+      destinationKind: input.route.destinationKind,
+      status: "complete",
+      phases: progressHistory,
+      capturedViewports: Array.from(capturedViewports),
+      evidenceClasses: summarizeRouteEvidenceClasses(finalCapture),
+      warnings,
+      reusedFromProgress,
+      capture: finalCapture,
+    });
+    await writeRouteCaptureProgress(stateDirs, finalProgress);
+
+    return {
+      capture: finalCapture,
+      progress: finalProgress,
+    };
+  } catch (error) {
+    const phaseError =
+      error instanceof RouteCapturePhaseError ? error : null;
+    const failingProgress = createRouteProgressArtifact({
+      sourceUrl: input.url,
+      compatibilityKey: input.compatibilityKey,
+      routePath: input.route.path,
+      routeTitle: input.route.title,
+      templateId: input.route.templateId,
+      templatePath: input.route.templatePath,
+      routeKind: input.route.routeKind,
+      template: input.route.template,
+      templateKind: input.route.templateKind,
+      destination: input.route.destination,
+      destinationKind: input.route.destinationKind,
+      status: "failed",
+      phases: progressHistory,
+      capturedViewports: Array.from(capturedViewports),
+      evidenceClasses: currentCapture
+        ? summarizeRouteEvidenceClasses(currentCapture)
+        : ["invalid"],
+      warnings,
+      reusedFromProgress,
+      failedPhase: phaseError?.phase,
+      failureReason: formatError(error),
+      capture: currentCapture ?? undefined,
+    });
+    await writeRouteCaptureProgress(stateDirs, failingProgress);
+    if (phaseError) {
+      throw phaseError;
+    }
+    throw new RouteCapturePhaseError(
+      formatError(error),
+      input.route.path,
+      "route-finalize",
+      true,
+      failingProgress,
+    );
+  } finally {
+    await browser.close().catch(() => undefined);
+  }
+}
+
 async function captureRuntimeWithBrowser(
   browser: Browser | BrowserContext,
   input: CaptureInput,
 ): Promise<RuntimeCapture> {
   const captureDir = path.join(input.workDir, "original");
-  await mkdirp(captureDir);
+  await fs.mkdir(captureDir, { recursive: true });
   const captures: Array<Awaited<ReturnType<typeof captureViewport>>> = [];
   const viewportNames =
     input.viewportNames && input.viewportNames.length > 0
@@ -496,6 +1640,9 @@ async function captureRuntimeWithBrowser(
       ...captures.map((capture) => capture.viewportName),
     ],
   );
+  const redirect =
+    captures.find((capture) => capture.viewportName === "desktop")?.redirect ??
+    captures.find((capture) => capture.redirect)?.redirect;
 
   return {
     url: input.url,
@@ -552,6 +1699,7 @@ async function captureRuntimeWithBrowser(
         : undefined) ??
       baseCapture?.interactionReplay ??
       [],
+    ...(redirect ? { redirectTo: redirect.redirectTo } : {}),
     framerStyleCss: desktop.framerStyleCss || baseCapture?.framerStyleCss,
     stylesheetUrls,
   };
@@ -683,85 +1831,257 @@ async function captureViewport(
 ) {
   const viewport = viewports[viewportName];
   const page = await createPageWithViewport(browser, viewport);
-  try {
-    await navigateForCapture(page, input.url);
-    const finalUrl = page.url();
-    if (isExternalRedirect(input.url, finalUrl)) {
-      const safeUrl = escapeHtml(finalUrl);
-      await showExternalRedirect(page, safeUrl);
-    } else {
-      await page
-        .waitForLoadState("domcontentloaded", { timeout: 15_000 })
-        .catch(() => undefined);
-      await page.waitForLoadState("load", { timeout: 15_000 }).catch(() => {
-        // Modern Framer sites can keep loading analytics/fonts; capture renderable DOM.
+  const routePath = input.routePath ?? "/";
+  const phaseHistory: RouteCapturePhaseRecord[] = [];
+  const warnings: string[] = [];
+
+  async function runPhase<T>(
+    phase: RouteCapturePhaseName,
+    required: boolean,
+    action: () => Promise<T>,
+    detail?: string,
+  ) {
+    const startedAt = new Date().toISOString();
+    phaseHistory.push({
+      phase,
+      routePath,
+      required,
+      status: "running",
+      startedAt,
+      viewportName,
+      detail,
+    });
+    const startedMs = Date.now();
+    try {
+      const result = await withTimeout(
+        action(),
+        ROUTE_PHASE_BUDGETS_MS[phase],
+        `Route ${routePath} phase ${phase} exceeded ${Math.round(
+          ROUTE_PHASE_BUDGETS_MS[phase] / 1000,
+        )}s at ${viewportName}.`,
+      );
+      phaseHistory.push({
+        phase,
+        routePath,
+        required,
+        status: "completed",
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        durationMs: Date.now() - startedMs,
+        viewportName,
+        detail,
       });
-      const settledUrl = page.url();
-      if (isExternalRedirect(input.url, settledUrl)) {
-        const safeUrl = escapeHtml(settledUrl);
-        await showExternalRedirect(page, safeUrl);
+      return result;
+    } catch (error) {
+      const finishedAt = new Date().toISOString();
+      phaseHistory.push({
+        phase,
+        routePath,
+        required,
+        status: required ? "failed" : "skipped",
+        startedAt,
+        finishedAt,
+        durationMs: Date.now() - startedMs,
+        viewportName,
+        detail: formatError(error),
+      });
+      if (required) {
+        const reason = formatError(error);
+        throw new RouteCapturePhaseError(
+          `Route ${routePath} phase ${phase} failed at ${viewportName}: ${reason}`,
+          routePath,
+          phase,
+          required,
+        );
       }
+      warnings.push(formatError(error));
+      return undefined as T;
     }
-    await waitForRenderableContent(page, input.selector);
-    const fontsReady = await waitForFonts(page);
-
-    const screenshotPath = path.join(captureDir, `${viewportName}.png`);
-
-    if (input.selector) {
-      const rootHandle = await resolveRootHandle(page, input.selector);
-      const clip = await getClip(rootHandle, viewport);
-      try {
-        await captureScreenshot(page, screenshotPath, fontsReady, clip);
-      } finally {
-        await rootHandle.dispose();
-      }
+  }
+  try {
+    await runPhase("navigate", true, async () => {
+      await navigateForCapture(page, input.url);
+    });
+    let redirect =
+      readExplicitExternalRouteRedirect(input.route) ??
+      readCapturedRedirect(input.url, page.url());
+    let fontsReady = true;
+    if (!redirect) {
+      fontsReady = await runPhase("stabilize", true, async () => {
+        await page
+          .waitForLoadState("domcontentloaded", { timeout: 15_000 })
+          .catch(() => undefined);
+        await page.waitForLoadState("load", { timeout: 15_000 }).catch(() => {
+          // Modern Framer sites can keep loading analytics/fonts; capture renderable DOM.
+        });
+        await waitForRenderableContent(page, input.selector);
+        return waitForFonts(page);
+      });
+      redirect = readCapturedRedirect(input.url, page.url());
     } else {
-      await captureScreenshot(page, screenshotPath, fontsReady);
+      phaseHistory.push({
+        phase: "stabilize",
+        routePath,
+        required: false,
+        status: "skipped",
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        durationMs: 0,
+        viewportName,
+        detail: "redirect-placeholder",
+      });
     }
+    if (redirect) {
+      await showExternalRedirect(page, escapeHtml(redirect.redirectTo));
+    }
+    const screenshotPath = path.join(captureDir, `${viewportName}.png`);
+    let nodes: RuntimeNode[] = [];
+    let rootStyles: Record<string, string> = {};
+    let stylesheets: string[] = [];
+    let framerStyleCss = "";
+    let nodesWithInteractions: RuntimeNode[] = [];
+    let observedViewportBeforeScreenshot: ObservedViewport | undefined;
+    let observedViewport: ObservedViewport | undefined;
+    let viewportValidation:
+      | ReturnType<typeof createViewportValidation>
+      | undefined;
 
-    const nodes = await extractNodes(page, input.selector, input.routePath ?? "/");
-    const rootStyles = await extractRootStyles(page, input.selector);
-    const nodesWithInteractions =
-      viewportName === "desktop"
-        ? await collectInteractionStyles(page, nodes)
-        : nodes;
-    const stylesheets = await extractStylesheets(page);
-    const framerStyleCss =
-      viewportName === "desktop"
-        ? await downloadStylesheets(stylesheets, input.url)
-        : "";
-    const title = await page.title();
+    await runPhase(`capture-${viewportName}`, true, async () => {
+      const screenshotEvidence = await captureViewportScreenshotWithRetry({
+        page,
+        input,
+        viewport,
+        viewportName,
+        screenshotPath,
+        fontsReady,
+      });
+      redirect = screenshotEvidence.redirect ?? redirect;
+      observedViewportBeforeScreenshot =
+        screenshotEvidence.observedViewportBeforeScreenshot;
+      observedViewport = screenshotEvidence.observedViewport;
+      viewportValidation = screenshotEvidence.viewportValidation;
+
+      if (redirect) {
+        nodes = createRedirectPlaceholderNodes(
+          input.routePath ?? "/",
+          redirect.redirectTo,
+        );
+        rootStyles = await withDomEvaluationRetry(
+          page,
+          input.routePath ?? "/",
+          "extract-root-styles",
+          () => extractRootStyles(page, input.selector),
+        );
+        stylesheets = [];
+        nodesWithInteractions = nodes;
+        return;
+      }
+
+      nodes = await withDomEvaluationRetry(
+        page,
+        input.routePath ?? "/",
+        "extract-dom",
+        async () => {
+          const redirected = readCapturedRedirect(input.url, page.url());
+          if (redirected) {
+            redirect = redirected;
+            return createRedirectPlaceholderNodes(
+              input.routePath ?? "/",
+              redirected.redirectTo,
+            );
+          }
+          return extractNodes(page, input.selector, input.routePath ?? "/");
+        },
+      );
+      if (redirect) {
+        rootStyles = await withDomEvaluationRetry(
+          page,
+          input.routePath ?? "/",
+          "extract-root-styles",
+          () => extractRootStyles(page, input.selector),
+        );
+        stylesheets = [];
+        nodesWithInteractions = nodes;
+        return;
+      }
+      rootStyles = await withDomEvaluationRetry(
+        page,
+        input.routePath ?? "/",
+        "extract-root-styles",
+        () => extractRootStyles(page, input.selector),
+      );
+      nodesWithInteractions =
+        viewportName === "desktop"
+          ? await collectInteractionStylesWithinBudget(
+              page,
+              nodes,
+              input.routePath ?? "/",
+              viewportName,
+              warnings,
+            )
+          : nodes;
+      stylesheets = await withDomEvaluationRetry(
+        page,
+        input.routePath ?? "/",
+        "extract-stylesheets",
+        () => extractStylesheets(page),
+      );
+      framerStyleCss = "";
+    });
+    if (viewportName === "desktop" && !redirect) {
+      framerStyleCss = await runPhase("route-finalize", true, async () =>
+        downloadStylesheets(stylesheets, input.url),
+      );
+    }
+    const title = redirect ? "External redirect" : await page.title();
     const imageSize = await getPngSize(screenshotPath).catch(() => viewport);
-    const observedViewport = await readObservedViewport(page);
-    const interactionReplay =
-      viewportName === "desktop"
-        ? await withTimeout(
+      const interactionReplay =
+      redirect
+        ? []
+        : viewportName === "desktop"
+        ? await runPhase("interaction-replay", false, async () =>
             collectSafeInteractionReplay(
               page,
               input.selector,
               captureDir,
               input.routePath ?? "/",
               viewportName,
-            ),
-            input.interactionReplayTimeoutMs ?? INTERACTION_REPLAY_TIMEOUT_MS,
-            `Interaction replay exceeded ${(input.interactionReplayTimeoutMs ?? INTERACTION_REPLAY_TIMEOUT_MS) / 1_000} seconds`,
-          ).catch((error) => {
-            console.warn(
-              "[coderelay:capture:interaction-replay-skipped]",
-              JSON.stringify({
-                routePath: input.routePath ?? "/",
-                viewport: viewportName,
-                reason: formatError(error),
-              }),
-            );
-            return [];
-          })
+              Math.min(
+                input.interactionReplayTimeoutMs ?? INTERACTION_REPLAY_TIMEOUT_MS,
+                ROUTE_PHASE_BUDGETS_MS["interaction-replay"],
+              ),
+            ).catch((error) => {
+              const warning = formatError(error);
+              if (isInteractionReplayTeardownError(warning)) {
+                return [];
+              }
+              warnings.push(warning);
+              console.warn(
+                "[coderelay:capture:interaction-replay-skipped]",
+                JSON.stringify({
+                  routePath: input.routePath ?? "/",
+                  viewport: viewportName,
+                  reason: warning,
+                }),
+              );
+              return [];
+            }),
+          )
         : undefined;
-    const viewportValidation = createViewportValidation(
-      viewport,
-      observedViewport,
-      imageSize,
-    );
+    if (!observedViewport || !viewportValidation) {
+      observedViewport = await withDomEvaluationRetry(
+        page,
+        input.routePath ?? "/",
+        "read-observed-viewport",
+        () => readObservedViewport(page),
+      );
+      viewportValidation = createViewportValidation(
+        viewport,
+        observedViewport,
+        imageSize,
+        observedViewportBeforeScreenshot,
+      );
+    }
 
     return {
       viewportName,
@@ -781,6 +2101,9 @@ async function captureViewport(
       framerStyleCss,
       stylesheetUrls: stylesheets,
       interactionReplay,
+      redirect,
+      phaseHistory,
+      warnings,
     };
   } finally {
     await page.close().catch(() => undefined);
@@ -810,6 +2133,142 @@ async function readObservedViewport(page: Page) {
   }));
 }
 
+async function captureViewportScreenshotWithRetry(input: {
+  page: Page;
+  input: CaptureInput;
+  viewport: { width: number; height: number };
+  viewportName: ViewportName;
+  screenshotPath: string;
+  fontsReady: boolean;
+}) {
+  const routePath = input.input.routePath ?? "/";
+  let lastObservedViewportBeforeScreenshot: ObservedViewport | undefined;
+  let lastObservedViewport: ObservedViewport | undefined;
+  let lastViewportValidation:
+    | ReturnType<typeof createViewportValidation>
+    | undefined;
+
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    lastObservedViewportBeforeScreenshot = await withDomEvaluationRetry(
+      input.page,
+      routePath,
+      "read-observed-viewport",
+      () => readObservedViewport(input.page),
+    );
+
+    if (input.input.selector) {
+      const rootHandle = await resolveRootHandle(input.page, input.input.selector);
+      const clip = await getClip(rootHandle, input.viewport);
+      try {
+        await captureScreenshot(
+          input.page,
+          input.screenshotPath,
+          input.fontsReady,
+          clip,
+        );
+      } finally {
+        await rootHandle.dispose();
+      }
+    } else {
+      await captureScreenshot(
+        input.page,
+        input.screenshotPath,
+        input.fontsReady,
+      );
+    }
+
+    const redirect = readCapturedRedirect(input.input.url, input.page.url());
+    if (redirect) {
+      return {
+        redirect,
+        observedViewportBeforeScreenshot: lastObservedViewportBeforeScreenshot,
+        observedViewport: lastObservedViewportBeforeScreenshot,
+        viewportValidation: createViewportValidation(
+          input.viewport,
+          lastObservedViewportBeforeScreenshot,
+          await getPngSize(input.screenshotPath).catch(() => input.viewport),
+          lastObservedViewportBeforeScreenshot,
+          attempt,
+        ),
+      };
+    }
+
+    const observedViewportAfterScreenshot = applyViewportDriftTestMode(
+      await withDomEvaluationRetry(
+        input.page,
+        routePath,
+        "read-observed-viewport",
+        () => readObservedViewport(input.page),
+      ),
+      input.viewport,
+    );
+    const imageSize = await getPngSize(input.screenshotPath).catch(
+      () => input.viewport,
+    );
+    const viewportValidation = createViewportValidation(
+      input.viewport,
+      observedViewportAfterScreenshot,
+      imageSize,
+      lastObservedViewportBeforeScreenshot,
+      attempt,
+    );
+    lastObservedViewport = observedViewportAfterScreenshot;
+    lastViewportValidation = viewportValidation;
+
+    if (viewportValidation.valid) {
+      return {
+        redirect,
+        observedViewportBeforeScreenshot: lastObservedViewportBeforeScreenshot,
+        observedViewport: observedViewportAfterScreenshot,
+        viewportValidation,
+      };
+    }
+
+    if (attempt < 2 && shouldRetryViewportScreenshot(viewportValidation)) {
+      console.warn(
+        "[coderelay:capture:viewport-retry]",
+        JSON.stringify({
+          routePath,
+          viewport: input.viewportName,
+          reason: viewportValidation.reason,
+          requestedWidth: input.viewport.width,
+          observedBeforeWidth:
+            lastObservedViewportBeforeScreenshot.innerWidth,
+          observedAfterWidth: observedViewportAfterScreenshot.innerWidth,
+          screenshotWidth: imageSize.width,
+          attempt,
+        }),
+      );
+      await input.page.setViewportSize(input.viewport).catch(() => undefined);
+      await input.page.waitForTimeout(100).catch(() => undefined);
+      continue;
+    }
+
+    break;
+  }
+
+  return {
+    redirect: readCapturedRedirect(input.input.url, input.page.url()),
+    observedViewportBeforeScreenshot: lastObservedViewportBeforeScreenshot,
+    observedViewport: lastObservedViewport ?? lastObservedViewportBeforeScreenshot,
+    viewportValidation:
+      lastViewportValidation ??
+      createViewportValidation(
+        input.viewport,
+        lastObservedViewport ??
+          lastObservedViewportBeforeScreenshot ?? {
+            innerWidth: input.viewport.width,
+            innerHeight: input.viewport.height,
+            clientWidth: input.viewport.width,
+            devicePixelRatio: 1,
+          },
+        await getPngSize(input.screenshotPath).catch(() => input.viewport),
+        lastObservedViewportBeforeScreenshot,
+        2,
+      ),
+  };
+}
+
 function createViewportValidation(
   requested: { width: number; height: number },
   observed: {
@@ -819,8 +2278,27 @@ function createViewportValidation(
     devicePixelRatio: number;
   },
   screenshot: { width: number; height: number },
+  observedBeforeScreenshot?: {
+    innerWidth: number;
+    innerHeight: number;
+    clientWidth: number;
+    devicePixelRatio: number;
+  },
+  screenshotAttempts = 1,
 ) {
   const reasons: string[] = [];
+  if (
+    observedBeforeScreenshot &&
+    observedBeforeScreenshot.innerWidth !== observed.innerWidth
+  ) {
+    reasons.push("viewport-drift-innerWidth");
+  }
+  if (
+    observedBeforeScreenshot &&
+    Math.abs(observedBeforeScreenshot.clientWidth - observed.clientWidth) > 1
+  ) {
+    reasons.push("viewport-drift-clientWidth");
+  }
   if (observed.innerWidth !== requested.width) {
     reasons.push("innerWidth-mismatch");
   }
@@ -833,13 +2311,47 @@ function createViewportValidation(
   return {
     requestedWidth: requested.width,
     requestedHeight: requested.height,
+    observedBeforeInnerWidth: observedBeforeScreenshot?.innerWidth,
+    observedBeforeInnerHeight: observedBeforeScreenshot?.innerHeight,
+    observedBeforeClientWidth: observedBeforeScreenshot?.clientWidth,
     observedInnerWidth: observed.innerWidth,
     observedInnerHeight: observed.innerHeight,
     observedClientWidth: observed.clientWidth,
     screenshotWidth: screenshot.width,
     screenshotHeight: screenshot.height,
+    screenshotAttempts,
     valid: reasons.length === 0,
     reason: reasons.length > 0 ? reasons.join(",") : undefined,
+  };
+}
+
+function shouldRetryViewportScreenshot(
+  validation: ReturnType<typeof createViewportValidation>,
+) {
+  return Boolean(
+    validation.reason?.includes("viewport-drift") ||
+      validation.reason?.includes("innerWidth-mismatch") ||
+      validation.reason?.includes("clientWidth-mismatch") ||
+      validation.reason?.includes("screenshotWidth-mismatch"),
+  );
+}
+
+function applyViewportDriftTestMode(
+  observed: ObservedViewport,
+  requested: { width: number; height: number },
+) {
+  if (viewportDriftTestMode === "normal") return observed;
+  if (
+    viewportDriftTestMode === "force-single-post-screenshot-mismatch" &&
+    viewportDriftInjected
+  ) {
+    return observed;
+  }
+  viewportDriftInjected = true;
+  return {
+    ...observed,
+    innerWidth: requested.width + 53,
+    clientWidth: requested.width + 53,
   };
 }
 
@@ -854,6 +2366,101 @@ function hasValidCachedResponsiveEvidence(capture?: RuntimeRouteCapture) {
     observedWidths.add(entry.observedInnerWidth);
   }
   return observedWidths.size > 0;
+}
+
+async function listReusableViewportNames(
+  capture: RuntimeRouteCapture | RuntimeCapture | undefined,
+  viewportNames: ViewportName[],
+) {
+  if (!capture?.captureDiagnostics?.viewportValidation) {
+    return new Set<ViewportName>();
+  }
+  const reusable = new Set<ViewportName>();
+  const observedWidths = new Set<number>();
+  for (const viewportName of viewportNames) {
+    if (!hasReusableRoutePhaseEvidence(capture, viewportName)) continue;
+    const validation = capture.captureDiagnostics.viewportValidation[viewportName];
+    const viewport = capture.viewports[viewportName];
+    if (!validation?.valid || !viewport?.screenshotPath) continue;
+    if (observedWidths.has(validation.observedInnerWidth)) continue;
+    try {
+      await fs.stat(viewport.screenshotPath);
+      const screenshotSize = await getPngSize(viewport.screenshotPath);
+      if (
+        Math.abs(screenshotSize.width - validation.screenshotWidth) > 1 ||
+        Math.abs(screenshotSize.height - validation.screenshotHeight) > 1 ||
+        Math.abs(screenshotSize.width - viewport.width) > 1 ||
+        Math.abs(screenshotSize.height - viewport.height) > 1
+      ) {
+        continue;
+      }
+      observedWidths.add(validation.observedInnerWidth);
+      reusable.add(viewportName);
+    } catch {
+      continue;
+    }
+  }
+  return reusable;
+}
+
+function hasReusableRoutePhaseEvidence(
+  capture: RuntimeRouteCapture | RuntimeCapture,
+  viewportName: ViewportName,
+) {
+  const phaseHistory = capture.captureDiagnostics?.phaseHistory ?? [];
+  const redirectBacked =
+    "redirectTo" in capture && Boolean(capture.redirectTo);
+
+  const hasPhase = (
+    phase: RouteCapturePhaseName,
+    allowedStatuses: RouteCapturePhaseStatus[],
+  ) =>
+    phaseHistory.some(
+      (record) =>
+        record.phase === phase &&
+        record.viewportName === viewportName &&
+        allowedStatuses.includes(record.status),
+    );
+
+  if (!hasPhase(`capture-${viewportName}`, ["completed", "reused"])) {
+    return false;
+  }
+  if (!hasPhase("navigate", ["completed", "reused"])) {
+    return false;
+  }
+  if (
+    !hasPhase("stabilize", redirectBacked ? ["completed", "reused", "skipped"] : ["completed", "reused"])
+  ) {
+    return false;
+  }
+  if (
+    viewportName === "desktop" &&
+    !redirectBacked &&
+    !hasPhase("route-finalize", ["completed", "reused"])
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function alignCaptureWithProgressArtifact(
+  progress: RouteCaptureProgressArtifact | null | undefined,
+  capture: RuntimeRouteCapture | null | undefined,
+) {
+  if (!progress || !capture) return capture ?? null;
+  const aligned: RuntimeRouteCapture = {
+    ...capture,
+    captureDiagnostics: {
+      ...(capture.captureDiagnostics ?? {}),
+      breakpointsCaptured:
+        progress.capturedViewports.length > 0
+          ? progress.capturedViewports
+          : (capture.captureDiagnostics?.breakpointsCaptured ?? []),
+      phaseHistory: [...progress.phases],
+    },
+  };
+  return aligned;
 }
 
 function readBaseViewportCapture(
@@ -887,8 +2494,15 @@ function readBaseViewportCapture(
 
 async function navigateForCapture(page: Page, url: string) {
   let lastError: unknown;
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  for (let attempt = 1; attempt <= ROUTE_TRANSIENT_RETRY_LIMIT; attempt += 1) {
     try {
+      if (
+        forcedNavigateNetworkFailureRoutePaths.has(
+          normalizeRoutePath(new URL(url).pathname),
+        )
+      ) {
+        throw new Error(`page.goto: net::ERR_NAME_NOT_RESOLVED at ${url}`);
+      }
       await page.goto(url, { waitUntil: "commit", timeout: 30_000 });
       return;
     } catch (error) {
@@ -913,13 +2527,15 @@ async function navigateForCapture(page: Page, url: string) {
         );
         return;
       }
-      if (attempt < 3) {
+      if (attempt < ROUTE_TRANSIENT_RETRY_LIMIT && isTransientNetworkError(error)) {
         console.warn(
           "[coderelay:capture:navigation-retry]",
           JSON.stringify({ url, attempt, reason: formatError(error) }),
         );
         await page.waitForTimeout(500 * attempt);
+        continue;
       }
+      throw error;
     }
   }
   throw lastError;
@@ -927,6 +2543,88 @@ async function navigateForCapture(page: Page, url: string) {
 
 function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isTransientNetworkError(error: unknown) {
+  const message = formatError(error);
+  return /ERR_INTERNET_DISCONNECTED|ERR_NETWORK_CHANGED|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_CONNECTION_REFUSED|ERR_TIMED_OUT|ERR_ADDRESS_UNREACHABLE|ERR_EMPTY_RESPONSE|ERR_ABORTED|ECONNRESET|EPIPE|socket hang up/i.test(
+    message,
+  );
+}
+
+async function probeOriginAvailability(originUrl: string): Promise<{
+  reachable: boolean;
+  probeUrl: string;
+  reason?: string;
+}> {
+  const probeUrl = new URL("/", originUrl).toString();
+  try {
+    const response = await withTimeout(
+      fetch(probeUrl, {
+        method: "GET",
+        redirect: "manual",
+        headers: {
+          "cache-control": "no-cache",
+        },
+      }),
+      NETWORK_AVAILABILITY_PROBE_TIMEOUT_MS,
+      `Origin probe timed out after ${Math.round(
+        NETWORK_AVAILABILITY_PROBE_TIMEOUT_MS / 1000,
+      )}s for ${probeUrl}.`,
+    );
+    await response.body?.cancel().catch(() => undefined);
+    return {
+      reachable: true,
+      probeUrl,
+    };
+  } catch (error) {
+    return {
+      reachable: false,
+      probeUrl,
+      reason: formatError(error),
+    };
+  }
+}
+
+function isRetriableDomEvaluationError(error: unknown) {
+  const message = formatError(error);
+  return (
+    /Execution context was destroyed/i.test(message) ||
+    /Cannot find context with specified id/i.test(message) ||
+    /Frame was detached/i.test(message) ||
+    /Target page, context or browser has been closed/i.test(message)
+  );
+}
+
+async function withDomEvaluationRetry<T>(
+  page: Page,
+  routePath: string,
+  phase:
+    | "extract-dom"
+    | "extract-root-styles"
+    | "extract-stylesheets"
+    | "read-observed-viewport",
+  action: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await action();
+  } catch (error) {
+    if (!isRetriableDomEvaluationError(error)) throw error;
+    console.warn(
+      "[coderelay:capture:dom-eval-retry]",
+      JSON.stringify({
+        routePath,
+        phase,
+        url: page.url(),
+        reason: formatError(error),
+      }),
+    );
+    await page
+      .waitForLoadState("domcontentloaded", { timeout: 2_000 })
+      .catch(() => undefined);
+    await page.waitForTimeout(100).catch(() => undefined);
+    return action();
+  }
 }
 
 async function captureScreenshot(
@@ -1007,9 +2705,12 @@ async function captureScreenshotWithCdp(
 async function extractRootStyles(page: Page, selector?: string) {
   return page.evaluate(
     ({ selector, styleProperties }) => {
-      const root = selector
-        ? document.querySelector(selector)
-        : document.body;
+      const root =
+        (selector
+          ? document.querySelector(selector)
+          : document.body ?? document.documentElement) ??
+        document.body ??
+        document.documentElement;
       if (!(root instanceof HTMLElement)) return {};
       const styles = window.getComputedStyle(root);
       return Object.fromEntries(
@@ -1030,6 +2731,56 @@ function isExternalRedirect(requestedUrl: string, finalUrl: string) {
   }
 }
 
+function readCapturedRedirect(
+  requestedUrl: string,
+  finalUrl: string,
+): CapturedRedirect | null {
+  try {
+    const requested = new URL(requestedUrl);
+    const final = new URL(finalUrl);
+    if (!/^https?:$/.test(final.protocol)) return null;
+    const normalize = (value: URL) => `${value.origin}${value.pathname}${value.search}`;
+    if (normalize(requested) === normalize(final)) return null;
+    if (requested.origin !== final.origin) {
+      return {
+        redirectTo: final.toString(),
+        templateKind: "utility",
+      };
+    }
+    return {
+      redirectTo: `${final.pathname}${final.search}${final.hash}`,
+      templateKind: "redirect",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function readExplicitExternalRouteRedirect(route?: {
+  routeKind?: ExportRouteKind;
+  templateKind?: RuntimeRouteCapture["templateKind"];
+  destination?: string;
+  destinationKind?: ExportRouteDestinationKind;
+  redirectTo?: string;
+}): CapturedRedirect | null {
+  if (!route) return null;
+  const redirectTo =
+    typeof route.redirectTo === "string" && route.redirectTo.trim().length > 0
+      ? route.redirectTo.trim()
+      : typeof route.destination === "string" && route.destination.trim().length > 0
+        ? route.destination.trim()
+        : null;
+  if (!redirectTo) return null;
+  if (route.destinationKind !== "external") return null;
+  if (route.routeKind !== "redirect" && route.templateKind !== "utility") {
+    return null;
+  }
+  return {
+    redirectTo,
+    templateKind: "utility",
+  };
+}
+
 function escapeHtml(value: string) {
   return value
     .replaceAll("&", "&amp;")
@@ -1040,14 +2791,56 @@ function escapeHtml(value: string) {
 
 async function showExternalRedirect(page: Page, safeUrl: string) {
   const html =
-    `<!doctype html><html><head><title>External redirect</title></head>` +
-    `<body><main style="min-height:100vh;display:grid;place-items:center">` +
+    `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">` +
+    `<title>External redirect</title><style>` +
+    `*{box-sizing:border-box}html,body{margin:0;max-width:100%;overflow-x:hidden}` +
+    `main{min-height:100vh;display:grid;place-items:center;max-width:100%;padding:16px}` +
+    `a{display:block;max-width:100%;overflow-wrap:anywhere;word-break:break-word}` +
+    `</style></head><body><main>` +
     `<a href="${safeUrl}">Continue to ${safeUrl}</a></main></body></html>`;
   // A redirected document may enforce Trusted Types, making setContent unsafe.
   await page.goto(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`, {
     waitUntil: "domcontentloaded",
     timeout: 10_000,
   });
+}
+
+function createRedirectPlaceholderNodes(routePath: string, redirectTo: string): RuntimeNode[] {
+  return [
+    {
+      id: `${routePath}::redirect-root`,
+      routePath,
+      tag: "main",
+      domPath: "body:nth-child(1) > main:nth-child(1)",
+      text: `Continue to ${redirectTo}`,
+      sectionIndex: 0,
+      sectionName: "Page",
+      rect: { x: 0, y: 0, width: 0, height: 0 },
+      attributes: {},
+      styles: {
+        display: "grid",
+        minHeight: "100vh",
+        placeItems: "center",
+      },
+    },
+    {
+      id: `${routePath}::redirect-link`,
+      routePath,
+      tag: "a",
+      domPath: "body:nth-child(1) > main:nth-child(1) > a:nth-child(1)",
+      parentDomPath: "body:nth-child(1) > main:nth-child(1)",
+      text: `Continue to ${redirectTo}`,
+      sectionIndex: 0,
+      sectionName: "Page",
+      rect: { x: 0, y: 0, width: 0, height: 0 },
+      attributes: {
+        href: redirectTo,
+      },
+      styles: {
+        display: "inline-block",
+      },
+    },
+  ];
 }
 
 async function waitForFonts(page: Page): Promise<boolean> {
@@ -1064,9 +2857,12 @@ async function waitForRenderableContent(page: Page, selector?: string) {
   await page
     .waitForFunction(
       (rootSelector) => {
-        const root = rootSelector
-          ? document.querySelector(rootSelector)
-          : document.body;
+        const root =
+          (rootSelector
+            ? document.querySelector(rootSelector)
+            : document.body ?? document.documentElement) ??
+          document.body ??
+          document.documentElement;
         if (!root) return false;
 
         const rect = root.getBoundingClientRect();
@@ -1076,7 +2872,8 @@ async function waitForRenderableContent(page: Page, selector?: string) {
             '[data-framer-name], [class*="framer-"], main, section',
           ),
         );
-        const hasText = (document.body.innerText ?? "").trim().length > 0;
+        const textRoot = document.body ?? document.documentElement ?? root;
+        const hasText = (textRoot.textContent ?? "").trim().length > 0;
 
         return document.readyState !== "loading" && hasSize && (hasFramerNodes || hasText);
       },
@@ -1133,16 +2930,50 @@ async function collectInteractionStyles(page: Page, nodes: RuntimeNode[]) {
   return nodes;
 }
 
+async function collectInteractionStylesWithinBudget(
+  page: Page,
+  nodes: RuntimeNode[],
+  routePath: string,
+  viewportName: ViewportName,
+  warnings: string[],
+) {
+  try {
+    return await withTimeout(
+      collectInteractionStyles(page, nodes),
+      INTERACTION_STYLE_COLLECTION_TIMEOUT_MS,
+      `Interaction-style collection exceeded ${Math.round(
+        INTERACTION_STYLE_COLLECTION_TIMEOUT_MS / 1000,
+      )}s at ${viewportName}.`,
+    );
+  } catch (error) {
+    const reason = formatError(error);
+    warnings.push(
+      `Route ${routePath} interaction-style collection skipped at ${viewportName}: ${reason}`,
+    );
+    console.warn(
+      "[coderelay:capture:interaction-style-skipped]",
+      JSON.stringify({
+        routePath,
+        viewportName,
+        reason,
+      }),
+    );
+    return nodes;
+  }
+}
+
 async function collectSafeInteractionReplay(
   page: Page,
   selector: string | undefined,
   captureDir: string,
   routePath: string,
   viewport: ViewportName,
+  timeoutMs: number,
 ): Promise<RuntimeInteractionReplayRecord[]> {
   const replayDir = path.join(captureDir, "replay");
-  await mkdirp(replayDir);
+  await fs.mkdir(replayDir, { recursive: true });
   const baseUrl = page.url();
+  const deadlineAt = Date.now() + timeoutMs;
   const candidates = await annotateReplayCandidates(page, selector);
   if (candidates.length === 0) return [];
 
@@ -1188,6 +3019,14 @@ async function collectSafeInteractionReplay(
   const records: RuntimeInteractionReplayRecord[] = [];
   try {
     for (let index = 0; index < Math.min(candidates.length, 4); index += 1) {
+      try {
+        assertReplayBudget(deadlineAt, timeoutMs, "before-candidate");
+      } catch (error) {
+        if (isInteractionReplayBudgetExceeded(error)) {
+          break;
+        }
+        throw error;
+      }
       const candidate = candidates[index]!;
       const beforeDomSnapshot = await readReplayDomSnapshot(page, selector);
       const beforeStyles = await readReplayCandidateStyles(page, candidate.id);
@@ -1196,10 +3035,12 @@ async function collectSafeInteractionReplay(
         replayDir,
         `${viewport}-${index + 1}-before.png`,
       );
-      await page.screenshot({
-        path: beforeScreenshotPath,
-        animations: "disabled",
-      });
+      await writeReplayScreenshot(
+        page,
+        beforeScreenshotPath,
+        deadlineAt,
+        timeoutMs,
+      );
 
       if (!candidate.allowed) {
         records.push({
@@ -1244,12 +3085,23 @@ async function collectSafeInteractionReplay(
           beforeUrl: page.url(),
           statsBeforeAction: { ...requestStats },
           requestStats,
+          deadlineAt,
+          timeoutMs,
         }),
       );
 
-      await page.goto(baseUrl, { waitUntil: "domcontentloaded", timeout: 15_000 });
-      await waitForRenderableContent(page, selector);
+      if (!(await resetReplayPage(page, baseUrl, selector, deadlineAt, timeoutMs))) {
+        break;
+      }
       await annotateReplayCandidates(page, selector);
+
+      if (!hasReplayBudgetForReset(deadlineAt)) {
+        break;
+      }
+      const refreshedCandidates = await annotateReplayCandidates(page, selector);
+      const refreshedCandidate = refreshedCandidates.find(
+        (entry) => entry.id === candidate.id,
+      ) ?? candidate;
 
       records.push(
         await executeReplayAction({
@@ -1259,31 +3111,64 @@ async function collectSafeInteractionReplay(
           viewport,
           replayDir,
           index,
-          candidate,
+          candidate: refreshedCandidate,
           action: "keyboard-enter",
           keyPress: "Enter",
           beforeDomSnapshot: await readReplayDomSnapshot(page, selector),
-          beforeStyles: await readReplayCandidateStyles(page, candidate.id),
-          beforeAnimation: await readReplayAnimationSnapshot(page, candidate.id),
+          beforeStyles: await readReplayCandidateStyles(page, refreshedCandidate.id),
+          beforeAnimation: await readReplayAnimationSnapshot(page, refreshedCandidate.id),
           beforeScreenshotPath: await writeReplayScreenshot(
             page,
             path.join(replayDir, `${viewport}-${index + 1}-keyboard-before.png`),
+            deadlineAt,
+            timeoutMs,
           ),
           beforeUrl: page.url(),
           statsBeforeAction: { ...requestStats },
           requestStats,
+          deadlineAt,
+          timeoutMs,
         }),
       );
 
-      await page.goto(baseUrl, { waitUntil: "domcontentloaded", timeout: 15_000 });
-      await waitForRenderableContent(page, selector);
-      await annotateReplayCandidates(page, selector);
+      if (!(await resetReplayPage(page, baseUrl, selector, deadlineAt, timeoutMs))) {
+        break;
+      }
     }
   } finally {
     await page.unroute("**/*", routeHandler).catch(() => undefined);
   }
 
   return records;
+}
+
+async function resetReplayPage(
+  page: Page,
+  baseUrl: string,
+  selector: string | undefined,
+  deadlineAt: number,
+  timeoutMs: number,
+) {
+  if (!hasReplayBudgetForReset(deadlineAt)) {
+    return false;
+  }
+  try {
+    await page.goto(baseUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: remainingReplayBudget(deadlineAt, 15_000, timeoutMs),
+    });
+  } catch (error) {
+    if (isInteractionReplayBudgetExceeded(error) || isReplayResetTimeout(error)) {
+      return false;
+    }
+    throw error;
+  }
+  await waitForRenderableContent(page, selector);
+  return true;
+}
+
+function hasReplayBudgetForReset(deadlineAt: number) {
+  return deadlineAt - Date.now() >= INTERACTION_REPLAY_MIN_RESET_BUDGET_MS;
 }
 
 async function executeReplayAction(input: {
@@ -1303,6 +3188,8 @@ async function executeReplayAction(input: {
   beforeUrl: string;
   statsBeforeAction: RuntimeInteractionReplayRecord["networkActivity"];
   requestStats: RuntimeInteractionReplayRecord["networkActivity"];
+  deadlineAt: number;
+  timeoutMs: number;
 }) {
   const consoleErrors: string[] = [];
   const onConsole = (message: { type(): string; text(): string }) => {
@@ -1338,11 +3225,14 @@ async function executeReplayAction(input: {
     }
 
     try {
+      assertReplayBudget(input.deadlineAt, input.timeoutMs, "before-action");
       if (input.keyPress) {
-        await locator.focus();
+        await locator.focus({ timeout: remainingReplayBudget(input.deadlineAt, 2_000, input.timeoutMs) });
         await input.page.keyboard.press(input.keyPress);
       } else {
-        await locator.click({ timeout: 2_000 });
+        await locator.click({
+          timeout: remainingReplayBudget(input.deadlineAt, 2_000, input.timeoutMs),
+        });
       }
     } catch (error) {
       return {
@@ -1368,7 +3258,9 @@ async function executeReplayAction(input: {
       };
     }
 
-    await input.page.waitForTimeout(250);
+    await input.page.waitForTimeout(
+      Math.min(250, remainingReplayBudget(input.deadlineAt, 250, input.timeoutMs)),
+    );
     const afterDomSnapshot = await readReplayDomSnapshot(input.page, input.selector);
     const afterStyles = await readReplayCandidateStyles(
       input.page,
@@ -1384,6 +3276,8 @@ async function executeReplayAction(input: {
         input.replayDir,
         `${input.viewport}-${input.index + 1}-${input.action}-after.png`,
       ),
+      input.deadlineAt,
+      input.timeoutMs,
     );
     return {
       id: `${input.routePath}:${input.viewport}:${input.candidate.id}:${input.action}`,
@@ -1438,9 +3332,12 @@ function diffReplayStats(
 
 async function annotateReplayCandidates(page: Page, selector?: string) {
   return page.evaluate((activeSelector) => {
-    const root = activeSelector
-      ? document.querySelector(activeSelector)
-      : document.body;
+    const root =
+      (activeSelector
+        ? document.querySelector(activeSelector)
+        : document.body ?? document.documentElement) ??
+      document.body ??
+      document.documentElement;
     if (!(root instanceof HTMLElement)) return [];
 
     root.querySelectorAll("[data-coderelay-replay-id]").forEach((element) => {
@@ -1499,9 +3396,12 @@ async function annotateReplayCandidates(page: Page, selector?: string) {
 
 async function readReplayDomSnapshot(page: Page, selector?: string) {
   return page.evaluate((activeSelector) => {
-    const root = activeSelector
-      ? document.querySelector(activeSelector)
-      : document.body;
+    const root =
+      (activeSelector
+        ? document.querySelector(activeSelector)
+        : document.body ?? document.documentElement) ??
+      document.body ??
+      document.documentElement;
     if (!(root instanceof HTMLElement)) return "";
     return JSON.stringify({
       html: root.innerHTML.slice(0, 20_000),
@@ -1564,8 +3464,29 @@ async function readReplayAnimationSnapshot(
   }, id);
 }
 
-async function writeReplayScreenshot(page: Page, targetPath: string) {
-  await page.screenshot({ path: targetPath, animations: "disabled" });
+async function writeReplayScreenshot(
+  page: Page,
+  targetPath: string,
+  deadlineAt: number,
+  timeoutMs: number,
+) {
+  assertReplayBudget(deadlineAt, timeoutMs, "replay-screenshot");
+  try {
+    await captureScreenshotWithCdp(page, targetPath);
+  } catch (error) {
+    console.warn(
+      "[coderelay:capture:interaction-replay-screenshot-fallback]",
+      JSON.stringify({
+        url: page.url(),
+        reason: formatError(error),
+      }),
+    );
+    await page.screenshot({
+      path: targetPath,
+      animations: "disabled",
+      timeout: remainingReplayBudget(deadlineAt, 2_000, timeoutMs),
+    });
+  }
   return targetPath;
 }
 
@@ -1573,7 +3494,56 @@ function hashReplaySnapshot(value: string) {
   return crypto.createHash("sha1").update(value).digest("hex");
 }
 
+function assertReplayBudget(
+  deadlineAt: number,
+  timeoutMs: number,
+  stage: string,
+) {
+  if (Date.now() < deadlineAt) return;
+  throw new Error(
+    `Interaction replay exceeded ${Math.ceil(timeoutMs / 1_000)} seconds (${stage})`,
+  );
+}
+
+function remainingReplayBudget(
+  deadlineAt: number,
+  capMs: number,
+  timeoutMs: number,
+) {
+  const remainingMs = deadlineAt - Date.now();
+  if (remainingMs <= 0) {
+    throw new Error(
+      `Interaction replay exceeded ${Math.ceil(timeoutMs / 1_000)} seconds`,
+    );
+  }
+  return Math.max(1, Math.min(capMs, remainingMs));
+}
+
+function isInteractionReplayTeardownError(message: string) {
+  return (
+    /Target page, context or browser has been closed/i.test(message) ||
+    /page\.(goto|waitForTimeout|click|focus|screenshot):[\s\S]*has been closed/i.test(
+      message,
+    ) ||
+    /browser has been closed/i.test(message) ||
+    /context has been closed/i.test(message)
+  );
+}
+
+function isInteractionReplayBudgetExceeded(error: unknown) {
+  const message = formatError(error);
+  return /Interaction replay exceeded \d+ seconds/i.test(message);
+}
+
+function isReplayResetTimeout(error: unknown) {
+  const message = formatError(error);
+  return /page\.goto: Timeout \d+ms exceeded/i.test(message);
+}
+
 async function captureInteractionStatesForNode(page: Page, domPath: string) {
+  if (interactionStyleCollectionTestMode === "slow") {
+    await page.waitForTimeout(INTERACTION_STYLE_COLLECTION_TIMEOUT_MS + 250);
+  }
   const locator = page.locator(domPath).first();
   const visible = await locator
     .evaluate((element) => {
@@ -1714,7 +3684,10 @@ async function downloadStylesheets(urls: string[], sourceUrl: string): Promise<s
       filtered.map(async (url) => {
         try {
           const response = await fetch(url, {
-            headers: { "user-agent": "coderelay-exporter/1.0" },
+            headers: {
+              "user-agent": "coderelay-exporter/1.0",
+              connection: "close",
+            },
             signal: AbortSignal.timeout(8_000),
           });
           if (!response.ok) return "";
@@ -1755,10 +3728,15 @@ async function resolveRootHandle(page: Page, selector?: string) {
         return secondRect.width * secondRect.height - firstRect.width * firstRect.height
       })
 
-    return candidates[0] ?? document.body
+    return candidates[0] ?? document.body ?? document.documentElement
   }`);
 
-  return handle.asElement() ?? (await page.$("body"))!;
+  const rootElement =
+    handle.asElement() ?? (await page.$("body")) ?? (await page.$("html"));
+  if (!rootElement) {
+    throw new Error("Unable to resolve a capture root element.");
+  }
+  return rootElement;
 }
 
 async function getClip(
@@ -1797,8 +3775,11 @@ async function extractNodes(
     const rootSelector = ${rootSelector}
     const routePath = ${route}
     const styleProperties = ${styleProperties}
-    const root = rootSelector ? document.querySelector(rootSelector) : document.body
-    const base = root ?? document.body
+    const root = rootSelector
+      ? document.querySelector(rootSelector)
+      : document.body ?? document.documentElement
+    const base = root ?? document.body ?? document.documentElement
+    if (!(base instanceof Element)) return []
     const ignoredTags = new Set(['script', 'style', 'noscript', 'template', 'meta', 'link'])
     const textLikeTags = new Set([
       'p',
