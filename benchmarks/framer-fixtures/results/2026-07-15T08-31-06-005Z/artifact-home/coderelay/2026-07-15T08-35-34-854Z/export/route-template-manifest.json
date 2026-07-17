@@ -1,0 +1,14 @@
+[
+  {
+    "templateId": "/",
+    "templatePath": "/",
+    "templateKind": "static",
+    "routePaths": [
+      "/"
+    ],
+    "sourceTextLength": 981,
+    "nodeCount": 683,
+    "representativeRoutePath": "/",
+    "routeCount": 1
+  }
+]

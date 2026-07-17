@@ -69,6 +69,59 @@ export type RuntimeInteractionReplayRecord = {
   provenance: "runtime";
 };
 
+export type RouteCapturePhaseName =
+  | "navigate"
+  | "stabilize"
+  | "capture-desktop"
+  | "capture-laptop"
+  | "capture-tablet"
+  | "capture-mobile"
+  | "extract-dom"
+  | "extract-stylesheets"
+  | "interaction-replay"
+  | "route-finalize";
+
+export type RouteCapturePhaseStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "skipped"
+  | "reused";
+
+export type RouteCaptureEvidenceClass =
+  | "screenshot-backed"
+  | "heuristic-backed"
+  | "dom-backed"
+  | "replay-backed"
+  | "redirect-backed"
+  | "invalid";
+
+export type RouteCapturePhaseRecord = {
+  phase: RouteCapturePhaseName;
+  routePath?: string;
+  required: boolean;
+  status: RouteCapturePhaseStatus;
+  startedAt?: string;
+  finishedAt?: string;
+  durationMs?: number;
+  viewportName?: ViewportName;
+  detail?: string;
+  reuseKind?: "fresh" | "reused" | "retried";
+};
+
+export type RouteCaptureProgressSummary = {
+  routePath: string;
+  status: "fresh" | "reused" | "retried" | "failed";
+  evidenceClasses: RouteCaptureEvidenceClass[];
+  capturedViewports: ViewportName[];
+  warningCount: number;
+  failedPhase?: RouteCapturePhaseName;
+  failedReason?: string;
+  reusedFromCache?: boolean;
+  reusedFromProgress?: boolean;
+};
+
 export type RuntimeNode = {
   id: string;
   routePath?: string;
@@ -96,6 +149,8 @@ export type RuntimeCapture = {
   url: string;
   title: string;
   mode: "page" | "section";
+  redirectTo?: string;
+  redirectStatus?: number;
   viewports: Record<
     ViewportName,
     {
@@ -129,11 +184,15 @@ export type RuntimeCapture = {
         {
           requestedWidth: number;
           requestedHeight: number;
+          observedBeforeInnerWidth: number | undefined;
+          observedBeforeInnerHeight: number | undefined;
+          observedBeforeClientWidth: number | undefined;
           observedInnerWidth: number;
           observedInnerHeight: number;
           observedClientWidth: number;
           screenshotWidth: number;
           screenshotHeight: number;
+          screenshotAttempts: number | undefined;
           valid: boolean;
           reason?: string;
         }
@@ -142,6 +201,15 @@ export type RuntimeCapture = {
     fontReadiness?: Partial<Record<ViewportName, boolean>>;
     stylesheetCount?: Partial<Record<ViewportName, number>>;
     nodeCount?: Partial<Record<ViewportName, number>>;
+    routeFailures?: Array<{
+      routePath: string;
+      error: string;
+      phase?: RouteCapturePhaseName;
+      required?: boolean;
+      reused?: boolean;
+    }>;
+    phaseHistory?: RouteCapturePhaseRecord[];
+    routeProgress?: RouteCaptureProgressSummary[];
   };
   interactionReplay?: RuntimeInteractionReplayRecord[];
   framerStyleCss?: string;
@@ -149,11 +217,21 @@ export type RuntimeCapture = {
   routeCaptures?: RuntimeRouteCapture[];
 };
 
+export type ExportRouteKind = "page" | "redirect";
+export type ExportRouteTemplate = "static" | "cms";
+export type ExportRouteDestinationKind = "internal" | "external";
+
 export type RuntimeRouteCapture = Omit<RuntimeCapture, "routeCaptures"> & {
   routePath: string;
   templateId?: string;
   templatePath?: string;
+  routeKind?: ExportRouteKind;
+  template?: ExportRouteTemplate;
   templateKind?: "static" | "cms" | "component" | "redirect" | "utility";
+  destination?: string;
+  destinationKind?: ExportRouteDestinationKind;
+  redirectTo?: string;
+  redirectStatus?: number;
 };
 
 export type ExportMode = "selection" | "components" | "full-site";
@@ -579,7 +657,11 @@ export type ExportIR = {
     sourceTextLength?: number;
     templateId?: string;
     templatePath?: string;
+    routeKind?: ExportRouteKind;
+    template?: ExportRouteTemplate;
     templateKind?: "static" | "cms" | "component" | "redirect" | "utility";
+    destination?: string;
+    destinationKind?: ExportRouteDestinationKind;
     redirectTo?: string;
     redirectStatus?: number;
   }>;

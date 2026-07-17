@@ -1,0 +1,63 @@
+{
+  "componentName": "ExportedSection",
+  "sourceUrl": "https://td-senrifolio.framer.ai/",
+  "nodeCount": 2,
+  "nodes": [
+    {
+      "id": "/::node-1505",
+      "tag": "div",
+      "name": "👇 Main",
+      "source": {
+        "runtimeNodeId": "/::node-1505",
+        "domPath": "body:nth-child(2) > div:nth-child(2) > div:nth-child(2) > div:nth-child(2) > main:nth-child(1) > div:nth-child(7) > div:nth-child(1) > section:nth-child(1) > div:nth-child(1) > div:nth-child(2) > div:nth-child(2) > div:nth-child(1) > div:nth-child(1)",
+        "runtimeNodeIdsByViewport": {
+          "desktop": "/::node-1505",
+          "laptop": "/::node-1505",
+          "tablet": "/::node-1486",
+          "mobile": "/::node-1486"
+        }
+      },
+      "motionByViewport": {},
+      "interactionStyles": {
+        "hover": {
+          "aspectRatio": "1 / 1"
+        }
+      },
+      "interactionStylesByViewport": {
+        "desktop": {
+          "hover": {
+            "aspectRatio": "1 / 1"
+          }
+        }
+      }
+    },
+    {
+      "id": "/::node-1508",
+      "tag": "div",
+      "name": "👇 Main",
+      "source": {
+        "runtimeNodeId": "/::node-1508",
+        "domPath": "body:nth-child(2) > div:nth-child(2) > div:nth-child(2) > div:nth-child(2) > main:nth-child(1) > div:nth-child(7) > div:nth-child(1) > section:nth-child(1) > div:nth-child(1) > div:nth-child(2) > div:nth-child(2) > div:nth-child(2) > div:nth-child(1)",
+        "runtimeNodeIdsByViewport": {
+          "desktop": "/::node-1508",
+          "laptop": "/::node-1508",
+          "tablet": "/::node-1489",
+          "mobile": "/::node-1489"
+        }
+      },
+      "motionByViewport": {},
+      "interactionStyles": {
+        "hover": {
+          "aspectRatio": "1 / 1"
+        }
+      },
+      "interactionStylesByViewport": {
+        "desktop": {
+          "hover": {
+            "aspectRatio": "1 / 1"
+          }
+        }
+      }
+    }
+  ]
+}

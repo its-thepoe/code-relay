@@ -1,0 +1,490 @@
+{
+  "attempt": 2,
+  "strategy": "semantic-layout+structured+compact+mobile-repair",
+  "overall": 74.57,
+  "fidelity": {
+    "desktop": 83.66,
+    "laptop": 85.8,
+    "tablet": 84.11,
+    "mobile": 72.05,
+    "overall": 74.57,
+    "layout": 84.83,
+    "typography": 82.05,
+    "color": 91.66,
+    "assets": 100,
+    "motion": 100,
+    "nodeMatch": 0,
+    "breakpointScores": {
+      "desktop": 83.66,
+      "laptop": 85.8,
+      "tablet": 84.11,
+      "mobile": 72.05
+    }
+  },
+  "warningCount": 3,
+  "previewValidation": {
+    "status": "validated",
+    "summary": {
+      "viewportsValidated": 4,
+      "inspectedNodes": 480,
+      "foundNodes": 480,
+      "nodesWithNonDefaultStyles": 445,
+      "nodesExpectingMotion": 8,
+      "nodesWithNonDefaultMotion": 2
+    },
+    "byViewport": {
+      "desktop": {
+        "viewport": "desktop",
+        "inspectedNodes": 120,
+        "foundNodes": 120,
+        "nodesWithNonDefaultStyles": 120,
+        "nodesExpectingMotion": 2,
+        "nodesWithNonDefaultMotion": 1
+      },
+      "laptop": {
+        "viewport": "laptop",
+        "inspectedNodes": 120,
+        "foundNodes": 120,
+        "nodesWithNonDefaultStyles": 120,
+        "nodesExpectingMotion": 2,
+        "nodesWithNonDefaultMotion": 1
+      },
+      "tablet": {
+        "viewport": "tablet",
+        "inspectedNodes": 120,
+        "foundNodes": 120,
+        "nodesWithNonDefaultStyles": 120,
+        "nodesExpectingMotion": 2,
+        "nodesWithNonDefaultMotion": 0
+      },
+      "mobile": {
+        "viewport": "mobile",
+        "inspectedNodes": 120,
+        "foundNodes": 120,
+        "nodesWithNonDefaultStyles": 85,
+        "nodesExpectingMotion": 2,
+        "nodesWithNonDefaultMotion": 0
+      }
+    }
+  },
+  "diagnosis": [
+    "Mobile fidelity lagged desktop, so the next pass should collapse layouts more aggressively and preserve runtime viewport overrides.",
+    "Layout fidelity stayed weak, so the next pass should keep wrappers and reinforce runtime-derived layout styles.",
+    "Node-match confidence stayed low, so the next pass should preserve more wrapper surfaces and runtime style evidence.",
+    "Typography fidelity fell below target, so the next pass should promote runtime font metrics into the export tree.",
+    "Overall fidelity stayed below target, so the next pass should reinforce runtime styles across the export tree."
+  ],
+  "diagnosisDetails": [
+    {
+      "category": "responsive_mismatch",
+      "message": "Mobile fidelity lagged desktop, so the next pass should collapse layouts more aggressively and preserve runtime viewport overrides."
+    },
+    {
+      "category": "layout_mismatch",
+      "message": "Layout fidelity stayed weak, so the next pass should keep wrappers and reinforce runtime-derived layout styles."
+    },
+    {
+      "category": "low_node_match",
+      "message": "Node-match confidence stayed low, so the next pass should preserve more wrapper surfaces and runtime style evidence."
+    },
+    {
+      "category": "typography_mismatch",
+      "message": "Typography fidelity fell below target, so the next pass should promote runtime font metrics into the export tree."
+    },
+    {
+      "category": "low_overall_fidelity",
+      "message": "Overall fidelity stayed below target, so the next pass should reinforce runtime styles across the export tree."
+    }
+  ],
+  "patchOperations": [
+    "enable_aggressive_mobile_stacking",
+    "enable_compact_spacing",
+    "promote_viewport_overrides",
+    "enable_structured_layout",
+    "preserve_wrapper_surfaces",
+    "reinforce_runtime_styles",
+    "boost_typography_from_runtime",
+    "preserve_motion_styles"
+  ],
+  "patchTargets": {
+    "promote_viewport_overrides": [
+      "/::node-16",
+      "/::node-17",
+      "/::node-18",
+      "/::node-19",
+      "/::node-20",
+      "/::node-21",
+      "/::node-22",
+      "/::node-23",
+      "/::node-24",
+      "/::node-25",
+      "/::node-26",
+      "/::node-27",
+      "/::node-35",
+      "/::node-36",
+      "/::node-37",
+      "/::node-38",
+      "/::node-39",
+      "/::node-40",
+      "/::node-41",
+      "/::node-42",
+      "/::node-43",
+      "/::aFKozwqFb",
+      "/::node-59",
+      "/::node-62",
+      "/::node-63",
+      "/::node-65",
+      "/::node-68",
+      "/::node-69",
+      "/::node-76",
+      "/::node-77",
+      "/::node-81",
+      "/::node-82",
+      "/::node-84",
+      "/::node-86",
+      "/::node-90",
+      "/::node-92",
+      "/::node-96",
+      "/::node-97",
+      "/::node-102",
+      "/::node-104",
+      "/::node-105",
+      "/::node-108",
+      "/::node-109",
+      "/::node-120",
+      "/::node-121"
+    ],
+    "preserve_motion_styles": [
+      "/::node-9",
+      "/::node-36"
+    ],
+    "preserve_wrapper_surfaces": [
+      "/::node-16",
+      "/::node-17",
+      "/::node-18",
+      "/::node-19",
+      "/::node-20",
+      "/::node-21",
+      "/::node-22",
+      "/::node-23",
+      "/::node-24",
+      "/::node-25",
+      "/::node-26",
+      "/::node-27",
+      "/::node-35",
+      "/::node-36",
+      "/::node-37",
+      "/::node-38",
+      "/::node-39",
+      "/::node-40",
+      "/::node-41",
+      "/::node-42",
+      "/::node-43",
+      "/::aFKozwqFb",
+      "/::node-59",
+      "/::node-62",
+      "/::node-63",
+      "/::node-65",
+      "/::node-68",
+      "/::node-69",
+      "/::node-76",
+      "/::node-77",
+      "/::node-81",
+      "/::node-82",
+      "/::node-84",
+      "/::node-86",
+      "/::node-90",
+      "/::node-92",
+      "/::node-96",
+      "/::node-97",
+      "/::node-102",
+      "/::node-104",
+      "/::node-105",
+      "/::node-108",
+      "/::node-109",
+      "/::node-120",
+      "/::node-121"
+    ]
+  },
+  "patchPropertyHints": {
+    "promote_viewport_overrides": {
+      "/::node-16": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-17": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-18": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-19": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-20": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-21": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-22": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-23": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-24": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-25": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-26": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-27": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-35": {
+        "mobile": [
+          "display",
+          "minHeight"
+        ]
+      },
+      "/::node-36": {
+        "mobile": [
+          "display",
+          "hover.background",
+          "hover.backgroundColor",
+          "focus.background",
+          "focus.backgroundColor"
+        ]
+      },
+      "/::node-37": {
+        "mobile": [
+          "display",
+          "minHeight"
+        ]
+      },
+      "/::node-38": {
+        "mobile": [
+          "display"
+        ]
+      },
+      "/::node-39": {
+        "mobile": [
+          "display"
+        ]
+      },
+      "/::node-40": {
+        "mobile": [
+          "display"
+        ]
+      },
+      "/::node-41": {
+        "mobile": [
+          "display",
+          "minHeight"
+        ]
+      },
+      "/::node-42": {
+        "mobile": [
+          "display",
+          "minHeight"
+        ]
+      },
+      "/::node-43": {
+        "mobile": [
+          "display"
+        ]
+      },
+      "/::aFKozwqFb": {
+        "mobile": [
+          "display"
+        ]
+      },
+      "/::node-59": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-62": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-63": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-65": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-68": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-69": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-76": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-77": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-81": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-82": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-84": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-86": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-90": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-92": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-96": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-97": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-102": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-104": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-105": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-108": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-109": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-120": {
+        "mobile": [
+          "width"
+        ]
+      },
+      "/::node-121": {
+        "mobile": [
+          "width"
+        ]
+      }
+    },
+    "preserve_motion_styles": {
+      "/::node-9": {
+        "desktop": [
+          "hover.aspectRatio"
+        ],
+        "laptop": [
+          "hover.aspectRatio"
+        ],
+        "tablet": [
+          "hover.aspectRatio"
+        ],
+        "mobile": [
+          "hover.aspectRatio"
+        ]
+      },
+      "/::node-36": {
+        "desktop": [
+          "hover.background",
+          "focus.background",
+          "focus.backgroundColor"
+        ],
+        "laptop": [
+          "hover.background",
+          "focus.background",
+          "focus.backgroundColor"
+        ],
+        "tablet": [
+          "display",
+          "hover.background",
+          "hover.backgroundColor",
+          "focus.background",
+          "focus.backgroundColor"
+        ],
+        "mobile": [
+          "display",
+          "hover.background",
+          "hover.backgroundColor",
+          "focus.background",
+          "focus.backgroundColor"
+        ]
+      }
+    }
+  },
+  "resetToBestStateForNextAttempt": false,
+  "selectedAsBest": false
+}

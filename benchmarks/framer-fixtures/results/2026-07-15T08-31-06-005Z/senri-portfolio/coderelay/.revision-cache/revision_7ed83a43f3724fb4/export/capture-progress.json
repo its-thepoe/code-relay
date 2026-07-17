@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 2,
+  "sourceUrl": "https://td-senrifolio.framer.ai/",
+  "completed": 1,
+  "total": 1,
+  "captured": [
+    "/"
+  ],
+  "failures": [],
+  "routeProgress": [
+    {
+      "routePath": "/",
+      "status": "fresh",
+      "evidenceClasses": [
+        "screenshot-backed",
+        "dom-backed"
+      ],
+      "capturedViewports": [
+        "desktop",
+        "laptop",
+        "tablet",
+        "mobile"
+      ],
+      "warningCount": 0,
+      "reusedFromProgress": false
+    }
+  ],
+  "summary": {
+    "reusedRoutes": 0,
+    "retriedRoutes": 0,
+    "failedRoutes": 0,
+    "optionalDegradedRoutes": 0,
+    "firstBlockingRoute": "/"
+  }
+}

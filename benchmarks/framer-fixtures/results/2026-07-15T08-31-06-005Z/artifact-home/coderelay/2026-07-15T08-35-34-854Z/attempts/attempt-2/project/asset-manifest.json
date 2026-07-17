@@ -1,0 +1,601 @@
+{
+  "exportedAt": "2026-07-15T08:36:44.659Z",
+  "totals": {
+    "irAssets": 18,
+    "runtimeAssets": 86,
+    "cmsAssets": 0
+  },
+  "irAssets": [
+    {
+      "url": "https://framerusercontent.com/images/AUWaY8BzdSrZTEmGcQvEissyc1E.jpeg",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/bWEzpl2D8PozgekT3emRcLSZAiM.jpg",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/1WpiHUvej0omfFIlhXJ4mGeXuM.jpg",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/sYyqni83lk3R0H3Rv8sKYc8cjZY.jpg",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/W8SOIzaQATXg2YiTQy2yZVWbs.jpeg?scale-down-to=1024",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/LTmuFWK7o7hkFqPex8Jnrobz5c.jpeg?scale-down-to=512",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/iAx1VBnbZZryCk7TI3JHZUKQ.jpeg?scale-down-to=512",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/fifYiMr975aAcL81yS2Q8Valolw.jpeg?scale-down-to=512",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/JEHF7Z8EwE2fVoabzV1o7dhGdlM.jpeg?scale-down-to=512",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/Lcov1yQ7u2EobWVDFPp9qU0eNc.jpeg?scale-down-to=512",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/gWM4JStXVN3CJeRoBZ5FjPm10.png",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/ZmOuFXkoGoEpOrAIJdOqFqdcs0.png",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/SOG6zVvs7YHeoByIT2vCBngfAcM.webp",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/cvValximiTCYGyctug38cu5vMU.png",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/wPpzmgsCNjJtl12gvb9asnOm0c.jpg",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/wCYUJecEDcxVjDNiA5dsJszhU0.jpg",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/CQSyM2flIboH8syDCScLWEL7mgY.webp",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/UPkjR5UQGzIvkr5SJ7WBpGso4o.webp",
+      "kind": "image"
+    }
+  ],
+  "runtimeAssets": [
+    {
+      "nodeId": "/::node-9",
+      "kind": "link",
+      "url": "/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-12",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/AUWaY8BzdSrZTEmGcQvEissyc1E.jpeg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-17",
+      "kind": "link",
+      "url": "/works",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-21",
+      "kind": "link",
+      "url": "/services",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-25",
+      "kind": "link",
+      "url": "/products",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-40",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-109",
+      "kind": "link",
+      "url": "https://www.cal.com/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-121",
+      "kind": "link",
+      "url": "/products",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-133",
+      "kind": "link",
+      "url": "/contact",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-160",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/bWEzpl2D8PozgekT3emRcLSZAiM.jpg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-164",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/1WpiHUvej0omfFIlhXJ4mGeXuM.jpg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-168",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/sYyqni83lk3R0H3Rv8sKYc8cjZY.jpg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-172",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/bWEzpl2D8PozgekT3emRcLSZAiM.jpg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-176",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/1WpiHUvej0omfFIlhXJ4mGeXuM.jpg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-180",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/sYyqni83lk3R0H3Rv8sKYc8cjZY.jpg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-184",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/bWEzpl2D8PozgekT3emRcLSZAiM.jpg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-188",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/1WpiHUvej0omfFIlhXJ4mGeXuM.jpg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-192",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/sYyqni83lk3R0H3Rv8sKYc8cjZY.jpg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-196",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/bWEzpl2D8PozgekT3emRcLSZAiM.jpg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-200",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/1WpiHUvej0omfFIlhXJ4mGeXuM.jpg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-204",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/sYyqni83lk3R0H3Rv8sKYc8cjZY.jpg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-221",
+      "kind": "link",
+      "url": "/products",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-228",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-245",
+      "kind": "link",
+      "url": "/blog",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-252",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-255",
+      "kind": "link",
+      "url": "/blog/top-10-mj-tips",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-263",
+      "kind": "link",
+      "url": "/blog/my-creative-process",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-271",
+      "kind": "link",
+      "url": "/blog/new-era-of-image-creation",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-287",
+      "kind": "link",
+      "url": "/works",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-294",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-297",
+      "kind": "link",
+      "url": "/works/skyline",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-300",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/W8SOIzaQATXg2YiTQy2yZVWbs.jpeg?scale-down-to=1024",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-313",
+      "kind": "link",
+      "url": "/works/meridian",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-316",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/LTmuFWK7o7hkFqPex8Jnrobz5c.jpeg?scale-down-to=512",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-329",
+      "kind": "link",
+      "url": "/works/apex",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-332",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/iAx1VBnbZZryCk7TI3JHZUKQ.jpeg?scale-down-to=512",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-353",
+      "kind": "link",
+      "url": "/about",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-356",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/AUWaY8BzdSrZTEmGcQvEissyc1E.jpeg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-363",
+      "kind": "link",
+      "url": "/works",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-372",
+      "kind": "link",
+      "url": "/products",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-381",
+      "kind": "link",
+      "url": "/blog",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-391",
+      "kind": "link",
+      "url": "https://x.com/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-395",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-397",
+      "kind": "link",
+      "url": "https://threads.com/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-401",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-411",
+      "kind": "link",
+      "url": "/products",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-418",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-422",
+      "kind": "link",
+      "url": "/products/interiorvision-studio",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-428",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-433",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/fifYiMr975aAcL81yS2Q8Valolw.jpeg?scale-down-to=512",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-445",
+      "kind": "link",
+      "url": "/products/contemporary-objects",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-451",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-456",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/JEHF7Z8EwE2fVoabzV1o7dhGdlM.jpeg?scale-down-to=512",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-468",
+      "kind": "link",
+      "url": "/products/promptcraft-pro",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-474",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-479",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/Lcov1yQ7u2EobWVDFPp9qU0eNc.jpeg?scale-down-to=512",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-497",
+      "kind": "link",
+      "url": "/stack",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-504",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-507",
+      "kind": "link",
+      "url": "https://www.midjourney.com/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-510",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/gWM4JStXVN3CJeRoBZ5FjPm10.png",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-521",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-523",
+      "kind": "link",
+      "url": "https://framer.link/cedric_design",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-526",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/ZmOuFXkoGoEpOrAIJdOqFqdcs0.png",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-537",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-539",
+      "kind": "link",
+      "url": "https://www.lemonsqueezy.com/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-542",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/SOG6zVvs7YHeoByIT2vCBngfAcM.webp",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-553",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-555",
+      "kind": "link",
+      "url": "https://www.figma.com/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-558",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/cvValximiTCYGyctug38cu5vMU.png",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-569",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-571",
+      "kind": "link",
+      "url": "https://typefully.com/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-574",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/wPpzmgsCNjJtl12gvb9asnOm0c.jpg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-585",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-587",
+      "kind": "link",
+      "url": "https://iconic.app/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-590",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/wCYUJecEDcxVjDNiA5dsJszhU0.jpg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-601",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-603",
+      "kind": "link",
+      "url": "https://www.linear.com/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-606",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/CQSyM2flIboH8syDCScLWEL7mgY.webp",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-617",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-619",
+      "kind": "link",
+      "url": "https://www.webflow.com/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-622",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/UPkjR5UQGzIvkr5SJ7WBpGso4o.webp",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-633",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-645",
+      "kind": "link",
+      "url": "https://buy.polar.sh/polar_cl_0slVKny7mgzD9R8Q1o8OxRfHj3wdRKI8LjZwK1dfjdb",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-687",
+      "kind": "link",
+      "url": "https://buy.polar.sh/polar_cl_0slVKny7mgzD9R8Q1o8OxRfHj3wdRKI8LjZwK1dfjdb",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-692",
+      "kind": "link",
+      "url": "https://framer.link/cedric_design",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-697",
+      "kind": "link",
+      "url": "https://www.framer.com/",
+      "source": "runtime"
+    }
+  ],
+  "cmsAssets": []
+}

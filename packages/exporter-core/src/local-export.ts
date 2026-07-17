@@ -1,14 +1,16 @@
-import { copy, mkdirp } from "fs-extra";
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs, { writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import os from "node:os";
 import path from "node:path";
+import { delimiter as pathDelimiter } from "node:path";
 import { chromium, type Locator, type Page } from "playwright";
 import { PNG } from "pngjs";
 import { generateNextProject } from "../../codegen/src/next-project.js";
 import { compareGeneratedPreview } from "../../fidelity/src/compare.js";
 import { matchPluginNodesToDom } from "../../matcher/src/match.js";
+import { resolveExportRouteMetadata } from "../../shared/src/route-contract.js";
 import type {
   ArtifactIndex,
   ArtifactRecord,
@@ -43,6 +45,10 @@ import {
   buildPluginSourceSnapshot,
   type PluginSourceSnapshot,
 } from "./ir.js";
+import {
+  normalizePluginExportRoutes,
+  type NormalizedExportRoute,
+} from "./export-routes.js";
 import { zipDirectory } from "./package.js";
 import {
   applyAttemptPlan,
@@ -51,6 +57,21 @@ import {
   detectAttemptPlateau,
 } from "./attempt-planner.js";
 import { analyzeCodeFilesCompatibility } from "./code-compatibility.js";
+
+let zipVerificationTestMode: "normal" | "force-failure" = "normal";
+let generationFailureTestMode: "normal" | "fail-before-validation" = "normal";
+
+export function __setZipVerificationTestMode(
+  mode: "normal" | "force-failure",
+) {
+  zipVerificationTestMode = mode;
+}
+
+export function __setGenerationFailureTestMode(
+  mode: "normal" | "fail-before-validation",
+) {
+  generationFailureTestMode = mode;
+}
 type LocalExportInput = {
   url?: string;
   pluginCapture?: PluginCanvasCapture;
@@ -82,6 +103,7 @@ type LocalExportResult = {
   previewPath: string;
   resolvedRequestPath?: string;
   statusPath?: string;
+  captureProgressPath?: string;
   capabilityReportPath?: string;
   codeCompatibilityReportPath?: string;
   beforeAfterReportPath?: string;
@@ -115,6 +137,28 @@ export type GeneratedProjectValidation = {
   renderedTextLength: number;
   consoleErrors: string[];
   pageErrors: string[];
+  externalRequests: string[];
+  failedRequests: Array<{
+    url: string;
+    status: number;
+  }>;
+  runtimeLocalization?: {
+    downloaded: number;
+    replaced: number;
+    failed: number;
+    manifestPath?: string;
+  };
+  packagedArchive?: {
+    verified: true;
+    zipByteSize: number;
+    extractedFileCount: number;
+    verificationDurationMs: number;
+    routeCount: number;
+    renderedElementCount: number;
+    renderedTextLength: number;
+    externalRequestCount: number;
+    failedRequestCount: number;
+  };
   codeFileExecutions: Array<{
     routePath: string;
     fileName: string;
@@ -136,6 +180,11 @@ export type GeneratedProjectValidation = {
   }>;
   routes: Array<{
     path: string;
+    routeKind?: "page" | "redirect";
+    status?: "passed";
+    destination?: string;
+    destinationKind?: "internal" | "external";
+    redirectTo?: string;
     sourceTextLength: number;
     sourceNodeCount: number;
     rootChildCount: number;
@@ -155,6 +204,24 @@ export type GeneratedProjectValidation = {
     }>;
   }>;
 };
+
+type ValidationProgressUpdate = {
+  detail: string;
+  routePath?: string;
+  completed?: number;
+  total?: number;
+  failed?: number;
+};
+
+function resolveValidationTimeoutMs(
+  envName: string,
+  fallbackMs: number,
+) {
+  const rawValue = process.env[envName];
+  if (!rawValue) return fallbackMs;
+  const parsed = Number(rawValue);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMs;
+}
 
 export function assertPluginCaptureIntegrity(input: {
   exportMode?: ExportMode;
@@ -197,6 +264,7 @@ type DebugArtifactsManifest = {
     attempt: number;
     dir: string;
     compareDiagnostics?: string;
+    previewCaptureError?: string;
     generatedScreenshots: string[];
     summary: string;
   }>;
@@ -435,9 +503,9 @@ export async function runLocalExport(
   const sharedRevisionCacheRoot = resolveSharedRevisionCacheRoot(input.outDir);
   let resolvedRevisionId: string | undefined;
 
-  await mkdirp(workDir);
-  await mkdirp(attemptsDir);
-  await mkdirp(exportDir);
+  await fs.mkdir(workDir, { recursive: true });
+  await fs.mkdir(attemptsDir, { recursive: true });
+  await fs.mkdir(exportDir, { recursive: true });
   await updateRevisionStatusFile({
     exportDir,
     stage: "planning",
@@ -498,8 +566,21 @@ export async function runLocalExport(
             cacheDir: path.join(input.outDir, ".capture-cache"),
             viewportNames: responsiveSelectiveReuse?.viewportNames,
             baseCapturesByRoute: responsiveSelectiveReuse?.baseCapturesByRoute,
-            onProgress: (progress) =>
-              input.onProgress?.({ stage: "Capturing routes", ...progress }),
+            freshRoutePaths: responsiveSelectiveReuse?.freshRoutePaths,
+            onProgress: async (progress) => {
+              await updateRevisionStatusFile({
+                exportDir,
+                stage: "capturing",
+                detail: `Captured route ${progress.routePath} (${progress.completed}/${progress.total}).`,
+                progress: {
+                  completed: progress.completed,
+                  total: progress.total,
+                  routePath: progress.routePath,
+                  failed: progress.failed,
+                },
+              });
+              await input.onProgress?.({ stage: "Capturing routes", ...progress });
+            },
           }),
         )
       : await captureRuntime({
@@ -585,48 +666,13 @@ export async function runLocalExport(
   );
   const cachedRevision = await readCachedRevision(revisionCacheDir);
   if (cachedRevision) {
-    await copy(cachedRevision.exportDir, exportDir);
-    const cachedReportPath = path.join(exportDir, "export-report.json");
-    try {
-      const cachedReport = JSON.parse(
-        await fs.readFile(cachedReportPath, "utf8"),
-      ) as Record<string, unknown>;
-      cachedReport.revisionCacheHit = true;
-      await writeFile(cachedReportPath, `${JSON.stringify(cachedReport, null, 2)}\n`);
-    } catch {
-      // Keep the cached export usable even if the report cannot be patched.
-    }
-    const zipPath = path.join(runDir, `${ir.componentName}.zip`);
-    await zipDirectory(exportDir, zipPath);
-    const responsivePlanPath = path.join(
+    await fs.cp(cachedRevision.exportDir, exportDir, { recursive: true });
+    return finalizeCachedRevisionResult({
       exportDir,
-      "responsive-recapture-plan.json",
-    );
-    return {
-      exportDir,
-      zipPath,
-      reportPath: path.join(exportDir, "export-report.json"),
-      previewPath: path.join(exportDir, "preview.html"),
-      capabilityReportPath: (await fileExists(
-        path.join(exportDir, "capability-report.json"),
-      ))
-        ? path.join(exportDir, "capability-report.json")
-        : undefined,
-      codeCompatibilityReportPath: (await fileExists(
-        path.join(exportDir, "code-compatibility-report.json"),
-      ))
-        ? path.join(exportDir, "code-compatibility-report.json")
-        : undefined,
-      bestAttempt: cachedRevision.bestAttempt,
-      validation: cachedRevision.validation,
-      revisionManifestPath: path.join(exportDir, "revision-manifest.json"),
-      invalidationPlanPath: path.join(exportDir, "invalidation-plan.json"),
-      artifactIndexPath: path.join(exportDir, "artifact-index.json"),
-      responsiveRecapturePlanPath: (await fileExists(responsivePlanPath))
-        ? responsivePlanPath
-        : undefined,
+      runDir,
+      cachedRevision,
       revisionCacheHit: true,
-    };
+    });
   }
   const noopComponentRevision =
     await tryReuseParentRevisionForUnchangedComponentSource({
@@ -663,7 +709,7 @@ export async function runLocalExport(
     ir,
     codeCompatibilityReport,
   );
-    const attempts = await runAttempts({
+  const attempts = await runAttempts({
     ir,
     attemptsDir,
     maxAttempts: input.maxAttempts,
@@ -671,7 +717,16 @@ export async function runLocalExport(
     codeCompatibilityReport,
     unadaptedCodeFiles,
   });
+  if (generationFailureTestMode === "fail-before-validation") {
+    throw new Error(
+      "Generated export forced to fail during generation before validation for testing.",
+    );
+  }
   const bestAttempt = selectBestAttempt(attempts);
+  const runtimeLocalization =
+    input.exportMode === "full-site"
+      ? await localizeRuntimeKeptProjectAssets(bestAttempt.projectDir)
+      : undefined;
   if (
     input.exportMode === "full-site" &&
     (bestAttempt.previewValidation?.summary.inspectedNodes ?? 0) > 0 &&
@@ -687,9 +742,26 @@ export async function runLocalExport(
       stage: "validating",
       detail: "Validating generated project output.",
     });
-    const validation = await validateGeneratedProject(bestAttempt.projectDir);
+    const validation = await validateGeneratedProject(bestAttempt.projectDir, {
+      exportMode: input.exportMode,
+      runtimeLocalization,
+      onProgress: async (progress) => {
+        await updateRevisionStatusFile({
+          exportDir,
+          revisionId,
+          stage: "validating",
+          detail: progress.detail,
+          progress: {
+            completed: progress.completed,
+            total: progress.total,
+            routePath: progress.routePath,
+            failed: progress.failed,
+          },
+        });
+      },
+    });
 
-  await copy(bestAttempt.projectDir, exportDir);
+  await fs.cp(bestAttempt.projectDir, exportDir, { recursive: true });
   const debugArtifacts = await bundleDebugArtifacts({
     workDir,
     attemptsDir,
@@ -702,6 +774,9 @@ export async function runLocalExport(
     ir,
     input.revisionRequest,
   );
+  const captureProgress = await readJsonFile<Record<string, unknown>>(
+    path.join(workDir, "capture-progress.json"),
+  );
   const report = createReport(
     ir,
     attempts,
@@ -713,10 +788,11 @@ export async function runLocalExport(
     input.revisionRequest,
     sourceArtifacts,
     responsiveRecapturePlan,
+    captureProgress,
     codeCompatibilityReport,
     unadaptedCodeFiles,
   );
-  await mkdirp(revisionCacheDir);
+  await fs.mkdir(revisionCacheDir, { recursive: true });
   await writeFile(
     path.join(exportDir, "best-attempt.json"),
     `${JSON.stringify(bestAttempt, null, 2)}\n`,
@@ -733,9 +809,18 @@ export async function runLocalExport(
     path.join(exportDir, "raw-runtime-capture.json"),
     `${JSON.stringify(runtimeCapture, null, 2)}\n`,
   );
+  await fs.cp(
+    path.join(workDir, "capture-progress.json"),
+    path.join(exportDir, "capture-progress.json"),
+    { recursive: false },
+  ).catch(() => undefined);
   await writeFile(
     path.join(exportDir, "normalized-ir.json"),
     `${JSON.stringify(createNormalizedIrArtifact(ir), null, 2)}\n`,
+  );
+  await writeFile(
+    path.join(exportDir, "fidelity-replay-ir.json"),
+    `${JSON.stringify(ir, null, 2)}\n`,
   );
   if (codeCompatibilityReport.fileCount > 0) {
     await writeJsonFile(
@@ -823,6 +908,7 @@ export async function runLocalExport(
     bestAttempt,
     revisionId,
     {
+      status: "validating",
       sourceFingerprint,
       pluginFingerprint,
       revisionRequest: input.revisionRequest,
@@ -852,12 +938,6 @@ export async function runLocalExport(
       dependencyHashes: entry.dependencyHashes,
       })),
   );
-  await updateRevisionStatusFile({
-    exportDir,
-    revisionId,
-    stage: "completed",
-    detail: "Revision completed successfully.",
-  });
   await writeJsonFile(path.join(exportDir, "revision-manifest.json"), {
     ...revisionManifest,
     artifactGraphHash,
@@ -871,10 +951,64 @@ export async function runLocalExport(
     path.join(exportDir, "artifact-index.json"),
     artifactIndex,
   );
-  await copy(exportDir, path.join(revisionCacheDir, "export"));
 
   const zipPath = path.join(runDir, `${ir.componentName}.zip`);
+  await updateRevisionStatusFile({
+    exportDir,
+    revisionId,
+    stage: "validating",
+    detail: "Packaging generated export into a ZIP archive.",
+  });
   await zipDirectory(exportDir, zipPath);
+  const packagedArchive = await verifyPackagedExportArchive(zipPath, {
+    exportMode: input.exportMode,
+    onProgress: async (progress) => {
+      await updateRevisionStatusFile({
+        exportDir,
+        revisionId,
+        stage: "validating",
+        detail: progress.detail,
+        progress: {
+          completed: progress.completed,
+          total: progress.total,
+          routePath: progress.routePath,
+          failed: progress.failed,
+        },
+      });
+    },
+  });
+  await persistPackagedArchiveVerification({
+    exportDir,
+    packagedArchive,
+  });
+  await fs.mkdir(revisionCacheDir, { recursive: true });
+  const completedRevisionManifest: ExportRevisionRecord = {
+    ...revisionManifest,
+    status: "completed",
+    updatedAt: new Date().toISOString(),
+  };
+  await writeJsonFile(path.join(exportDir, "revision-manifest.json"), {
+    ...completedRevisionManifest,
+    artifactGraphHash,
+    normalizedIr,
+  });
+  const completedArtifactIndex = await createArtifactIndex(exportDir, sourceArtifacts, {
+    sourceFingerprint,
+    revisionId,
+  });
+  await writeJsonFile(
+    path.join(exportDir, "artifact-index.json"),
+    completedArtifactIndex,
+  );
+  await fs.cp(exportDir, path.join(revisionCacheDir, "export"), {
+    recursive: true,
+  });
+  await updateRevisionStatusFile({
+    exportDir,
+    revisionId,
+    stage: "completed",
+    detail: "Revision completed successfully.",
+  });
 
     return {
       exportDir,
@@ -883,6 +1017,11 @@ export async function runLocalExport(
       previewPath,
       resolvedRequestPath: path.join(exportDir, "resolved-request.json"),
       statusPath: path.join(exportDir, "status.json"),
+      captureProgressPath: (await fileExists(
+        path.join(exportDir, "capture-progress.json"),
+      ))
+        ? path.join(exportDir, "capture-progress.json")
+        : undefined,
       capabilityReportPath: readCapabilityReport(pluginCapture)
         ? path.join(exportDir, "capability-report.json")
         : undefined,
@@ -895,7 +1034,10 @@ export async function runLocalExport(
         : undefined,
       parentInfoPath: parentInfo ? path.join(exportDir, "parent.json") : undefined,
       bestAttempt,
-      validation,
+      validation: {
+        ...validation,
+        packagedArchive,
+      },
       revisionManifestPath: path.join(exportDir, "revision-manifest.json"),
       invalidationPlanPath: path.join(exportDir, "invalidation-plan.json"),
       artifactIndexPath: path.join(exportDir, "artifact-index.json"),
@@ -905,6 +1047,16 @@ export async function runLocalExport(
       revisionCacheHit: false,
     };
   } catch (error) {
+    const manifestPath = path.join(exportDir, "revision-manifest.json");
+    const persistedManifest =
+      (await readJsonFile<ExportRevisionRecord>(manifestPath)) ?? null;
+    if (persistedManifest) {
+      await writeJsonFile(manifestPath, {
+        ...persistedManifest,
+        status: "failed",
+        updatedAt: new Date().toISOString(),
+      });
+    }
     await updateRevisionStatusFile({
       exportDir,
       revisionId: resolvedRevisionId,
@@ -1129,8 +1281,10 @@ export async function migrateLegacyExportToRevision(input: {
   );
 
   const revisionCacheDir = path.join(sharedRevisionCacheRoot, revisionId);
-  await mkdirp(revisionCacheDir);
-  await copy(exportDir, path.join(revisionCacheDir, "export"));
+  await fs.mkdir(revisionCacheDir, { recursive: true });
+  await fs.cp(exportDir, path.join(revisionCacheDir, "export"), {
+    recursive: true,
+  });
   await updateRevisionStatusFile({
     exportDir,
     revisionId,
@@ -1219,7 +1373,11 @@ export function createNormalizedIrArtifact(ir: ExportIR) {
       exportTreeNodeCount: countExportTreeNodes(page.exportTree ?? []),
       templateId: page.templateId,
       templatePath: page.templatePath,
+      routeKind: page.routeKind,
+      template: page.template,
       templateKind: page.templateKind,
+      destination: page.destination ?? page.redirectTo,
+      destinationKind: page.destinationKind,
     })),
   };
 }
@@ -1582,172 +1740,21 @@ function countExportTreeNodes(nodes: ExportTreeNode[]): number {
 }
 
 export function readFullSiteRouteManifest(pluginCapture?: PluginCanvasCapture) {
-  type RouteManifestEntry = {
-    path: string;
-    title?: string;
-    collectionId?: string;
-    templateId?: string;
-    templatePath?: string;
-    templateKind?: "static" | "cms" | "component" | "redirect" | "utility";
-    redirectTo?: string;
-    redirectStatus?: number;
-  };
-  const pages = Array.isArray(pluginCapture?.context?.sitePages)
-    ? pluginCapture.context.sitePages
-    : [];
-  const collections = Array.isArray(pluginCapture?.context?.cmsCollections)
-    ? pluginCapture.context.cmsCollections
-    : [];
-  const routes: RouteManifestEntry[] = pages
-    .map((page) => {
-      const record =
-        page && typeof page === "object"
-          ? (page as Record<string, unknown>)
-          : {};
-      const metadata =
-        record.metadata && typeof record.metadata === "object"
-          ? (record.metadata as Record<string, unknown>)
-          : {};
-      const pathValue = [
-        record.routePath,
-        record.path,
-        record.pathname,
-        record.pagePath,
-        record.route,
-        record.slug,
-        record.url,
-        metadata.routePath,
-        metadata.path,
-        metadata.pathname,
-        metadata.pagePath,
-      ].find((value) => typeof value === "string" && value.trim());
-      const titleValue = [
-        record.name,
-        record.title,
-        record.pageTitle,
-        record.displayName,
-        metadata.name,
-        metadata.title,
-      ].find((value) => typeof value === "string" && value.trim());
-      const redirectTo =
-        typeof record.redirectTo === "string"
-          ? record.redirectTo
-          : typeof record.redirectUrl === "string"
-            ? record.redirectUrl
-            : typeof record.targetUrl === "string"
-              ? record.targetUrl
-              : typeof record.externalUrl === "string"
-                ? record.externalUrl
-                : typeof metadata.redirectTo === "string"
-                  ? metadata.redirectTo
-                  : typeof metadata.redirectUrl === "string"
-                    ? metadata.redirectUrl
-                    : undefined;
-      const redirectStatus =
-        typeof record.redirectStatus === "number"
-          ? record.redirectStatus
-          : typeof record.statusCode === "number"
-            ? record.statusCode
-            : typeof metadata.redirectStatus === "number"
-              ? metadata.redirectStatus
-              : typeof metadata.statusCode === "number"
-                ? metadata.statusCode
-                : undefined;
-      return {
-        path: typeof pathValue === "string" ? pathValue : "",
-        title: typeof titleValue === "string" ? titleValue : undefined,
-        collectionId:
-          typeof record.collectionId === "string"
-            ? record.collectionId
-            : typeof metadata.collectionId === "string"
-              ? metadata.collectionId
-              : undefined,
-        templatePath:
-          typeof record.path === "string" && record.path.trim()
-            ? record.path.trim()
-            : typeof metadata.path === "string" && metadata.path.trim()
-              ? metadata.path.trim()
-              : undefined,
-        ...(redirectTo ? { redirectTo } : {}),
-        ...(typeof redirectStatus === "number" ? { redirectStatus } : {}),
-      };
-    })
-    .filter(
-      (route) =>
-        route.path &&
-        !/^\/?drafts(?:\/|$)/i.test(route.path) &&
-        !/^\/?404\/?$/i.test(route.path),
-    )
-    .flatMap((route): RouteManifestEntry[] => {
-      if (!route.path.includes(":slug")) {
-        const redirectKind = route.redirectTo
-          ? /^https?:\/\//i.test(route.redirectTo)
-            ? "utility"
-            : "redirect"
-          : "static";
-        return [
-          {
-            ...route,
-            templateId: route.templatePath ?? route.path,
-            templateKind: redirectKind,
-            templatePath: route.templatePath ?? route.path,
-          },
-        ];
-      }
-      if (!route.collectionId) {
-        return [
-          {
-            ...route,
-            templateId: route.templatePath ?? route.path,
-            templateKind: "cms",
-            templatePath: route.templatePath ?? route.path,
-          },
-        ];
-      }
-      const collection = collections.find((entry) => {
-        const record =
-          entry && typeof entry === "object"
-            ? (entry as Record<string, unknown>)
-            : {};
-        return record.id === route.collectionId;
-      });
-      const collectionRecord =
-        collection && typeof collection === "object"
-          ? (collection as Record<string, unknown>)
-          : {};
-      const items = Array.isArray(collectionRecord.items)
-        ? collectionRecord.items
-        : [];
-      const expanded = items
-        .map<RouteManifestEntry | null>((item) => {
-          const record =
-            item && typeof item === "object"
-              ? (item as Record<string, unknown>)
-              : {};
-          const slug = typeof record.slug === "string" ? record.slug.trim() : "";
-          if (!slug) return null;
-          return {
-            path: route.path.replace(":slug", encodeURIComponent(slug)),
-            title: route.title ? `${route.title} - ${slug}` : slug,
-            collectionId: route.collectionId,
-            templateId: route.templatePath ?? route.path,
-            templatePath: route.templatePath ?? route.path,
-            templateKind: "cms",
-          };
-        })
-        .filter((entry): entry is RouteManifestEntry => entry !== null);
-      return expanded.length > 0
-        ? expanded
-        : [
-            {
-              ...route,
-              templateId: route.templatePath ?? route.path,
-              templateKind: "cms",
-              templatePath: route.templatePath ?? route.path,
-            },
-          ];
-    });
-  return routes.length > 0 ? routes : [{ path: "/", title: "Home" }];
+  const routes = normalizePluginExportRoutes(pluginCapture);
+  return routes.length > 0
+    ? routes
+    : [
+        {
+          schemaVersion: 1,
+          path: "/",
+          title: "Home",
+          templateId: "/",
+          templatePath: "/",
+          kind: "page",
+          template: "static",
+          templateKind: "static",
+        } satisfies NormalizedExportRoute,
+      ];
 }
 
 async function readResponsiveSelectiveReuseContext(input: {
@@ -1795,18 +1802,85 @@ async function readResponsiveSelectiveReuseContext(input: {
     const templateKind = group[0]?.templateKind ?? "static";
     return templateKind === "cms" ? group.slice(0, 1) : group;
   });
+  const freshRoutePaths = routesToCapture.map((route) => route.path);
   const baseCapturesByRoute = Object.fromEntries(
-    (parentRuntimeCapture.routeCaptures ?? []).map((capture) => [
-      capture.routePath,
-      capture,
-    ]),
+    (parentRuntimeCapture.routeCaptures ?? [])
+      .filter((capture) => freshRoutePaths.includes(capture.routePath))
+      .map((capture) => [
+        capture.routePath,
+        createResponsiveFreshBaseCapture(capture, ["desktop"]),
+      ]),
   ) as Record<string, RuntimeRouteCapture | undefined>;
 
   return {
     parentRuntimeCapture,
     routesToCapture,
+    freshRoutePaths,
     viewportNames: ["laptop", "tablet", "mobile"] as ViewportName[],
     baseCapturesByRoute,
+  };
+}
+
+function createResponsiveFreshBaseCapture(
+  capture: RuntimeRouteCapture,
+  preserveViewports: ViewportName[] = ["desktop"],
+): RuntimeRouteCapture {
+  const preserved = new Set(preserveViewports);
+  const preservedViewports = Object.fromEntries(
+    Object.entries(capture.viewports).filter(([viewportName]) =>
+      preserved.has(viewportName as ViewportName),
+    ),
+  ) as RuntimeCapture["viewports"];
+  const preservedNodesByViewport = capture.nodesByViewport
+    ? (Object.fromEntries(
+        Object.entries(capture.nodesByViewport).filter(([viewportName]) =>
+          preserved.has(viewportName as ViewportName),
+        ),
+      ) as RuntimeCapture["nodesByViewport"])
+    : undefined;
+  const preservedRootStylesByViewport = capture.rootStylesByViewport
+    ? (Object.fromEntries(
+        Object.entries(capture.rootStylesByViewport).filter(([viewportName]) =>
+          preserved.has(viewportName as ViewportName),
+        ),
+      ) as RuntimeCapture["rootStylesByViewport"])
+    : undefined;
+  const preservedBreakpointNames = (
+    capture.captureDiagnostics?.breakpointsCaptured ?? []
+  ).filter((viewportName) => preserved.has(viewportName));
+  const filterRecords = <T extends Record<string, unknown> | undefined>(
+    records: T,
+  ) =>
+    records
+      ? (Object.fromEntries(
+          Object.entries(records).filter(([viewportName]) =>
+            preserved.has(viewportName as ViewportName),
+          ),
+        ) as T)
+      : records;
+
+  return {
+    ...capture,
+    viewports: preservedViewports,
+    nodesByViewport: preservedNodesByViewport,
+    rootStylesByViewport: preservedRootStylesByViewport,
+    captureDiagnostics: {
+      ...(capture.captureDiagnostics ?? {
+        breakpointsCaptured: preserveViewports,
+      }),
+      breakpointsCaptured:
+        preservedBreakpointNames.length > 0
+          ? preservedBreakpointNames
+          : preserveViewports,
+      viewportValidation: filterRecords(
+        capture.captureDiagnostics?.viewportValidation,
+      ),
+      fontReadiness: filterRecords(capture.captureDiagnostics?.fontReadiness),
+      stylesheetCount: filterRecords(capture.captureDiagnostics?.stylesheetCount),
+      nodeCount: filterRecords(capture.captureDiagnostics?.nodeCount),
+      phaseHistory: capture.captureDiagnostics?.phaseHistory ?? [],
+      routeProgress: capture.captureDiagnostics?.routeProgress ?? [],
+    },
   };
 }
 
@@ -1821,6 +1895,290 @@ async function readParentRuntimeCapture(
       "export",
       "raw-runtime-capture.json",
     ),
+  );
+}
+
+type RuntimeLocalizationSummary = {
+  downloaded: number;
+  replaced: number;
+  failed: number;
+  manifestPath?: string;
+};
+
+async function localizeRuntimeKeptProjectAssets(projectDir: string): Promise<RuntimeLocalizationSummary> {
+  const files = await listFiles(projectDir);
+  const candidateFiles = files.filter((filePath) => {
+    if (filePath.includes(`${path.sep}node_modules${path.sep}`)) return false;
+    if (filePath.includes(`${path.sep}dist${path.sep}`)) return false;
+    if (filePath.includes(`${path.sep}public${path.sep}runtime-assets${path.sep}`)) {
+      return false;
+    }
+    const extension = path.extname(filePath).toLowerCase();
+    return [".tsx", ".ts", ".css", ".html", ".json", ".md"].includes(extension);
+  });
+  const rawMatchesByNormalizedUrl = new Map<string, Set<string>>();
+  for (const filePath of candidateFiles) {
+    const content = await fs.readFile(filePath, "utf8");
+    for (const match of content.matchAll(/https?:\/\/[^\s"'`()<>]+/g)) {
+      const raw = match[0]?.trim();
+      if (!raw) continue;
+      const normalized = normalizeLocalizableRuntimeUrl(raw);
+      if (!normalized || !isLocalizableRuntimeUrl(normalized)) continue;
+      const variants = rawMatchesByNormalizedUrl.get(normalized) ?? new Set<string>();
+      variants.add(raw);
+      rawMatchesByNormalizedUrl.set(normalized, variants);
+    }
+  }
+
+  const runtimeAssetsDir = path.join(projectDir, "public", "runtime-assets");
+  await fs.mkdir(runtimeAssetsDir, { recursive: true });
+  const replacements = new Map<string, string>();
+  const manifestEntries: Array<{
+    sourceUrl: string;
+    localPath?: string;
+    status: "localized" | "failed";
+    contentType?: string;
+    byteLength?: number;
+    error?: string;
+  }> = [];
+
+  for (const [normalizedUrl, rawMatches] of rawMatchesByNormalizedUrl) {
+    try {
+      const localized = await downloadLocalizedRuntimeAsset(
+        normalizedUrl,
+        runtimeAssetsDir,
+      );
+      for (const rawMatch of rawMatches) {
+        replacements.set(rawMatch, localized.publicPath);
+      }
+      manifestEntries.push({
+        sourceUrl: normalizedUrl,
+        localPath: localized.publicPath,
+        status: "localized",
+        contentType: localized.contentType,
+        byteLength: localized.byteLength,
+      });
+    } catch (error) {
+      manifestEntries.push({
+        sourceUrl: normalizedUrl,
+        status: "failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  let replaced = 0;
+  const orderedReplacements = Array.from(replacements.entries()).sort(
+    ([left], [right]) => right.length - left.length,
+  );
+  for (const filePath of candidateFiles) {
+    const original = await fs.readFile(filePath, "utf8");
+    let next = original;
+    for (const [rawMatch, publicPath] of orderedReplacements) {
+      if (!next.includes(rawMatch)) continue;
+      next = next.split(rawMatch).join(publicPath);
+      replaced += 1;
+    }
+    if (next !== original) {
+      await fs.writeFile(filePath, next);
+    }
+  }
+
+  const manifestPath = path.join(projectDir, "runtime-localization-report.json");
+  await writeJsonFile(manifestPath, {
+    generatedAt: new Date().toISOString(),
+    downloaded: manifestEntries.filter((entry) => entry.status === "localized").length,
+    replaced,
+    failed: manifestEntries.filter((entry) => entry.status === "failed").length,
+    assets: manifestEntries,
+  });
+
+  return {
+    downloaded: manifestEntries.filter((entry) => entry.status === "localized").length,
+    replaced,
+    failed: manifestEntries.filter((entry) => entry.status === "failed").length,
+    manifestPath: "runtime-localization-report.json",
+  };
+}
+
+async function downloadLocalizedRuntimeAsset(
+  sourceUrl: string,
+  outputDir: string,
+): Promise<{
+  publicPath: string;
+  contentType?: string;
+  byteLength: number;
+}> {
+  const normalizedSourceUrl = normalizeLocalizableRuntimeUrl(sourceUrl);
+  const response = await fetch(normalizedSourceUrl, {
+    headers: {
+      connection: "close",
+    },
+    redirect: "follow",
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) {
+    throw new Error(`Download failed with ${response.status} ${response.statusText}`);
+  }
+  const contentType = response.headers.get("content-type") ?? undefined;
+  const normalizedContentType = normalizeRuntimeAssetContentType(contentType);
+  if (
+    normalizedContentType &&
+    !isSupportedLocalizedRuntimeContentType(normalizedContentType)
+  ) {
+    throw new Error(`Unsupported localized asset content type: ${normalizedContentType}`);
+  }
+  const extension = inferAssetExtension(normalizedSourceUrl, contentType) ?? ".bin";
+  const arrayBuffer = await response.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+  if (buffer.byteLength === 0) {
+    throw new Error("Downloaded asset is empty.");
+  }
+  const contentHash = crypto
+    .createHash("sha256")
+    .update(buffer)
+    .digest("hex")
+    .slice(0, 24);
+  const fileName = `${contentHash}${extension}`;
+  const targetPath = path.join(outputDir, fileName);
+  const existingAssetMatches =
+    (await readLocalizedRuntimeAssetHash(targetPath)) === contentHash;
+  if (!existingAssetMatches) {
+    const tempPath = path.join(
+      outputDir,
+      `${fileName}.tmp-${crypto.randomUUID()}`,
+    );
+    await fs.writeFile(tempPath, buffer);
+    try {
+      await fs.rename(tempPath, targetPath);
+    } catch (error) {
+      const renamedAssetMatches =
+        (await readLocalizedRuntimeAssetHash(targetPath)) === contentHash;
+      if (!renamedAssetMatches) {
+        throw error;
+      }
+      await fs.rm(tempPath, { force: true }).catch(() => undefined);
+    }
+  }
+  return {
+    publicPath: `/runtime-assets/${fileName}`,
+    contentType,
+    byteLength: buffer.byteLength,
+  };
+}
+
+async function readLocalizedRuntimeAssetHash(targetPath: string) {
+  try {
+    const buffer = await fs.readFile(targetPath);
+    if (buffer.byteLength === 0) return null;
+    return crypto
+      .createHash("sha256")
+      .update(buffer)
+      .digest("hex")
+      .slice(0, 24);
+  } catch {
+    return null;
+  }
+}
+
+function decodeHtmlEntities(value: string) {
+  return value.replace(/&amp;/g, "&");
+}
+
+export function normalizeLocalizableRuntimeUrl(value: string) {
+  return decodeHtmlEntities(value).trim().replace(/\\+$/u, "");
+}
+
+function isLocalizableRuntimeUrl(value: string) {
+  try {
+    const parsed = new URL(normalizeLocalizableRuntimeUrl(value));
+    if (!/^https?:$/.test(parsed.protocol)) return false;
+    const hostname = parsed.hostname.toLowerCase();
+    if (
+      hostname.endsWith("framerusercontent.com") ||
+      hostname.endsWith("framerstatic.com") ||
+      hostname === "fonts.googleapis.com" ||
+      hostname === "fonts.gstatic.com"
+    ) {
+      return true;
+    }
+    const extension = path.extname(parsed.pathname).toLowerCase();
+    return [
+      ".png",
+      ".jpg",
+      ".jpeg",
+      ".gif",
+      ".webp",
+      ".svg",
+      ".ico",
+      ".avif",
+      ".mp4",
+      ".webm",
+      ".mov",
+      ".m4v",
+      ".mp3",
+      ".wav",
+      ".ogg",
+      ".aac",
+      ".woff",
+      ".woff2",
+      ".ttf",
+      ".otf",
+      ".eot",
+      ".riv",
+      ".css",
+      ".js",
+      ".mjs",
+      ".json",
+    ].includes(extension);
+  } catch {
+    return false;
+  }
+}
+
+function inferAssetExtension(sourceUrl: string, contentType?: string) {
+  try {
+    const parsed = new URL(sourceUrl);
+    const pathnameExt = path.extname(parsed.pathname).toLowerCase();
+    if (pathnameExt) return pathnameExt;
+  } catch {
+    // Fall through to content-type based inference.
+  }
+  const normalized = contentType?.split(";")[0].trim().toLowerCase();
+  const byType: Record<string, string> = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "image/svg+xml": ".svg",
+    "image/avif": ".avif",
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
+    "audio/mpeg": ".mp3",
+    "audio/ogg": ".ogg",
+    "font/woff": ".woff",
+    "font/woff2": ".woff2",
+    "font/ttf": ".ttf",
+    "font/otf": ".otf",
+    "text/css": ".css",
+    "text/javascript": ".js",
+    "application/javascript": ".js",
+    "application/json": ".json",
+  };
+  return normalized ? byType[normalized] : undefined;
+}
+
+function normalizeRuntimeAssetContentType(contentType?: string) {
+  return contentType?.split(";")[0].trim().toLowerCase() || undefined;
+}
+
+function isSupportedLocalizedRuntimeContentType(contentType: string) {
+  return Boolean(
+    inferAssetExtension("https://example.com/asset", contentType) ||
+      contentType.startsWith("image/") ||
+      contentType.startsWith("video/") ||
+      contentType.startsWith("audio/") ||
+      contentType.startsWith("font/"),
   );
 }
 
@@ -1867,6 +2225,18 @@ function mergeRuntimeCaptures(
 
 export async function validateGeneratedProject(
   projectDir: string,
+  input: {
+    exportMode?: ExportMode;
+    runtimeLocalization?: {
+      downloaded: number;
+      replaced: number;
+      failed: number;
+      manifestPath?: string;
+    };
+    onProgress?: (
+      progress: ValidationProgressUpdate,
+    ) => void | Promise<void>;
+  } = {},
 ): Promise<GeneratedProjectValidation> {
   const generated = await summarizeGeneratedProject(projectDir);
   console.log(
@@ -1897,11 +2267,19 @@ export async function validateGeneratedProject(
         : hasPackageLock
           ? ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]
           : ["install", "--ignore-scripts", "--no-audit", "--no-fund"];
+    const expectedLockfilePath =
+      packageManager === "pnpm"
+        ? path.join(projectDir, "pnpm-lock.yaml")
+        : path.join(projectDir, "package-lock.json");
+
+    await input.onProgress?.({
+      detail: `Installing generated project dependencies with ${packageManager}.`,
+    });
     const install = await runCommand(
       packageManager,
       installArgs,
       projectDir,
-      180_000,
+      resolveValidationTimeoutMs("CODERELAY_INSTALL_TIMEOUT_MS", 180_000),
     );
     console.log(
       "[coderelay:core:install]",
@@ -1922,12 +2300,20 @@ export async function validateGeneratedProject(
         )}`,
       );
     }
+    if (!(await fileExists(expectedLockfilePath))) {
+      throw new Error(
+        `Generated export install did not produce the expected lockfile: ${path.basename(expectedLockfilePath)}.`,
+      );
+    }
 
+    await input.onProgress?.({
+      detail: `Building generated project with ${packageManager} run build.`,
+    });
     const build = await runCommand(
       packageManager,
       ["run", "build"],
       projectDir,
-      300_000,
+      resolveValidationTimeoutMs("CODERELAY_BUILD_TIMEOUT_MS", 300_000),
     );
     console.log(
       "[coderelay:core:build]",
@@ -1948,9 +2334,17 @@ export async function validateGeneratedProject(
     }
 
     const routeManifest = await readGeneratedRouteManifest(projectDir);
+    await input.onProgress?.({
+      detail: `Running generated runtime validation across ${routeManifest.length} routes.`,
+      completed: 0,
+      total: routeManifest.length,
+    });
     const runtime = await inspectBuiltProject(
       path.join(projectDir, "dist"),
       routeManifest,
+      {
+        onProgress: input.onProgress,
+      },
     );
     console.log(
       "[coderelay:core:runtime]",
@@ -1961,6 +2355,8 @@ export async function validateGeneratedProject(
         consoleErrorCount: runtime.consoleErrors.length,
         pageErrorCount: runtime.pageErrors.length,
         routeCount: runtime.routes.length,
+        externalRequestCount: runtime.externalRequests.length,
+        failedRequestCount: runtime.failedRequests.length,
         codeFileExecutionCount: runtime.codeFileExecutions.length,
         failedCodeFileExecutionCount: runtime.codeFileExecutions.filter(
           (execution) => execution.status === "failed",
@@ -1983,11 +2379,18 @@ export async function validateGeneratedProject(
         ),
         failedRouteCount: runtime.routes.filter(
           (route) =>
-            route.rootChildCount === 0 || route.renderedElementCount === 0,
+            route.routeKind !== "redirect" &&
+            (route.rootChildCount === 0 || route.renderedElementCount === 0),
         ).length,
       }),
     );
-    if (runtime.rootChildCount === 0 || runtime.renderedElementCount === 0) {
+    const hasRenderedPageRoute = runtime.routes.some(
+      (route) => route.routeKind !== "redirect",
+    );
+    if (
+      hasRenderedPageRoute &&
+      (runtime.rootChildCount === 0 || runtime.renderedElementCount === 0)
+    ) {
       throw new Error(
         `Generated export rendered a blank root (children=${runtime.rootChildCount}, visibleElements=${runtime.renderedElementCount}).`,
       );
@@ -1995,6 +2398,18 @@ export async function validateGeneratedProject(
     if (runtime.pageErrors.length > 0) {
       throw new Error(
         `Generated export crashed at runtime.\n${runtime.pageErrors.join("\n")}`,
+      );
+    }
+    if (input.exportMode === "full-site" && runtime.externalRequests.length > 0) {
+      throw new Error(
+        `Generated export still depends on external runtime assets.\n${runtime.externalRequests.join("\n")}`,
+      );
+    }
+    if (input.exportMode === "full-site" && runtime.failedRequests.length > 0) {
+      throw new Error(
+        `Generated export requested missing assets or routes.\n${runtime.failedRequests
+          .map((entry) => `${entry.status} ${entry.url}`)
+          .join("\n")}`,
       );
     }
     const failedCodeFileExecution = runtime.codeFileExecutions.find(
@@ -2017,15 +2432,16 @@ export async function validateGeneratedProject(
     }
     const emptyRoute = runtime.routes.find(
       (route) =>
-        (route.sourceTextLength > 0 && route.renderedTextLength === 0) ||
-        (route.sourceTextLength >= 200 &&
-          route.renderedTextLength / route.sourceTextLength < 0.5) ||
-        (route.sourceTextLength > 0 &&
-          route.sourceNodeCount >= 5 &&
-          route.renderedElementCount < 3) ||
-        (route.sourceTextLength > 0 &&
-          route.sourceNodeCount >= 5 &&
-          route.screenshotColorCount < 3),
+        route.routeKind !== "redirect" &&
+        ((route.sourceTextLength > 0 && route.renderedTextLength === 0) ||
+          (route.sourceTextLength >= 200 &&
+            route.renderedTextLength / route.sourceTextLength < 0.5) ||
+          (route.sourceTextLength > 0 &&
+            route.sourceNodeCount >= 5 &&
+            route.renderedElementCount < 3) ||
+          (route.sourceTextLength > 0 &&
+            route.sourceNodeCount >= 5 &&
+            route.screenshotColorCount < 3)),
     );
     if (emptyRoute) {
       throw new Error(
@@ -2061,12 +2477,15 @@ export async function validateGeneratedProject(
       renderedTextLength: runtime.renderedTextLength,
       consoleErrors: runtime.consoleErrors,
       pageErrors: runtime.pageErrors,
+      externalRequests: runtime.externalRequests,
+      failedRequests: runtime.failedRequests,
+      runtimeLocalization: input.runtimeLocalization,
       codeFileExecutions: runtime.codeFileExecutions,
       interactionContracts: runtime.interactionContracts,
       routes: runtime.routes,
     };
   } finally {
-    // Keep package-lock.json and dist, but never ship installed dependencies.
+    // Keep the generated lockfile and dist, but never ship installed dependencies.
     await fs.rm(path.join(projectDir, "node_modules"), {
       recursive: true,
       force: true,
@@ -2095,6 +2514,134 @@ async function resolvePackageManager(projectDir: string): Promise<"npm" | "pnpm"
   );
 }
 
+async function verifyPackagedExportArchive(
+  zipPath: string,
+  input: {
+    exportMode?: ExportMode;
+    onProgress?: (
+      progress: ValidationProgressUpdate,
+    ) => void | Promise<void>;
+  } = {},
+): Promise<NonNullable<GeneratedProjectValidation["packagedArchive"]>> {
+  if (zipVerificationTestMode === "force-failure") {
+    throw new Error("Generated export ZIP verification forced to fail for testing.");
+  }
+  const zipStat = await fs.stat(zipPath).catch(() => null);
+  if (!zipStat?.isFile() || zipStat.size <= 0) {
+    throw new Error(`Packaged export ZIP is missing or empty: ${zipPath}`);
+  }
+
+  const verificationRoot = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-zip-verify-"),
+  );
+  const extractedProjectDir = path.join(verificationRoot, "export");
+  await fs.mkdir(extractedProjectDir, { recursive: true });
+
+  try {
+    await input.onProgress?.({
+      detail: "Extracting generated ZIP into a clean verification directory.",
+    });
+    const extraction = await extractZipArchive(zipPath, extractedProjectDir);
+    console.log(
+      "[coderelay:core:zip-verify:extract]",
+      JSON.stringify({
+        command: `${extraction.command} ${extraction.args.join(" ")}`,
+        exitCode: extraction.result.exitCode,
+        durationMs: extraction.result.durationMs,
+        stdout: tail(extraction.result.stdout, 2_000),
+        stderr: tail(extraction.result.stderr, 2_000),
+      }),
+    );
+    if (extraction.result.exitCode !== 0) {
+      throw new Error(
+        `Generated export ZIP could not be extracted.\n${tail(
+          extraction.result.stderr || extraction.result.stdout,
+          4_000,
+        )}`,
+      );
+    }
+
+    const extractedFiles = await listFiles(extractedProjectDir);
+    if (extractedFiles.length === 0) {
+      throw new Error("Generated export ZIP unpacked to an empty directory.");
+    }
+
+    await input.onProgress?.({
+      detail: "Revalidating extracted ZIP contents from a clean directory.",
+    });
+    const packagedValidation = await validateGeneratedProject(extractedProjectDir, {
+      exportMode: input.exportMode,
+      onProgress: input.onProgress,
+    });
+
+    return {
+      verified: true,
+      zipByteSize: zipStat.size,
+      extractedFileCount: extractedFiles.length,
+      verificationDurationMs: extraction.result.durationMs + packagedValidation.buildDurationMs,
+      routeCount: packagedValidation.routes.length,
+      renderedElementCount: packagedValidation.renderedElementCount,
+      renderedTextLength: packagedValidation.renderedTextLength,
+      externalRequestCount: packagedValidation.externalRequests.length,
+      failedRequestCount: packagedValidation.failedRequests.length,
+    };
+  } finally {
+    await fs.rm(verificationRoot, {
+      recursive: true,
+      force: true,
+    });
+  }
+}
+
+async function extractZipArchive(zipPath: string, outputDir: string) {
+  const requestedCommands = process.env.CODERELAY_ZIP_EXTRACT_COMMANDS
+    ?.split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const attempts = (
+    requestedCommands && requestedCommands.length > 0
+      ? requestedCommands
+      : ["unzip", "tar"]
+  ).map((command) => ({
+    command,
+    args:
+      command === "unzip"
+        ? ["-qq", path.resolve(zipPath), "-d", path.resolve(outputDir)]
+        : command === "tar"
+          ? ["-xf", path.resolve(zipPath), "-C", path.resolve(outputDir)]
+          : [path.resolve(zipPath), path.resolve(outputDir)],
+  }));
+
+  const failures: string[] = [];
+
+  for (const attempt of attempts) {
+    try {
+      const result = await runCommand(
+        attempt.command,
+        [...attempt.args],
+        outputDir,
+        120_000,
+      );
+      if (result.exitCode === 0) {
+        return { ...attempt, result };
+      }
+      failures.push(
+        `${attempt.command}: ${tail(result.stderr || result.stdout, 2_000)}`,
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        failures.push(`${attempt.command}: command not available`);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new Error(
+    `Generated export ZIP verification requires unzip or tar.\n${failures.join("\n")}`,
+  );
+}
+
 async function readGeneratedRouteManifest(projectDir: string) {
   const manifestPath = path.join(projectDir, "route-manifest.json");
   const parsed = await fs
@@ -2102,18 +2649,37 @@ async function readGeneratedRouteManifest(projectDir: string) {
     .then((content) => JSON.parse(content) as unknown)
     .catch(() => []);
   if (!Array.isArray(parsed) || parsed.length === 0) {
-    return [{ path: "/", sourceTextLength: 0, sourceNodeCount: 0 }];
+    return [{ path: "/", routeKind: "page" as const, sourceTextLength: 0, sourceNodeCount: 0 }];
   }
   return parsed.map((entry) => {
     const record =
       entry && typeof entry === "object"
         ? (entry as Record<string, unknown>)
         : {};
+    const routeMetadata = resolveExportRouteMetadata({
+      routeKind:
+        record.routeKind === "redirect" || record.routeKind === "page"
+          ? record.routeKind
+          : undefined,
+      destination:
+        typeof record.destination === "string" && record.destination.length > 0
+          ? record.destination
+          : undefined,
+      destinationKind:
+        record.destinationKind === "internal" || record.destinationKind === "external"
+          ? record.destinationKind
+          : undefined,
+      redirectTo:
+        typeof record.redirectTo === "string" && record.redirectTo.length > 0
+          ? record.redirectTo
+          : undefined,
+    });
     return {
       path:
         typeof record.path === "string" && record.path.startsWith("/")
           ? record.path
           : "/",
+      routeKind: routeMetadata.routeKind,
       sourceTextLength:
         typeof record.sourceTextLength === "number"
           ? record.sourceTextLength
@@ -2122,6 +2688,9 @@ async function readGeneratedRouteManifest(projectDir: string) {
         typeof record.sourceNodeCount === "number"
           ? record.sourceNodeCount
           : 0,
+      destination: routeMetadata.destination,
+      destinationKind: routeMetadata.destinationKind,
+      redirectTo: routeMetadata.redirectTo,
     };
   });
 }
@@ -2165,6 +2734,21 @@ async function runCommand(
   timeoutMs: number,
 ) {
   const startedAt = Date.now();
+  const nodeBinDir = path.dirname(process.execPath);
+  const inheritedPath = process.env.PATH ?? "";
+  const envPathEntries = inheritedPath
+    .split(pathDelimiter)
+    .filter(Boolean);
+  if (!envPathEntries.includes(nodeBinDir)) {
+    envPathEntries.unshift(nodeBinDir);
+  }
+  const childEnv = {
+    ...process.env,
+    PATH: envPathEntries.join(pathDelimiter),
+    NODE: process.execPath,
+    npm_node_execpath: process.execPath,
+    npm_execpath: process.env.npm_execpath ?? process.execPath,
+  };
   return await new Promise<{
     exitCode: number;
     stdout: string;
@@ -2173,16 +2757,22 @@ async function runCommand(
   }>((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
-      env: process.env,
+      env: childEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
+      const durationMs = Date.now() - startedAt;
       reject(
         new Error(
-          `${command} ${args.join(" ")} timed out after ${timeoutMs}ms.`,
+          `${command} ${args.join(" ")} timed out after ${timeoutMs}ms.\n` +
+            `cwd=${cwd}\n` +
+            `pid=${child.pid ?? "unknown"}\n` +
+            `elapsedMs=${durationMs}\n` +
+            `stdout:\n${tail(stdout, 4_000) || "(empty)"}\n` +
+            `stderr:\n${tail(stderr, 4_000) || "(empty)"}`,
         ),
       );
     }, timeoutMs);
@@ -2213,19 +2803,35 @@ async function inspectBuiltProject(
   distDir: string,
   routeManifest: Array<{
     path: string;
+    routeKind?: "page" | "redirect";
     sourceTextLength: number;
     sourceNodeCount: number;
+    destination?: string;
+    destinationKind?: "internal" | "external";
+    redirectTo?: string;
   }>,
+  input: {
+    onProgress?: (
+      progress: ValidationProgressUpdate,
+    ) => void | Promise<void>;
+  } = {},
 ): Promise<{
   rootChildCount: number;
   renderedElementCount: number;
   renderedTextLength: number;
   consoleErrors: string[];
   pageErrors: string[];
+  externalRequests: string[];
+  failedRequests: Array<{ url: string; status: number }>;
   codeFileExecutions: GeneratedProjectValidation["codeFileExecutions"];
   interactionContracts: GeneratedProjectValidation["interactionContracts"];
   routes: GeneratedProjectValidation["routes"];
 }> {
+  const normalizeRoutePath = (value: string) => {
+    if (!value) return "/";
+    if (value === "/") return "/";
+    return value.endsWith("/") ? value.slice(0, -1) : value;
+  };
   const server = createServer(async (request, response) => {
     try {
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -2233,7 +2839,14 @@ async function inspectBuiltProject(
       const normalized = path.normalize(requested).replace(/^(\.\.(\/|\\|$))+/, "");
       let filePath = path.join(distDir, normalized);
       const stat = await fs.stat(filePath).catch(() => null);
-      if (!stat?.isFile()) filePath = path.join(distDir, "index.html");
+      if (!stat?.isFile()) {
+        if (path.extname(normalized)) {
+          response.statusCode = 404;
+          response.end("Not found");
+          return;
+        }
+        filePath = path.join(distDir, "index.html");
+      }
       const content = await fs.readFile(filePath);
       response.statusCode = 200;
       response.setHeader("content-type", contentType(filePath));
@@ -2258,11 +2871,27 @@ async function inspectBuiltProject(
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
+  const externalRequests = new Set<string>();
+  const failedRequests: Array<{ url: string; status: number }> = [];
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
   });
   page.on("pageerror", (error) => {
     pageErrors.push(error.message);
+  });
+  page.on("request", (request) => {
+    try {
+      const url = new URL(request.url());
+      if (!/^https?:$/.test(url.protocol)) return;
+      if (url.hostname === "127.0.0.1" && url.port === String(address.port)) return;
+      externalRequests.add(request.url());
+    } catch {
+      // Ignore nonstandard URLs.
+    }
+  });
+  page.on("response", (response) => {
+    if (response.status() < 400) return;
+    failedRequests.push({ url: response.url(), status: response.status() });
   });
 
   try {
@@ -2281,22 +2910,122 @@ async function inspectBuiltProject(
       tablet: { width: 768, height: 1024 },
       mobile: { width: 390, height: 844 },
     };
-    for (const route of routeManifest) {
+    const routeReadyTimeoutMs = resolveValidationTimeoutMs(
+      "CODERELAY_ROUTE_READY_TIMEOUT_MS",
+      10_000,
+    );
+    const knownRoutePaths = new Set(routeManifest.map((route) => route.path));
+    for (const [routeIndex, route] of routeManifest.entries()) {
+      const routeMetadata = resolveExportRouteMetadata({
+        routeKind: route.routeKind,
+        destination: route.destination,
+        destinationKind: route.destinationKind,
+        redirectTo: route.redirectTo,
+      });
+      await input.onProgress?.({
+        detail:
+          routeMetadata.routeKind === "redirect"
+            ? `Validating redirect contract for ${route.path}.`
+            : `Validating rendered route ${route.path}.`,
+        routePath: route.path,
+        completed: routeIndex,
+        total: routeManifest.length,
+      });
+      if (routeMetadata.routeKind === "redirect") {
+        const destination = routeMetadata.destination;
+        const destinationKind = routeMetadata.destinationKind;
+        let validRedirect = false;
+        if (destination) {
+          if (destination.startsWith("/")) {
+            validRedirect = true;
+          } else {
+            try {
+              validRedirect = ["http:", "https:"].includes(
+                new URL(destination).protocol,
+              );
+            } catch {
+              validRedirect = false;
+            }
+          }
+        }
+        if (!destination || !validRedirect || !destinationKind) {
+          throw new Error(
+            `Generated export route ${route.path} has an invalid redirect target: ${destination ?? "missing"}`,
+          );
+        }
+        if (
+          destinationKind === "internal" &&
+          !knownRoutePaths.has(destination)
+        ) {
+          throw new Error(
+            `Generated export route ${route.path} has an invalid internal redirect target: ${destination}`,
+          );
+        }
+        await page.goto(`http://127.0.0.1:${address.port}${route.path}`, {
+          waitUntil: "domcontentloaded",
+          timeout: 30_000,
+        });
+        await page.waitForTimeout(250);
+        const runtimeUrl = page.url();
+        let runtimeLocation: URL;
+        try {
+          runtimeLocation = new URL(runtimeUrl);
+        } catch {
+          throw new Error(
+            `Generated export redirect route ${route.path} resolved to an unreadable runtime URL: ${runtimeUrl}`,
+          );
+        }
+        if (
+          runtimeLocation.hostname !== "127.0.0.1" ||
+          runtimeLocation.port !== String(address.port)
+        ) {
+          throw new Error(
+            `Generated export redirect route ${route.path} navigated away during local validation: ${runtimeUrl}`,
+          );
+        }
+        const observedPath = normalizeRoutePath(runtimeLocation.pathname);
+        const expectedPaths =
+          destinationKind === "internal"
+            ? new Set([
+                normalizeRoutePath(route.path),
+                normalizeRoutePath(destination),
+              ])
+            : new Set([normalizeRoutePath(route.path)]);
+        if (!expectedPaths.has(observedPath)) {
+          throw new Error(
+            `Generated export redirect route ${route.path} resolved to unexpected local path during validation: ${observedPath}`,
+          );
+        }
+        routes.push({
+          ...route,
+          routeKind: "redirect",
+          status: "passed",
+          destination,
+          destinationKind,
+          redirectTo: routeMetadata.redirectTo,
+          rootChildCount: 0,
+          renderedElementCount: 0,
+          renderedTextLength: 0,
+          screenshotColorCount: 0,
+          viewportChecks: [],
+        });
+        await input.onProgress?.({
+          detail: `Validated redirect contract for ${route.path}.`,
+          routePath: route.path,
+          completed: routeIndex + 1,
+          total: routeManifest.length,
+        });
+        continue;
+      }
       await page.goto(`http://127.0.0.1:${address.port}${route.path}`, {
         waitUntil: "domcontentloaded",
         timeout: 30_000,
       });
-      await page.waitForFunction(
-        () => {
-          const root = document.getElementById("root");
-          return (
-            (root?.childElementCount ?? 0) > 0 &&
-            !root?.querySelector('[aria-live="polite"]')
-          );
-        },
-        undefined,
-        { timeout: 10_000 },
-      );
+      await waitForRenderedRouteReady({
+        page,
+        routePath: route.path,
+        timeoutMs: routeReadyTimeoutMs,
+      });
       await page.waitForTimeout(100);
       const inspected = await page.evaluate(() => {
         const root = document.getElementById("root");
@@ -2394,6 +3123,12 @@ async function inspectBuiltProject(
       );
       rootChildCount = Math.max(rootChildCount, inspected.rootChildCount);
       routes.push({ ...route, ...inspected, screenshotColorCount, viewportChecks });
+      await input.onProgress?.({
+        detail: `Validated rendered route ${route.path}.`,
+        routePath: route.path,
+        completed: routeIndex + 1,
+        total: routeManifest.length,
+      });
     }
     return {
       rootChildCount,
@@ -2407,6 +3142,8 @@ async function inspectBuiltProject(
       ),
       consoleErrors,
       pageErrors,
+      externalRequests: [...externalRequests],
+      failedRequests,
       codeFileExecutions,
       interactionContracts,
       routes,
@@ -2456,7 +3193,16 @@ async function inspectComponentFamilyInteractions(
       variantButtons,
       initialVariantId,
     );
+    const transitionButtons = family.locator("[data-framer-transition-trigger]");
+    const transitionButtonCount = await transitionButtons.count();
+    const hasAlternateTransition = await hasAlternateTransitionTarget(
+      transitionButtons,
+      initialVariantId,
+    );
     if (targetButtonIndex < 0) {
+      if (buttonCount <= 1 && (!transitionButtonCount || !hasAlternateTransition)) {
+        continue;
+      }
       results.push({
         routePath,
         familyId,
@@ -2533,7 +3279,6 @@ async function inspectComponentFamilyInteractions(
     }
 
     let transitionTargetId: string | undefined;
-    const transitionButtons = family.locator("[data-framer-transition-trigger]");
     if ((await transitionButtons.count()) > 0) {
       const transitionButton = transitionButtons.first();
       transitionTargetId =
@@ -2577,6 +3322,75 @@ async function inspectComponentFamilyInteractions(
   }
 
   return results;
+}
+
+async function waitForRenderedRouteReady(input: {
+  page: Page;
+  routePath: string;
+  timeoutMs: number;
+}) {
+  const maxAttempts = 2;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await input.page.waitForFunction(
+        () => {
+          const root = document.getElementById("root");
+          return (
+            (root?.childElementCount ?? 0) > 0 &&
+            !root?.querySelector('[aria-live="polite"]')
+          );
+        },
+        undefined,
+        { timeout: input.timeoutMs },
+      );
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/Timeout \d+ms exceeded/i.test(message)) throw error;
+      if (attempt < maxAttempts) {
+        await input.page.reload({
+          waitUntil: "domcontentloaded",
+          timeout: 30_000,
+        });
+        continue;
+      }
+
+      let diagnostics:
+        | {
+            readyState: string;
+            rootChildCount: number;
+            ariaLivePresent: boolean;
+            ariaLiveTextLength: number;
+            renderedTextLength: number;
+          }
+        | undefined;
+      try {
+        diagnostics = await input.page.evaluate(() => {
+          const root = document.getElementById("root");
+          const ariaLive = root?.querySelector('[aria-live="polite"]');
+          return {
+            readyState: document.readyState,
+            rootChildCount: root?.childElementCount ?? 0,
+            ariaLivePresent: Boolean(ariaLive),
+            ariaLiveTextLength: ariaLive?.textContent?.trim().length ?? 0,
+            renderedTextLength: root?.textContent?.trim().length ?? 0,
+          };
+        });
+      } catch {
+        diagnostics = undefined;
+      }
+
+      throw new Error(
+        `Generated runtime validation timed out waiting for route ${input.routePath} to render after ${input.timeoutMs}ms. ` +
+          `attempt=${attempt}/${maxAttempts} url=${input.page.url()} ` +
+          `readyState=${diagnostics?.readyState ?? "unknown"} ` +
+          `rootChildCount=${diagnostics?.rootChildCount ?? "unknown"} ` +
+          `ariaLivePresent=${diagnostics?.ariaLivePresent ?? "unknown"} ` +
+          `ariaLiveTextLength=${diagnostics?.ariaLiveTextLength ?? "unknown"} ` +
+          `renderedTextLength=${diagnostics?.renderedTextLength ?? "unknown"}`,
+      );
+    }
+  }
 }
 
 async function inspectExecutableCodeFilePreviews(
@@ -2669,6 +3483,21 @@ async function findAlternateVariantButtonIndex(
   return -1;
 }
 
+async function hasAlternateTransitionTarget(
+  buttons: Locator,
+  currentVariantId: string,
+) {
+  const buttonCount = await buttons.count();
+  for (let index = 0; index < buttonCount; index += 1) {
+    const targetId =
+      (await buttons.nth(index).getAttribute("data-framer-transition-target")) ?? "";
+    if (targetId && targetId !== currentVariantId) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function countSampledScreenshotColors(buffer: Buffer) {
   const image = PNG.sync.read(buffer);
   const colors = new Set<string>();
@@ -2714,9 +3543,9 @@ async function bundleDebugArtifacts(input: {
   const sourceDir = path.join(debugDir, "source");
   const attemptsDir = path.join(debugDir, "attempts");
 
-  await mkdirp(debugDir);
-  await mkdirp(sourceDir);
-  await mkdirp(attemptsDir);
+  await fs.mkdir(debugDir, { recursive: true });
+  await fs.mkdir(sourceDir, { recursive: true });
+  await fs.mkdir(attemptsDir, { recursive: true });
 
   const sourceScreenshotPaths = await copyDirectoryIfExists(
     (await pathExists(path.join(input.workDir, "routes")))
@@ -2735,11 +3564,15 @@ async function bundleDebugArtifacts(input: {
         attemptsDir,
         `attempt-${attempt.attemptNumber}`,
       );
-      await mkdirp(targetAttemptDir);
+      await fs.mkdir(targetAttemptDir, { recursive: true });
 
       const compareDiagnostics = await copyFileIfExists(
         path.join(sourceAttemptDir, "compare-diagnostics.json"),
         path.join(targetAttemptDir, "compare-diagnostics.json"),
+      );
+      const previewCaptureError = await copyFileIfExists(
+        path.join(sourceAttemptDir, "generated-preview-capture-error.json"),
+        path.join(targetAttemptDir, "generated-preview-capture-error.json"),
       );
 
       const generatedScreenshots = (
@@ -2781,6 +3614,9 @@ async function bundleDebugArtifacts(input: {
         compareDiagnostics: compareDiagnostics
           ? relativeToExport(input.exportDir, compareDiagnostics)
           : undefined,
+        previewCaptureError: previewCaptureError
+          ? relativeToExport(input.exportDir, previewCaptureError)
+          : undefined,
         generatedScreenshots: generatedScreenshots.map((filePath) =>
           relativeToExport(input.exportDir, filePath),
         ),
@@ -2815,7 +3651,7 @@ async function copyDirectoryIfExists(sourceDir: string, targetDir: string) {
     const source = path.join(sourceDir, entry.name);
     const target = path.join(targetDir, entry.name);
     if (entry.isDirectory()) {
-      await mkdirp(target);
+      await fs.mkdir(target, { recursive: true });
       copied.push(...(await copyDirectoryIfExists(source, target)));
       continue;
     }
@@ -3284,7 +4120,7 @@ async function runAttempts(input: {
     const attemptDir = path.join(input.attemptsDir, `attempt-${attemptNumber}`);
     const projectDir = path.join(attemptDir, "project");
 
-    await mkdirp(projectDir);
+    await fs.mkdir(projectDir, { recursive: true });
 
     const generated = await generateNextProject({
       ir: workingState.ir,
@@ -3554,6 +4390,7 @@ function createReport(
   revisionRequest?: LocalExportInput["revisionRequest"],
   sourceArtifacts?: SourceArtifactsManifest,
   responsiveRecapturePlan?: ResponsiveRecapturePlan | null,
+  captureProgress?: Record<string, unknown> | null,
   codeCompatibilityReport: ReturnType<typeof analyzeCodeFilesCompatibility> = analyzeCodeFilesCompatibility(
     ir.codeFiles ?? [],
   ),
@@ -3580,6 +4417,7 @@ function createReport(
     unsupportedBehavior,
     sourceArtifacts: sourceArtifacts ?? null,
     responsiveRecapturePlan: responsiveRecapturePlan ?? null,
+    captureProgress: captureProgress ?? null,
     jobId: ir.jobId,
     exportType:
       ir.exportMode === "full-site"
@@ -3587,6 +4425,27 @@ function createReport(
         : ir.libraryComponents
           ? "component-library"
           : "component",
+    exportStrategy:
+      ir.exportMode === "full-site"
+        ? "runtime-kept-full-site"
+        : "reconstructed-react",
+    runtimeKept: ir.exportMode === "full-site",
+    intendedEditor:
+      ir.exportMode === "full-site" ? "agent-first" : "human-or-agent",
+    handoffArtifacts: {
+      readme: "README.md",
+      agentBrief: "AGENT_BRIEF.md",
+      routeManifest: "route-manifest.json",
+      routeTemplateManifest: "route-template-manifest.json",
+      assetManifest: "asset-manifest.json",
+      runtimeLocalizationReport: "runtime-localization-report.json",
+      runtimeStrategyManifest: "runtime-strategy-manifest.json",
+      agentHandoffManifest: "agent-handoff-manifest.json",
+      cmsManifest: "framer-cms-collections.json",
+      codeFilesManifest: "framer-code-files.json",
+      fontsManifest: "framer-fonts.json",
+      rawRuntimeCapture: "raw-runtime-capture.json",
+    },
     sourceUrl: ir.sourceUrl,
     captureMode: ir.captureMode ?? "plugin-only",
     exportEngine: ir.exportEngine ?? "plugin-approximation",
@@ -3748,6 +4607,7 @@ function createReport(
       stylesheetCount: ir.runtimeCapture.captureDiagnostics?.stylesheetCount,
       nodeCount: ir.runtimeCapture.captureDiagnostics?.nodeCount,
       fontsReady: ir.runtimeCapture.captureDiagnostics?.fontReadiness,
+      routeProgress: ir.runtimeCapture.captureDiagnostics?.routeProgress ?? [],
       routes: (ir.runtimeCapture.routeCaptures ?? []).map((capture) => ({
         path: capture.routePath,
         url: capture.url,
@@ -3758,6 +4618,12 @@ function createReport(
         viewportValidation: capture.captureDiagnostics?.viewportValidation,
         captureProvenance:
           revisionRequest?.kind === "improvement" ? "mixed" : "fresh",
+        phaseHistory: capture.captureDiagnostics?.phaseHistory ?? [],
+        routeProgress: capture.captureDiagnostics?.routeProgress?.[0] ?? null,
+        evidenceClasses:
+          capture.captureDiagnostics?.routeProgress?.[0]?.evidenceClasses ?? [],
+        warningCount:
+          capture.captureDiagnostics?.routeProgress?.[0]?.warningCount ?? 0,
       })),
     },
     previewValidation: bestAttempt.previewValidation,
@@ -3771,9 +4637,9 @@ function createReport(
       flaggedLowConfidence: (section.confidence ?? 0) < 0.5,
     })),
     assets: {
-      downloaded: 0,
+      downloaded: validation.runtimeLocalization?.downloaded ?? 0,
       linked: ir.assets.length,
-      failed: 0,
+      failed: validation.runtimeLocalization?.failed ?? 0,
     },
     patchHistoryPath: "patch-history.json",
     warnings: bestAttempt.warnings,
@@ -3988,6 +4854,7 @@ function createRevisionManifest(
   input: {
     sourceFingerprint: string;
     pluginFingerprint: string;
+    status?: ExportRevisionRecord["status"];
     revisionRequest?: LocalExportInput["revisionRequest"];
     sourceEvidence?: SourceEvidenceSummary | null;
     sourceArtifacts?: SourceArtifactsManifest | null;
@@ -4016,7 +4883,11 @@ function createRevisionManifest(
       routePath: page.routePath,
       templateId: page.templateId,
       templatePath: page.templatePath,
+      routeKind: page.routeKind,
+      template: page.template,
       templateKind: page.templateKind,
+      destination: page.destination ?? page.redirectTo,
+      destinationKind: page.destinationKind,
       sourceTextLength: page.sourceTextLength ?? 0,
     })),
     componentModuleCount: ir.componentModules?.length ?? 0,
@@ -4053,7 +4924,7 @@ function createRevisionManifest(
     schemaVersion: REVISION_MANIFEST_SCHEMA_VERSION,
     sourceFingerprint: input.sourceFingerprint,
     pluginFingerprint: input.pluginFingerprint,
-    status: "completed",
+    status: input.status ?? "completed",
     parentRevisionId: input.revisionRequest?.parentRevisionId ?? null,
     revisionRequest: input.revisionRequest ?? null,
     summary,
@@ -4399,7 +5270,11 @@ function createStableRevisionSummary(ir: ExportIR) {
       routePath: page.routePath,
       templateId: page.templateId,
       templatePath: page.templatePath,
+      routeKind: page.routeKind,
+      template: page.template,
       templateKind: page.templateKind,
+      destination: page.destination ?? page.redirectTo,
+      destinationKind: page.destinationKind,
       sourceTextLength: page.sourceTextLength ?? 0,
     })),
     componentModuleCount: ir.componentModules?.length ?? 0,
@@ -4555,7 +5430,11 @@ function createLegacyStableRevisionSummary(input: {
       routePath: page.routePath,
       templateId: page.templateId,
       templatePath: page.templatePath,
+      routeKind: page.routeKind,
+      template: page.template,
       templateKind: page.templateKind,
+      destination: page.destination ?? page.redirectTo,
+      destinationKind: page.destinationKind,
       sourceTextLength:
         typeof page.sourceTextLength === "number" ? page.sourceTextLength : 0,
     })),
@@ -4677,7 +5556,7 @@ async function tryReuseParentRevisionForValidation(input: {
   const revisionCacheDir = path.join(input.sharedRevisionCacheRoot, revisionId);
   const cachedRevision = await readCachedRevision(revisionCacheDir);
   if (cachedRevision) {
-    await copy(cachedRevision.exportDir, input.exportDir);
+    await fs.cp(cachedRevision.exportDir, input.exportDir, { recursive: true });
     await writeJsonFile(
       path.join(input.exportDir, "resolved-request.json"),
       createResolvedRequestArtifact({
@@ -4698,14 +5577,35 @@ async function tryReuseParentRevisionForValidation(input: {
     });
   }
 
-  await copy(parentRevision.exportDir, input.exportDir);
+  await fs.cp(parentRevision.exportDir, input.exportDir, { recursive: true });
   await updateRevisionStatusFile({
     exportDir: input.exportDir,
     revisionId,
     stage: "validating",
     detail: "Revalidating copied parent revision output.",
   });
-  const validation = await validateGeneratedProject(input.exportDir);
+  const runtimeLocalization =
+    input.localExportInput.exportMode === "full-site"
+      ? await localizeRuntimeKeptProjectAssets(input.exportDir)
+      : undefined;
+  const validation = await validateGeneratedProject(input.exportDir, {
+    exportMode: input.localExportInput.exportMode,
+    runtimeLocalization,
+    onProgress: async (progress) => {
+      await updateRevisionStatusFile({
+        exportDir: input.exportDir,
+        revisionId,
+        stage: "validating",
+        detail: progress.detail,
+        progress: {
+          completed: progress.completed,
+          total: progress.total,
+          routePath: progress.routePath,
+          failed: progress.failed,
+        },
+      });
+    },
+  });
   const parentReportPath = path.join(parentRevision.exportDir, "export-report.json");
   const parentReport = await readJsonFile<Record<string, unknown>>(parentReportPath);
   const now = new Date().toISOString();
@@ -4748,16 +5648,7 @@ async function tryReuseParentRevisionForValidation(input: {
     }),
   );
 
-  await mkdirp(revisionCacheDir);
-  await copy(input.exportDir, path.join(revisionCacheDir, "export"));
-  await updateRevisionStatusFile({
-    exportDir: input.exportDir,
-    revisionId,
-    stage: "completed",
-    detail: "Revalidate-only revision completed successfully.",
-  });
-
-  return finalizeCachedRevisionResult({
+  const result = await finalizeCachedRevisionResult({
     exportDir: input.exportDir,
     runDir: input.runDir,
     cachedRevision: {
@@ -4767,6 +5658,17 @@ async function tryReuseParentRevisionForValidation(input: {
     },
     revisionCacheHit: false,
   });
+  await fs.mkdir(revisionCacheDir, { recursive: true });
+  await fs.cp(input.exportDir, path.join(revisionCacheDir, "export"), {
+    recursive: true,
+  });
+  await updateRevisionStatusFile({
+    exportDir: input.exportDir,
+    revisionId,
+    stage: "completed",
+    detail: "Revalidate-only revision completed successfully.",
+  });
+  return result;
 }
 
 async function tryReuseParentRevisionForUnchangedComponentSource(input: {
@@ -4811,14 +5713,35 @@ async function tryReuseParentRevisionForUnchangedComponentSource(input: {
     return null;
   }
 
-  await copy(parentRevision.exportDir, input.exportDir);
+  await fs.cp(parentRevision.exportDir, input.exportDir, { recursive: true });
   await updateRevisionStatusFile({
     exportDir: input.exportDir,
     revisionId: input.revisionId,
     stage: "validating",
     detail: "Validating reused parent export for unchanged component source.",
   });
-  const validation = await validateGeneratedProject(input.exportDir);
+  const runtimeLocalization =
+    input.localExportInput.exportMode === "full-site"
+      ? await localizeRuntimeKeptProjectAssets(input.exportDir)
+      : undefined;
+  const validation = await validateGeneratedProject(input.exportDir, {
+    exportMode: input.localExportInput.exportMode,
+    runtimeLocalization,
+    onProgress: async (progress) => {
+      await updateRevisionStatusFile({
+        exportDir: input.exportDir,
+        revisionId: input.revisionId,
+        stage: "validating",
+        detail: progress.detail,
+        progress: {
+          completed: progress.completed,
+          total: progress.total,
+          routePath: progress.routePath,
+          failed: progress.failed,
+        },
+      });
+    },
+  });
   const parentManifest = await readJsonFile<Record<string, unknown>>(
     path.join(parentRevision.exportDir, "revision-manifest.json"),
   );
@@ -4916,16 +5839,7 @@ async function tryReuseParentRevisionForUnchangedComponentSource(input: {
     input.sharedRevisionCacheRoot,
     input.revisionId,
   );
-  await mkdirp(revisionCacheDir);
-  await copy(input.exportDir, path.join(revisionCacheDir, "export"));
-  await updateRevisionStatusFile({
-    exportDir: input.exportDir,
-    revisionId: input.revisionId,
-    stage: "completed",
-    detail: "Unchanged component-source revision completed successfully.",
-  });
-
-  return finalizeCachedRevisionResult({
+  const result = await finalizeCachedRevisionResult({
     exportDir: input.exportDir,
     runDir: input.runDir,
     cachedRevision: {
@@ -4935,6 +5849,17 @@ async function tryReuseParentRevisionForUnchangedComponentSource(input: {
     },
     revisionCacheHit: false,
   });
+  await fs.mkdir(revisionCacheDir, { recursive: true });
+  await fs.cp(input.exportDir, path.join(revisionCacheDir, "export"), {
+    recursive: true,
+  });
+  await updateRevisionStatusFile({
+    exportDir: input.exportDir,
+    revisionId: input.revisionId,
+    stage: "completed",
+    detail: "Unchanged component-source revision completed successfully.",
+  });
+  return result;
 }
 
 async function readCachedRevision(revisionCacheDir: string): Promise<{
@@ -5155,6 +6080,64 @@ async function writeJsonFile(filePath: string, value: unknown) {
   await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+async function persistPackagedArchiveVerification(input: {
+  exportDir: string;
+  packagedArchive: NonNullable<GeneratedProjectValidation["packagedArchive"]>;
+}) {
+  const generatedValidationPath = path.join(
+    input.exportDir,
+    "generated-validation.json",
+  );
+  const generatedValidation =
+    await readJsonFile<GeneratedProjectValidation>(generatedValidationPath);
+  if (generatedValidation) {
+    await writeJsonFile(generatedValidationPath, {
+      ...generatedValidation,
+      packagedArchive: input.packagedArchive,
+    });
+  }
+
+  const exportReportPath = path.join(input.exportDir, "export-report.json");
+  const exportReport =
+    await readJsonFile<Record<string, unknown>>(exportReportPath);
+  if (exportReport) {
+    const generatedValidationRecord =
+      exportReport.generatedValidation &&
+      typeof exportReport.generatedValidation === "object"
+        ? (exportReport.generatedValidation as Record<string, unknown>)
+        : null;
+    await writeJsonFile(exportReportPath, {
+      ...exportReport,
+      generatedValidation: generatedValidationRecord
+        ? {
+            ...generatedValidationRecord,
+            packagedArchive: input.packagedArchive,
+          }
+        : exportReport.generatedValidation,
+    });
+  }
+
+  const revisionManifestPath = path.join(input.exportDir, "revision-manifest.json");
+  const revisionManifest =
+    await readJsonFile<Record<string, unknown>>(revisionManifestPath);
+  if (revisionManifest) {
+    const generatedValidationRecord =
+      revisionManifest.generatedValidation &&
+      typeof revisionManifest.generatedValidation === "object"
+        ? (revisionManifest.generatedValidation as Record<string, unknown>)
+        : null;
+    await writeJsonFile(revisionManifestPath, {
+      ...revisionManifest,
+      generatedValidation: generatedValidationRecord
+        ? {
+            ...generatedValidationRecord,
+            packagedArchive: input.packagedArchive,
+          }
+        : revisionManifest.generatedValidation,
+    });
+  }
+}
+
 async function finalizeCachedRevisionResult(input: {
   exportDir: string;
   runDir: string;
@@ -5188,8 +6171,59 @@ async function finalizeCachedRevisionResult(input: {
     typeof (manifest.summary as Record<string, unknown>).componentName === "string"
       ? ((manifest.summary as Record<string, unknown>).componentName as string)
       : "CodeRelayExport";
+  const revisionId =
+    typeof manifest.revisionId === "string" ? manifest.revisionId : undefined;
   const zipPath = path.join(input.runDir, `${componentName}.zip`);
-  await zipDirectory(input.exportDir, zipPath);
+  let packagedArchive: NonNullable<GeneratedProjectValidation["packagedArchive"]>;
+  try {
+    if (revisionId) {
+      await updateRevisionStatusFile({
+        exportDir: input.exportDir,
+        revisionId,
+        stage: "validating",
+        detail: "Packaging cached revision export into a ZIP archive.",
+      });
+    }
+    await zipDirectory(input.exportDir, zipPath);
+    packagedArchive = await verifyPackagedExportArchive(zipPath, {
+      exportMode:
+        typeof manifest.summary === "object" &&
+        manifest.summary &&
+        typeof (manifest.summary as Record<string, unknown>).exportMode === "string"
+          ? ((manifest.summary as Record<string, unknown>).exportMode as ExportMode)
+          : undefined,
+      onProgress: revisionId
+        ? async (progress) => {
+            await updateRevisionStatusFile({
+              exportDir: input.exportDir,
+              revisionId,
+              stage: "validating",
+              detail: progress.detail,
+              progress: {
+                completed: progress.completed,
+                total: progress.total,
+                routePath: progress.routePath,
+                failed: progress.failed,
+              },
+            });
+          }
+        : undefined,
+    });
+  } catch (error) {
+    if (revisionId) {
+      await updateRevisionStatusFile({
+        exportDir: input.exportDir,
+        revisionId,
+        stage: "failed",
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    }
+    throw error;
+  }
+  await persistPackagedArchiveVerification({
+    exportDir: input.exportDir,
+    packagedArchive,
+  });
   const responsivePlanPath = path.join(
     input.exportDir,
     "responsive-recapture-plan.json",
@@ -5206,6 +6240,11 @@ async function finalizeCachedRevisionResult(input: {
       : undefined,
     statusPath: (await fileExists(path.join(input.exportDir, "status.json")))
       ? path.join(input.exportDir, "status.json")
+      : undefined,
+    captureProgressPath: (await fileExists(
+      path.join(input.exportDir, "capture-progress.json"),
+    ))
+      ? path.join(input.exportDir, "capture-progress.json")
       : undefined,
     capabilityReportPath: (await fileExists(
       path.join(input.exportDir, "capability-report.json"),
@@ -5226,7 +6265,10 @@ async function finalizeCachedRevisionResult(input: {
       ? path.join(input.exportDir, "parent.json")
       : undefined,
     bestAttempt: input.cachedRevision.bestAttempt,
-    validation: input.cachedRevision.validation,
+    validation: {
+      ...input.cachedRevision.validation,
+      packagedArchive,
+    },
     revisionManifestPath: path.join(input.exportDir, "revision-manifest.json"),
     invalidationPlanPath: path.join(input.exportDir, "invalidation-plan.json"),
     artifactIndexPath: path.join(input.exportDir, "artifact-index.json"),
@@ -5245,7 +6287,15 @@ async function createArtifactIndex(
     revisionId?: string;
   },
 ): Promise<ArtifactIndex> {
-  const files = await listFiles(exportDir);
+  const files = (await listFiles(exportDir)).filter(
+    (filePath) => {
+      const relativePath = relativeToExport(exportDir, filePath);
+      return (
+        relativePath !== "status.json" &&
+        relativePath !== "artifact-index.json"
+      );
+    },
+  );
   const draftEntries = await Promise.all(
     files.map(async (filePath) => {
       const relativePath = relativeToExport(exportDir, filePath);
@@ -5334,6 +6384,8 @@ function inferArtifactType(filePath: string) {
   const relativePath = filePath.replace(/\\/g, "/");
   if (relativePath.endsWith("revision-manifest.json")) return "revision-manifest";
   if (relativePath.endsWith("status.json")) return "revision-status";
+  if (relativePath.endsWith("capture-progress.json")) return "capture-progress";
+  if (relativePath.endsWith("resolved-request.json")) return "resolved-request";
   if (relativePath.endsWith("parent.json")) return "parent-link";
   if (relativePath.endsWith("invalidation-plan.json")) return "invalidation-plan";
   if (relativePath.endsWith("artifact-index.json")) return "artifact-index";
@@ -5377,6 +6429,8 @@ function inferArtifactId(
   if (relativePath === "export-report.json") return "report/export";
   if (relativePath === "revision-manifest.json") return "manifest/revision";
   if (relativePath === "status.json") return "manifest/status";
+  if (relativePath === "capture-progress.json") return "manifest/capture-progress";
+  if (relativePath === "resolved-request.json") return "request/resolved";
   if (relativePath === "parent.json") return "manifest/parent";
   if (relativePath === "invalidation-plan.json") return "manifest/invalidation";
   if (relativePath === "artifact-index.json") return "manifest/artifact-index";
@@ -5511,6 +6565,8 @@ function inferArtifactDependencies(
     return ["ir/normalized", "validation/generated", "manifest/source-artifacts"];
   }
   if (artifactId === "manifest/status") return [];
+  if (artifactId === "manifest/capture-progress") return ["runtime/raw-capture"];
+  if (artifactId === "request/resolved") return ["plugin/raw-payload"];
   if (artifactId === "manifest/parent") return ["manifest/revision"];
   if (artifactId === "manifest/invalidation") return ["manifest/revision"];
   if (artifactId === "manifest/artifact-index") return ["manifest/revision"];
@@ -5717,7 +6773,7 @@ async function writeSourceArtifacts(
 ): Promise<SourceArtifactsManifest> {
   const rootDir = path.join(exportDir, "source-artifacts");
   const codeFilesDir = path.join(rootDir, "code-files");
-  await mkdirp(codeFilesDir);
+  await fs.mkdir(codeFilesDir, { recursive: true });
 
   let componentFamiliesPath: string | undefined;
   let componentFamiliesArtifactId: string | undefined;
@@ -5826,7 +6882,7 @@ async function writeLegacySourceArtifacts(input: {
 }): Promise<SourceArtifactsManifest> {
   const rootDir = path.join(input.exportDir, "source-artifacts");
   const codeFilesDir = path.join(rootDir, "code-files");
-  await mkdirp(codeFilesDir);
+  await fs.mkdir(codeFilesDir, { recursive: true });
 
   const normalizedCodeFiles = Array.isArray(input.normalizedIr.codeFiles)
     ? (input.normalizedIr.codeFiles as Array<Record<string, unknown>>)
@@ -6136,7 +7192,7 @@ async function writeUnadaptedCodeFileArtifacts(
 ) {
   if (artifacts.length === 0) return;
   const dir = path.join(exportDir, "unadapted-components");
-  await mkdirp(dir);
+  await fs.mkdir(dir, { recursive: true });
 
   for (const artifact of artifacts) {
     const file =
@@ -6161,7 +7217,7 @@ async function writeUnadaptedCodeFileArtifacts(
 
     if (!artifact.sourcePath || !file?.content) continue;
     const sourceTarget = path.join(exportDir, artifact.sourcePath);
-    await mkdirp(path.dirname(sourceTarget));
+    await fs.mkdir(path.dirname(sourceTarget), { recursive: true });
     await writeFile(sourceTarget, file.content.endsWith("\n") ? file.content : `${file.content}\n`);
   }
 }
@@ -6332,6 +7388,7 @@ function readComparableFidelityMetric(
 }
 
 function createReadme(ir: ExportIR, bestAttempt: ExportAttemptResult) {
+  const isRuntimeKeptFullSite = ir.exportMode === "full-site";
   return `# ${ir.componentName}
 
 Generated by Coderelay from:
@@ -6346,6 +7403,12 @@ npm run dev
 \`\`\`
 
 This export is a Vite + React + TypeScript project using CSS Modules and Framer Motion.
+
+${
+  isRuntimeKeptFullSite
+    ? "For full-site exports, Coderelay now treats the generated project as a runtime-kept, agent-first handoff. Preserve fidelity first; simplify only when validation still passes."
+    : "This export favors reconstructed React that a human or agent can refine."
+}
 
 ## Important files
 
@@ -6363,6 +7426,9 @@ This export is a Vite + React + TypeScript project using CSS Modules and Framer 
 - \`framer-tree.json\`
 - \`export-tree.json\`
 - \`asset-manifest.json\`
+- \`runtime-localization-report.json\`
+- \`runtime-strategy-manifest.json\`
+- \`agent-handoff-manifest.json\`
 - \`patch-history.json\`
 - \`export-report.json\`
 - \`debug/manifest.json\`
@@ -6384,11 +7450,12 @@ This export is a Vite + React + TypeScript project using CSS Modules and Framer 
 - Framer tree nodes: ${ir.framerTree?.length ?? 0}
 - Export tree nodes: ${ir.exportTreeDiagnostics?.totalNodes ?? 0}
 
-Review \`export-report.json\` before editing.
+Review \`export-report.json\` before editing. For full-site exports, also read \`runtime-strategy-manifest.json\`, \`agent-handoff-manifest.json\`, and \`runtime-localization-report.json\`.
 `;
 }
 
 function createAgentBrief(ir: ExportIR, bestAttempt: ExportAttemptResult) {
+  const isRuntimeKeptFullSite = ir.exportMode === "full-site";
   return `# Agent Brief
 
 This code was exported from a Framer design. Preserve visual fidelity unless instructed otherwise.
@@ -6407,6 +7474,9 @@ This code was exported from a Framer design. Preserve visual fidelity unless ins
 - Framer tree manifest: \`framer-tree.json\`
 - Merged export tree manifest: \`export-tree.json\`
 - Asset manifest: \`asset-manifest.json\`
+- Runtime localization report: \`runtime-localization-report.json\`
+- Runtime strategy manifest: \`runtime-strategy-manifest.json\`
+- Agent handoff manifest: \`agent-handoff-manifest.json\`
 - Patch history: \`patch-history.json\`
 - Debug artifact manifest: \`debug/manifest.json\`
 - Shared preview styles: \`src/styles.css\`
@@ -6417,7 +7487,11 @@ This code was exported from a Framer design. Preserve visual fidelity unless ins
 - Start by reading \`export-report.json\`.
 - Keep spacing, typography, and responsive behavior close to the original.
 - Reconnect forms, analytics, custom embeds, and advanced motion manually if needed.
-- This MVP-A export links remote assets instead of bundling them.
+- ${
+    isRuntimeKeptFullSite
+      ? "This full-site export is runtime-kept and optimized for agent follow-on work. Treat route completeness and behavior parity as the top constraints."
+      : "This reconstructed export is intended to be refined as regular React code."
+  }
 - Capture mode: \`${ir.captureMode ?? "plugin-only"}\`.
 - Export engine: \`${ir.exportEngine ?? "plugin-approximation"}\`.
 - Component modules detected: ${ir.componentModules?.length ?? 0}.
@@ -6427,6 +7501,7 @@ This code was exported from a Framer design. Preserve visual fidelity unless ins
 - Tree nodes preserved: ${ir.framerTree?.length ?? 0}.
 - Merged export tree nodes: ${ir.exportTreeDiagnostics?.totalNodes ?? 0}.
 - Best attempt was ${bestAttempt.attemptNumber} using \`${bestAttempt.strategy}\`.
+- Intended editor: \`${isRuntimeKeptFullSite ? "agent-first" : "human-or-agent"}\`.
 `;
 }
 

@@ -1,0 +1,32 @@
+{
+  "bestAttempt": 1,
+  "sourceScreenshots": [
+    "debug/source/home/route-progress.json"
+  ],
+  "attempts": [
+    {
+      "attempt": 1,
+      "dir": "debug/attempts/attempt-1",
+      "compareDiagnostics": "debug/attempts/attempt-1/compare-diagnostics.json",
+      "generatedScreenshots": [
+        "debug/attempts/attempt-1/generated-desktop.png",
+        "debug/attempts/attempt-1/generated-laptop.png",
+        "debug/attempts/attempt-1/generated-tablet.png",
+        "debug/attempts/attempt-1/generated-mobile.png"
+      ],
+      "summary": "debug/attempts/attempt-1/summary.json"
+    },
+    {
+      "attempt": 2,
+      "dir": "debug/attempts/attempt-2",
+      "compareDiagnostics": "debug/attempts/attempt-2/compare-diagnostics.json",
+      "generatedScreenshots": [
+        "debug/attempts/attempt-2/generated-desktop.png",
+        "debug/attempts/attempt-2/generated-laptop.png",
+        "debug/attempts/attempt-2/generated-tablet.png",
+        "debug/attempts/attempt-2/generated-mobile.png"
+      ],
+      "summary": "debug/attempts/attempt-2/summary.json"
+    }
+  ]
+}

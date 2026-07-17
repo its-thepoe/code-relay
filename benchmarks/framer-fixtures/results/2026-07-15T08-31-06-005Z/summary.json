@@ -1,0 +1,232 @@
+{
+  "manifest": {
+    "name": "framer-published-url-benchmark-suite",
+    "description": "Published Framer URLs used to compare export fidelity, route coverage, asset completeness, editability, and report quality across exporters.",
+    "fixtures": [
+      {
+        "id": "cohesion-home",
+        "label": "Cohesion home",
+        "url": "https://cohesion.framer.ai/",
+        "surface": "portfolio"
+      },
+      {
+        "id": "artifact-home",
+        "label": "Artifact home",
+        "url": "https://artifact.framer.ai/",
+        "surface": "portfolio"
+      },
+      {
+        "id": "senri-portfolio",
+        "label": "Senri portfolio",
+        "url": "https://td-senrifolio.framer.ai/",
+        "surface": "portfolio"
+      },
+      {
+        "id": "jingbo-home",
+        "label": "Jingbo home",
+        "url": "https://jingbo.framer.ai/",
+        "surface": "portfolio"
+      },
+      {
+        "id": "portx-home",
+        "label": "Portx home",
+        "url": "https://portx.framer.ai/",
+        "surface": "portfolio"
+      },
+      {
+        "id": "mouse-terms",
+        "label": "Mouse terms",
+        "url": "https://mouse.framer.ai/terms-and-conditions",
+        "surface": "legal"
+      },
+      {
+        "id": "priyanka-portfolio",
+        "label": "Priyanka portfolio",
+        "url": "https://priyanka-portfolio-181.framer.ai/",
+        "surface": "portfolio"
+      },
+      {
+        "id": "quang-portfolio",
+        "label": "Quang portfolio",
+        "url": "https://quangnguyenportfolio.framer.ai/",
+        "surface": "portfolio"
+      },
+      {
+        "id": "simran-portfolio",
+        "label": "Simran portfolio",
+        "url": "https://simranpandit.framer.ai/",
+        "surface": "portfolio"
+      },
+      {
+        "id": "simplefolio-home",
+        "label": "SimpleFolio home",
+        "url": "https://simplefolio.framer.ai/",
+        "surface": "portfolio"
+      },
+      {
+        "id": "kernel-venue",
+        "label": "Kernel venue",
+        "url": "https://kernel.framer.ai/venue",
+        "surface": "event"
+      },
+      {
+        "id": "conflux-speaker",
+        "label": "Conflux speaker",
+        "url": "https://conflux.framer.ai/speaker/jacob-jones",
+        "surface": "event"
+      },
+      {
+        "id": "picasso-home",
+        "label": "Picasso home",
+        "url": "https://picasso.framer.ai/",
+        "surface": "portfolio"
+      },
+      {
+        "id": "mona-fun",
+        "label": "Mona fun page",
+        "url": "https://monaellis.framer.ai/fun",
+        "surface": "portfolio"
+      },
+      {
+        "id": "allaboutframer-blog",
+        "label": "All About Framer blog",
+        "url": "https://allaboutframer.framer.ai/step-by-step-guide-to-customize-a-framer-template",
+        "surface": "article"
+      },
+      {
+        "id": "leoblog-article",
+        "label": "LeoBlog article",
+        "url": "https://leoblog.framer.ai/blog/mastering-high-fashion-on-a-budget",
+        "surface": "article"
+      },
+      {
+        "id": "freetemplate-home",
+        "label": "Free template home",
+        "url": "https://freetemplate.framer.ai/",
+        "surface": "template"
+      },
+      {
+        "id": "framy-home",
+        "label": "Framy home",
+        "url": "https://framy.framer.ai/",
+        "surface": "template"
+      }
+    ]
+  },
+  "runs": [
+    {
+      "tool": "coderelay",
+      "fixture": "cohesion-home",
+      "url": "https://cohesion.framer.ai/",
+      "outputDir": "/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/benchmarks/framer-fixtures/results/2026-07-15T08-31-06-005Z/cohesion-home/coderelay/2026-07-15T08-31-23-860Z/export",
+      "appDir": "/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/benchmarks/framer-fixtures/results/2026-07-15T08-31-06-005Z/cohesion-home/coderelay/2026-07-15T08-31-23-860Z/export",
+      "previewPath": "/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/benchmarks/framer-fixtures/results/2026-07-15T08-31-06-005Z/cohesion-home/coderelay/2026-07-15T08-31-23-860Z/export/preview.html",
+      "routeCount": 1,
+      "editableSourceFiles": 25,
+      "assetFiles": 42,
+      "reportFiles": 14,
+      "reportQuality": "rich",
+      "fidelityEvidence": "screenshot-backed",
+      "screenshotDiffPct": {
+        "desktop": 2.91,
+        "laptop": 2.49,
+        "tablet": 1.3,
+        "mobile": 2.93
+      },
+      "status": "passed"
+    },
+    {
+      "tool": "ditto",
+      "fixture": "cohesion-home",
+      "url": "https://cohesion.framer.ai/",
+      "outputDir": "",
+      "appDir": "",
+      "previewPath": "",
+      "routeCount": 0,
+      "editableSourceFiles": 0,
+      "assetFiles": 0,
+      "reportFiles": 0,
+      "reportQuality": "failed",
+      "fidelityEvidence": "failed",
+      "screenshotDiffPct": {},
+      "status": "failed",
+      "error": "spawn npm ENOENT"
+    },
+    {
+      "tool": "coderelay",
+      "fixture": "artifact-home",
+      "url": "https://artifact.framer.ai/",
+      "outputDir": "/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/benchmarks/framer-fixtures/results/2026-07-15T08-31-06-005Z/artifact-home/coderelay/2026-07-15T08-35-34-854Z/export",
+      "appDir": "/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/benchmarks/framer-fixtures/results/2026-07-15T08-31-06-005Z/artifact-home/coderelay/2026-07-15T08-35-34-854Z/export",
+      "previewPath": "/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/benchmarks/framer-fixtures/results/2026-07-15T08-31-06-005Z/artifact-home/coderelay/2026-07-15T08-35-34-854Z/export/preview.html",
+      "routeCount": 1,
+      "editableSourceFiles": 25,
+      "assetFiles": 26,
+      "reportFiles": 14,
+      "reportQuality": "rich",
+      "fidelityEvidence": "screenshot-backed",
+      "screenshotDiffPct": {
+        "desktop": 6.52,
+        "laptop": 11.33,
+        "tablet": 0.63,
+        "mobile": 22.42
+      },
+      "status": "passed"
+    },
+    {
+      "tool": "ditto",
+      "fixture": "artifact-home",
+      "url": "https://artifact.framer.ai/",
+      "outputDir": "",
+      "appDir": "",
+      "previewPath": "",
+      "routeCount": 0,
+      "editableSourceFiles": 0,
+      "assetFiles": 0,
+      "reportFiles": 0,
+      "reportQuality": "failed",
+      "fidelityEvidence": "failed",
+      "screenshotDiffPct": {},
+      "status": "failed",
+      "error": "spawn npm ENOENT"
+    },
+    {
+      "tool": "coderelay",
+      "fixture": "senri-portfolio",
+      "url": "https://td-senrifolio.framer.ai/",
+      "outputDir": "/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/benchmarks/framer-fixtures/results/2026-07-15T08-31-06-005Z/senri-portfolio/coderelay/2026-07-15T08-38-16-984Z/export",
+      "appDir": "/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/benchmarks/framer-fixtures/results/2026-07-15T08-31-06-005Z/senri-portfolio/coderelay/2026-07-15T08-38-16-984Z/export",
+      "previewPath": "/Users/MAC/Desktop/Desktop - Poe's MacBook Pro/Engineering/Builds/code-relay/benchmarks/framer-fixtures/results/2026-07-15T08-31-06-005Z/senri-portfolio/coderelay/2026-07-15T08-38-16-984Z/export/preview.html",
+      "routeCount": 1,
+      "editableSourceFiles": 25,
+      "assetFiles": 31,
+      "reportFiles": 14,
+      "reportQuality": "rich",
+      "fidelityEvidence": "screenshot-backed",
+      "screenshotDiffPct": {
+        "desktop": 28.58,
+        "laptop": 21.45,
+        "tablet": 21.32,
+        "mobile": 21.48
+      },
+      "status": "passed"
+    },
+    {
+      "tool": "ditto",
+      "fixture": "senri-portfolio",
+      "url": "https://td-senrifolio.framer.ai/",
+      "outputDir": "",
+      "appDir": "",
+      "previewPath": "",
+      "routeCount": 0,
+      "editableSourceFiles": 0,
+      "assetFiles": 0,
+      "reportFiles": 0,
+      "reportQuality": "failed",
+      "fidelityEvidence": "failed",
+      "screenshotDiffPct": {},
+      "status": "failed",
+      "error": "spawn npm ENOENT"
+    }
+  ]
+}

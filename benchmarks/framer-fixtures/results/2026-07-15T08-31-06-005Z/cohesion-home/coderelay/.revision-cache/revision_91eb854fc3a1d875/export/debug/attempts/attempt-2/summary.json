@@ -1,0 +1,127 @@
+{
+  "attempt": 2,
+  "strategy": "semantic-layout+structured",
+  "overall": 84.66,
+  "fidelity": {
+    "desktop": 94.45,
+    "laptop": 93.77,
+    "tablet": 96.74,
+    "mobile": 93.39,
+    "overall": 84.66,
+    "layout": 98.53,
+    "typography": 86.79,
+    "color": 100,
+    "assets": 100,
+    "motion": 100,
+    "nodeMatch": 0,
+    "breakpointScores": {
+      "desktop": 94.45,
+      "laptop": 93.77,
+      "tablet": 96.74,
+      "mobile": 93.39
+    }
+  },
+  "warningCount": 2,
+  "previewValidation": {
+    "status": "validated",
+    "summary": {
+      "viewportsValidated": 4,
+      "inspectedNodes": 480,
+      "foundNodes": 480,
+      "nodesWithNonDefaultStyles": 480,
+      "nodesExpectingMotion": 4,
+      "nodesWithNonDefaultMotion": 0
+    },
+    "byViewport": {
+      "desktop": {
+        "viewport": "desktop",
+        "inspectedNodes": 120,
+        "foundNodes": 120,
+        "nodesWithNonDefaultStyles": 120,
+        "nodesExpectingMotion": 1,
+        "nodesWithNonDefaultMotion": 0
+      },
+      "laptop": {
+        "viewport": "laptop",
+        "inspectedNodes": 120,
+        "foundNodes": 120,
+        "nodesWithNonDefaultStyles": 120,
+        "nodesExpectingMotion": 1,
+        "nodesWithNonDefaultMotion": 0
+      },
+      "tablet": {
+        "viewport": "tablet",
+        "inspectedNodes": 120,
+        "foundNodes": 120,
+        "nodesWithNonDefaultStyles": 120,
+        "nodesExpectingMotion": 1,
+        "nodesWithNonDefaultMotion": 0
+      },
+      "mobile": {
+        "viewport": "mobile",
+        "inspectedNodes": 120,
+        "foundNodes": 120,
+        "nodesWithNonDefaultStyles": 120,
+        "nodesExpectingMotion": 1,
+        "nodesWithNonDefaultMotion": 0
+      }
+    }
+  },
+  "diagnosis": [
+    "Node-match confidence stayed low, so the next pass should preserve more wrapper surfaces and runtime style evidence.",
+    "Typography fidelity fell below target, so the next pass should promote runtime font metrics into the export tree.",
+    "Rendered preview validation found nodes that should preserve motion but no non-default motion was applied, so the next pass should preserve runtime motion styles.",
+    "Overall fidelity stayed below target, so the next pass should reinforce runtime styles across the export tree."
+  ],
+  "diagnosisDetails": [
+    {
+      "category": "low_node_match",
+      "message": "Node-match confidence stayed low, so the next pass should preserve more wrapper surfaces and runtime style evidence."
+    },
+    {
+      "category": "typography_mismatch",
+      "message": "Typography fidelity fell below target, so the next pass should promote runtime font metrics into the export tree."
+    },
+    {
+      "category": "motion_mismatch",
+      "message": "Rendered preview validation found nodes that should preserve motion but no non-default motion was applied, so the next pass should preserve runtime motion styles."
+    },
+    {
+      "category": "low_overall_fidelity",
+      "message": "Overall fidelity stayed below target, so the next pass should reinforce runtime styles across the export tree."
+    }
+  ],
+  "patchOperations": [
+    "preserve_wrapper_surfaces",
+    "reinforce_runtime_styles",
+    "boost_typography_from_runtime",
+    "preserve_motion_styles"
+  ],
+  "patchTargets": {
+    "preserve_motion_styles": [
+      "/::node-123"
+    ]
+  },
+  "patchPropertyHints": {
+    "preserve_motion_styles": {
+      "/::node-123": {
+        "desktop": [
+          "hover.aspectRatio"
+        ],
+        "laptop": [
+          "hover.aspectRatio"
+        ],
+        "tablet": [
+          "display",
+          "hover.aspectRatio"
+        ],
+        "mobile": [
+          "display",
+          "hover.aspectRatio"
+        ]
+      }
+    }
+  },
+  "resetToBestStateForNextAttempt": false,
+  "selectedAsBest": false
+}

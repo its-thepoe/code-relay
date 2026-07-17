@@ -1,0 +1,84 @@
+{
+  "attempt": 1,
+  "strategy": "semantic-layout",
+  "overall": 74.57,
+  "fidelity": {
+    "desktop": 83.66,
+    "laptop": 85.8,
+    "tablet": 84.11,
+    "mobile": 72.05,
+    "overall": 74.57,
+    "layout": 84.83,
+    "typography": 82.05,
+    "color": 91.66,
+    "assets": 100,
+    "motion": 100,
+    "nodeMatch": 0,
+    "breakpointScores": {
+      "desktop": 83.66,
+      "laptop": 85.8,
+      "tablet": 84.11,
+      "mobile": 72.05
+    }
+  },
+  "warningCount": 3,
+  "previewValidation": {
+    "status": "validated",
+    "summary": {
+      "viewportsValidated": 4,
+      "inspectedNodes": 480,
+      "foundNodes": 480,
+      "nodesWithNonDefaultStyles": 480,
+      "nodesExpectingMotion": 8,
+      "nodesWithNonDefaultMotion": 2
+    },
+    "byViewport": {
+      "desktop": {
+        "viewport": "desktop",
+        "inspectedNodes": 120,
+        "foundNodes": 120,
+        "nodesWithNonDefaultStyles": 120,
+        "nodesExpectingMotion": 2,
+        "nodesWithNonDefaultMotion": 1
+      },
+      "laptop": {
+        "viewport": "laptop",
+        "inspectedNodes": 120,
+        "foundNodes": 120,
+        "nodesWithNonDefaultStyles": 120,
+        "nodesExpectingMotion": 2,
+        "nodesWithNonDefaultMotion": 1
+      },
+      "tablet": {
+        "viewport": "tablet",
+        "inspectedNodes": 120,
+        "foundNodes": 120,
+        "nodesWithNonDefaultStyles": 120,
+        "nodesExpectingMotion": 2,
+        "nodesWithNonDefaultMotion": 0
+      },
+      "mobile": {
+        "viewport": "mobile",
+        "inspectedNodes": 120,
+        "foundNodes": 120,
+        "nodesWithNonDefaultStyles": 120,
+        "nodesExpectingMotion": 2,
+        "nodesWithNonDefaultMotion": 0
+      }
+    }
+  },
+  "diagnosis": [
+    "Initial export attempt uses the baseline semantic strategy."
+  ],
+  "diagnosisDetails": [
+    {
+      "category": "initial_baseline",
+      "message": "Start from the baseline export before applying corrective patches."
+    }
+  ],
+  "patchOperations": [
+    "baseline_strategy"
+  ],
+  "resetToBestStateForNextAttempt": false,
+  "selectedAsBest": true
+}

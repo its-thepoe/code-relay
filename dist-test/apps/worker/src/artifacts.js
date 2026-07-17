@@ -2,8 +2,10 @@ import path from "node:path";
 export function createPredictedArtifacts(outDir) {
     return {
         exportDir: outDir,
+        reportPath: path.join(outDir, "export-report.json"),
         resolvedRequestPath: path.join(outDir, "resolved-request.json"),
         statusPath: path.join(outDir, "status.json"),
+        captureProgressPath: path.join(outDir, "capture-progress.json"),
         capabilityReportPath: path.join(outDir, "capability-report.json"),
         codeCompatibilityReportPath: path.join(outDir, "code-compatibility-report.json"),
         beforeAfterReportPath: path.join(outDir, "before-after-report.json"),

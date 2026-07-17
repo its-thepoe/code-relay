@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "captureSchemaVersion": "runtime-capture-v2",
+  "generatedAt": "2026-07-15T08:37:32.071Z",
+  "kind": "initial",
+  "requestedFocus": null,
+  "parentRevisionId": null,
+  "breakpointsCaptured": [
+    "desktop",
+    "laptop",
+    "tablet",
+    "mobile"
+  ],
+  "targetViewports": [
+    "laptop",
+    "tablet",
+    "mobile"
+  ],
+  "reuseDesktopCapture": true,
+  "templateCount": 1,
+  "routeCount": 1,
+  "templates": [
+    {
+      "templateId": "/",
+      "templatePath": "/",
+      "templateKind": "static",
+      "routeCount": 1,
+      "representativeRoutePaths": [
+        "/"
+      ],
+      "memberRoutePaths": [
+        "/"
+      ],
+      "responsiveCapturePolicy": "all-viewports",
+      "routesToCapture": [
+        "/"
+      ],
+      "viewports": [
+        "laptop",
+        "tablet",
+        "mobile"
+      ],
+      "reasons": [
+        "static-or-component-layout",
+        "capture-all-template-routes"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,930 @@
+{
+  "jobId": "local-1784104580799",
+  "sourceUrl": "https://artifact.framer.ai/",
+  "componentName": "SurrealHomesMadeInMidjourney",
+  "exportMode": "full-site",
+  "captureMode": "runtime-first",
+  "exportEngine": "published-runtime",
+  "runtimeCapture": {
+    "url": "https://artifact.framer.ai/",
+    "title": "Home",
+    "mode": "page",
+    "captureDiagnostics": {
+      "breakpointsCaptured": [
+        "desktop",
+        "laptop",
+        "tablet",
+        "mobile"
+      ],
+      "viewportValidation": {
+        "desktop": {
+          "requestedWidth": 1440,
+          "requestedHeight": 900,
+          "observedBeforeInnerWidth": 1440,
+          "observedBeforeInnerHeight": 900,
+          "observedBeforeClientWidth": 1440,
+          "observedInnerWidth": 1440,
+          "observedInnerHeight": 900,
+          "observedClientWidth": 1440,
+          "screenshotWidth": 1440,
+          "screenshotHeight": 2738,
+          "screenshotAttempts": 1,
+          "valid": true
+        },
+        "laptop": {
+          "requestedWidth": 1280,
+          "requestedHeight": 900,
+          "observedBeforeInnerWidth": 1280,
+          "observedBeforeInnerHeight": 900,
+          "observedBeforeClientWidth": 1280,
+          "observedInnerWidth": 1280,
+          "observedInnerHeight": 900,
+          "observedClientWidth": 1280,
+          "screenshotWidth": 1280,
+          "screenshotHeight": 2738,
+          "screenshotAttempts": 1,
+          "valid": true
+        },
+        "tablet": {
+          "requestedWidth": 768,
+          "requestedHeight": 1024,
+          "observedBeforeInnerWidth": 768,
+          "observedBeforeInnerHeight": 1024,
+          "observedBeforeClientWidth": 768,
+          "observedInnerWidth": 768,
+          "observedInnerHeight": 1024,
+          "observedClientWidth": 768,
+          "screenshotWidth": 768,
+          "screenshotHeight": 5979,
+          "screenshotAttempts": 1,
+          "valid": true
+        },
+        "mobile": {
+          "requestedWidth": 390,
+          "requestedHeight": 844,
+          "observedBeforeInnerWidth": 390,
+          "observedBeforeInnerHeight": 844,
+          "observedBeforeClientWidth": 390,
+          "observedInnerWidth": 390,
+          "observedInnerHeight": 844,
+          "observedClientWidth": 390,
+          "screenshotWidth": 390,
+          "screenshotHeight": 4523,
+          "screenshotAttempts": 1,
+          "valid": true
+        }
+      },
+      "fontReadiness": {
+        "desktop": true,
+        "laptop": true,
+        "tablet": true,
+        "mobile": true
+      },
+      "stylesheetCount": {
+        "desktop": 0,
+        "laptop": 0,
+        "tablet": 0,
+        "mobile": 0
+      },
+      "nodeCount": {
+        "desktop": 683,
+        "laptop": 683,
+        "tablet": 612,
+        "mobile": 612
+      },
+      "phaseHistory": [
+        {
+          "phase": "navigate",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:35:35.093Z",
+          "viewportName": "desktop"
+        },
+        {
+          "phase": "navigate",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:35:35.093Z",
+          "finishedAt": "2026-07-15T08:35:35.457Z",
+          "durationMs": 364,
+          "viewportName": "desktop"
+        },
+        {
+          "phase": "stabilize",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:35:35.457Z",
+          "viewportName": "desktop"
+        },
+        {
+          "phase": "stabilize",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:35:35.457Z",
+          "finishedAt": "2026-07-15T08:35:37.369Z",
+          "durationMs": 1912,
+          "viewportName": "desktop"
+        },
+        {
+          "phase": "capture-desktop",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:35:37.370Z",
+          "viewportName": "desktop"
+        },
+        {
+          "phase": "capture-desktop",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:35:37.370Z",
+          "finishedAt": "2026-07-15T08:35:41.877Z",
+          "durationMs": 4507,
+          "viewportName": "desktop"
+        },
+        {
+          "phase": "route-finalize",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:35:41.877Z",
+          "viewportName": "desktop"
+        },
+        {
+          "phase": "route-finalize",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:35:41.877Z",
+          "finishedAt": "2026-07-15T08:35:41.877Z",
+          "durationMs": 0,
+          "viewportName": "desktop"
+        },
+        {
+          "phase": "interaction-replay",
+          "routePath": "/",
+          "required": false,
+          "status": "running",
+          "startedAt": "2026-07-15T08:35:42.018Z",
+          "viewportName": "desktop"
+        },
+        {
+          "phase": "interaction-replay",
+          "routePath": "/",
+          "required": false,
+          "status": "skipped",
+          "startedAt": "2026-07-15T08:35:42.018Z",
+          "finishedAt": "2026-07-15T08:35:54.019Z",
+          "durationMs": 12001,
+          "viewportName": "desktop",
+          "detail": "Route / phase interaction-replay exceeded 12s at desktop."
+        },
+        {
+          "phase": "navigate",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:35:54.096Z",
+          "viewportName": "laptop"
+        },
+        {
+          "phase": "navigate",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:35:54.096Z",
+          "finishedAt": "2026-07-15T08:35:59.621Z",
+          "durationMs": 5525,
+          "viewportName": "laptop"
+        },
+        {
+          "phase": "stabilize",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:35:59.621Z",
+          "viewportName": "laptop"
+        },
+        {
+          "phase": "stabilize",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:35:59.621Z",
+          "finishedAt": "2026-07-15T08:36:08.032Z",
+          "durationMs": 8411,
+          "viewportName": "laptop"
+        },
+        {
+          "phase": "capture-laptop",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:36:08.032Z",
+          "viewportName": "laptop"
+        },
+        {
+          "phase": "capture-laptop",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:36:08.032Z",
+          "finishedAt": "2026-07-15T08:36:09.076Z",
+          "durationMs": 1044,
+          "viewportName": "laptop"
+        },
+        {
+          "phase": "navigate",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:36:09.412Z",
+          "viewportName": "tablet"
+        },
+        {
+          "phase": "navigate",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:36:09.412Z",
+          "finishedAt": "2026-07-15T08:36:10.279Z",
+          "durationMs": 866,
+          "viewportName": "tablet"
+        },
+        {
+          "phase": "stabilize",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:36:10.279Z",
+          "viewportName": "tablet"
+        },
+        {
+          "phase": "stabilize",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:36:10.279Z",
+          "finishedAt": "2026-07-15T08:36:14.165Z",
+          "durationMs": 3886,
+          "viewportName": "tablet"
+        },
+        {
+          "phase": "capture-tablet",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:36:14.165Z",
+          "viewportName": "tablet"
+        },
+        {
+          "phase": "capture-tablet",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:36:14.165Z",
+          "finishedAt": "2026-07-15T08:36:14.830Z",
+          "durationMs": 665,
+          "viewportName": "tablet"
+        },
+        {
+          "phase": "navigate",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:36:15.023Z",
+          "viewportName": "mobile"
+        },
+        {
+          "phase": "navigate",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:36:15.023Z",
+          "finishedAt": "2026-07-15T08:36:15.576Z",
+          "durationMs": 553,
+          "viewportName": "mobile"
+        },
+        {
+          "phase": "stabilize",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:36:15.577Z",
+          "viewportName": "mobile"
+        },
+        {
+          "phase": "stabilize",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:36:15.577Z",
+          "finishedAt": "2026-07-15T08:36:19.352Z",
+          "durationMs": 3775,
+          "viewportName": "mobile"
+        },
+        {
+          "phase": "capture-mobile",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:36:19.352Z",
+          "viewportName": "mobile"
+        },
+        {
+          "phase": "capture-mobile",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:36:19.352Z",
+          "finishedAt": "2026-07-15T08:36:20.073Z",
+          "durationMs": 721,
+          "viewportName": "mobile"
+        }
+      ],
+      "routeProgress": [
+        {
+          "routePath": "/",
+          "status": "fresh",
+          "evidenceClasses": [
+            "screenshot-backed",
+            "dom-backed"
+          ],
+          "capturedViewports": [
+            "desktop",
+            "laptop",
+            "tablet",
+            "mobile"
+          ],
+          "warningCount": 1,
+          "reusedFromProgress": false
+        }
+      ],
+      "routeFailures": []
+    },
+    "stylesheetUrls": [],
+    "routeCaptures": [
+      {
+        "routePath": "/",
+        "url": "https://artifact.framer.ai/",
+        "title": "Home",
+        "captureDiagnostics": {
+          "breakpointsCaptured": [
+            "desktop",
+            "laptop",
+            "tablet",
+            "mobile"
+          ],
+          "viewportValidation": {
+            "desktop": {
+              "requestedWidth": 1440,
+              "requestedHeight": 900,
+              "observedBeforeInnerWidth": 1440,
+              "observedBeforeInnerHeight": 900,
+              "observedBeforeClientWidth": 1440,
+              "observedInnerWidth": 1440,
+              "observedInnerHeight": 900,
+              "observedClientWidth": 1440,
+              "screenshotWidth": 1440,
+              "screenshotHeight": 2738,
+              "screenshotAttempts": 1,
+              "valid": true
+            },
+            "laptop": {
+              "requestedWidth": 1280,
+              "requestedHeight": 900,
+              "observedBeforeInnerWidth": 1280,
+              "observedBeforeInnerHeight": 900,
+              "observedBeforeClientWidth": 1280,
+              "observedInnerWidth": 1280,
+              "observedInnerHeight": 900,
+              "observedClientWidth": 1280,
+              "screenshotWidth": 1280,
+              "screenshotHeight": 2738,
+              "screenshotAttempts": 1,
+              "valid": true
+            },
+            "tablet": {
+              "requestedWidth": 768,
+              "requestedHeight": 1024,
+              "observedBeforeInnerWidth": 768,
+              "observedBeforeInnerHeight": 1024,
+              "observedBeforeClientWidth": 768,
+              "observedInnerWidth": 768,
+              "observedInnerHeight": 1024,
+              "observedClientWidth": 768,
+              "screenshotWidth": 768,
+              "screenshotHeight": 5979,
+              "screenshotAttempts": 1,
+              "valid": true
+            },
+            "mobile": {
+              "requestedWidth": 390,
+              "requestedHeight": 844,
+              "observedBeforeInnerWidth": 390,
+              "observedBeforeInnerHeight": 844,
+              "observedBeforeClientWidth": 390,
+              "observedInnerWidth": 390,
+              "observedInnerHeight": 844,
+              "observedClientWidth": 390,
+              "screenshotWidth": 390,
+              "screenshotHeight": 4523,
+              "screenshotAttempts": 1,
+              "valid": true
+            }
+          },
+          "fontReadiness": {
+            "desktop": true,
+            "laptop": true,
+            "tablet": true,
+            "mobile": true
+          },
+          "stylesheetCount": {
+            "desktop": 0,
+            "laptop": 0,
+            "tablet": 0,
+            "mobile": 0
+          },
+          "nodeCount": {
+            "desktop": 683,
+            "laptop": 683,
+            "tablet": 612,
+            "mobile": 612
+          },
+          "phaseHistory": [
+            {
+              "phase": "navigate",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:35:35.093Z",
+              "viewportName": "desktop"
+            },
+            {
+              "phase": "navigate",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:35:35.093Z",
+              "finishedAt": "2026-07-15T08:35:35.457Z",
+              "durationMs": 364,
+              "viewportName": "desktop"
+            },
+            {
+              "phase": "stabilize",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:35:35.457Z",
+              "viewportName": "desktop"
+            },
+            {
+              "phase": "stabilize",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:35:35.457Z",
+              "finishedAt": "2026-07-15T08:35:37.369Z",
+              "durationMs": 1912,
+              "viewportName": "desktop"
+            },
+            {
+              "phase": "capture-desktop",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:35:37.370Z",
+              "viewportName": "desktop"
+            },
+            {
+              "phase": "capture-desktop",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:35:37.370Z",
+              "finishedAt": "2026-07-15T08:35:41.877Z",
+              "durationMs": 4507,
+              "viewportName": "desktop"
+            },
+            {
+              "phase": "route-finalize",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:35:41.877Z",
+              "viewportName": "desktop"
+            },
+            {
+              "phase": "route-finalize",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:35:41.877Z",
+              "finishedAt": "2026-07-15T08:35:41.877Z",
+              "durationMs": 0,
+              "viewportName": "desktop"
+            },
+            {
+              "phase": "interaction-replay",
+              "routePath": "/",
+              "required": false,
+              "status": "running",
+              "startedAt": "2026-07-15T08:35:42.018Z",
+              "viewportName": "desktop"
+            },
+            {
+              "phase": "interaction-replay",
+              "routePath": "/",
+              "required": false,
+              "status": "skipped",
+              "startedAt": "2026-07-15T08:35:42.018Z",
+              "finishedAt": "2026-07-15T08:35:54.019Z",
+              "durationMs": 12001,
+              "viewportName": "desktop",
+              "detail": "Route / phase interaction-replay exceeded 12s at desktop."
+            },
+            {
+              "phase": "navigate",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:35:54.096Z",
+              "viewportName": "laptop"
+            },
+            {
+              "phase": "navigate",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:35:54.096Z",
+              "finishedAt": "2026-07-15T08:35:59.621Z",
+              "durationMs": 5525,
+              "viewportName": "laptop"
+            },
+            {
+              "phase": "stabilize",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:35:59.621Z",
+              "viewportName": "laptop"
+            },
+            {
+              "phase": "stabilize",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:35:59.621Z",
+              "finishedAt": "2026-07-15T08:36:08.032Z",
+              "durationMs": 8411,
+              "viewportName": "laptop"
+            },
+            {
+              "phase": "capture-laptop",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:36:08.032Z",
+              "viewportName": "laptop"
+            },
+            {
+              "phase": "capture-laptop",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:36:08.032Z",
+              "finishedAt": "2026-07-15T08:36:09.076Z",
+              "durationMs": 1044,
+              "viewportName": "laptop"
+            },
+            {
+              "phase": "navigate",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:36:09.412Z",
+              "viewportName": "tablet"
+            },
+            {
+              "phase": "navigate",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:36:09.412Z",
+              "finishedAt": "2026-07-15T08:36:10.279Z",
+              "durationMs": 866,
+              "viewportName": "tablet"
+            },
+            {
+              "phase": "stabilize",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:36:10.279Z",
+              "viewportName": "tablet"
+            },
+            {
+              "phase": "stabilize",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:36:10.279Z",
+              "finishedAt": "2026-07-15T08:36:14.165Z",
+              "durationMs": 3886,
+              "viewportName": "tablet"
+            },
+            {
+              "phase": "capture-tablet",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:36:14.165Z",
+              "viewportName": "tablet"
+            },
+            {
+              "phase": "capture-tablet",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:36:14.165Z",
+              "finishedAt": "2026-07-15T08:36:14.830Z",
+              "durationMs": 665,
+              "viewportName": "tablet"
+            },
+            {
+              "phase": "navigate",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:36:15.023Z",
+              "viewportName": "mobile"
+            },
+            {
+              "phase": "navigate",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:36:15.023Z",
+              "finishedAt": "2026-07-15T08:36:15.576Z",
+              "durationMs": 553,
+              "viewportName": "mobile"
+            },
+            {
+              "phase": "stabilize",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:36:15.577Z",
+              "viewportName": "mobile"
+            },
+            {
+              "phase": "stabilize",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:36:15.577Z",
+              "finishedAt": "2026-07-15T08:36:19.352Z",
+              "durationMs": 3775,
+              "viewportName": "mobile"
+            },
+            {
+              "phase": "capture-mobile",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:36:19.352Z",
+              "viewportName": "mobile"
+            },
+            {
+              "phase": "capture-mobile",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:36:19.352Z",
+              "finishedAt": "2026-07-15T08:36:20.073Z",
+              "durationMs": 721,
+              "viewportName": "mobile"
+            }
+          ],
+          "routeProgress": [
+            {
+              "routePath": "/",
+              "status": "fresh",
+              "evidenceClasses": [
+                "screenshot-backed",
+                "dom-backed"
+              ],
+              "capturedViewports": [
+                "desktop",
+                "laptop",
+                "tablet",
+                "mobile"
+              ],
+              "warningCount": 1,
+              "reusedFromProgress": false
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "pluginCapture": {
+    "mode": "simulated",
+    "capturedAt": "2026-07-15T08:35:34.853Z",
+    "selectedNodeCount": 0
+  },
+  "nodeMatches": [],
+  "component": {
+    "semanticType": "hero",
+    "nodeCount": 160,
+    "sections": [
+      {
+        "index": 0,
+        "name": "Section 1",
+        "kind": "hero",
+        "confidence": 0,
+        "nodeCount": 69
+      },
+      {
+        "index": 1,
+        "name": "Surreal Homes made in Midjourney",
+        "kind": "content",
+        "confidence": 0,
+        "nodeCount": 19
+      },
+      {
+        "index": 2,
+        "name": "New Work",
+        "kind": "media-grid",
+        "confidence": 0,
+        "nodeCount": 29
+      },
+      {
+        "index": 3,
+        "name": "I'm , a designer merging design with to create n",
+        "kind": "content",
+        "confidence": 0,
+        "nodeCount": 13
+      },
+      {
+        "index": 4,
+        "name": "You can find me on where share daily thoughts, a",
+        "kind": "content",
+        "confidence": 0,
+        "nodeCount": 30
+      }
+    ]
+  },
+  "assets": [
+    {
+      "url": "https://framerusercontent.com/images/AUWaY8BzdSrZTEmGcQvEissyc1E.jpeg",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/bWEzpl2D8PozgekT3emRcLSZAiM.jpg",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/1WpiHUvej0omfFIlhXJ4mGeXuM.jpg",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/sYyqni83lk3R0H3Rv8sKYc8cjZY.jpg",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/W8SOIzaQATXg2YiTQy2yZVWbs.jpeg?scale-down-to=1024",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/LTmuFWK7o7hkFqPex8Jnrobz5c.jpeg?scale-down-to=512",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/iAx1VBnbZZryCk7TI3JHZUKQ.jpeg?scale-down-to=512",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/fifYiMr975aAcL81yS2Q8Valolw.jpeg?scale-down-to=512",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/JEHF7Z8EwE2fVoabzV1o7dhGdlM.jpeg?scale-down-to=512",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/Lcov1yQ7u2EobWVDFPp9qU0eNc.jpeg?scale-down-to=512",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/gWM4JStXVN3CJeRoBZ5FjPm10.png",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/ZmOuFXkoGoEpOrAIJdOqFqdcs0.png",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/SOG6zVvs7YHeoByIT2vCBngfAcM.webp",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/cvValximiTCYGyctug38cu5vMU.png",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/wPpzmgsCNjJtl12gvb9asnOm0c.jpg",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/wCYUJecEDcxVjDNiA5dsJszhU0.jpg",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/CQSyM2flIboH8syDCScLWEL7mgY.webp",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/UPkjR5UQGzIvkr5SJ7WBpGso4o.webp",
+      "kind": "image"
+    }
+  ],
+  "framerTree": [],
+  "componentModules": [],
+  "componentFamilies": [],
+  "overrideAssignments": [],
+  "codeFiles": [],
+  "fonts": [
+    {
+      "name": "sans-serif",
+      "family": "sans-serif",
+      "source": "runtime"
+    },
+    {
+      "name": "Inter",
+      "family": "Inter, \"Inter Placeholder\", sans-serif",
+      "source": "runtime"
+    },
+    {
+      "name": "Inter Medium",
+      "family": "\"Inter Medium\", Inter, Inter, system-ui, -apple-system, \"system-ui\", \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\"",
+      "source": "runtime"
+    },
+    {
+      "name": "Inter",
+      "family": "Inter, sans-serif",
+      "source": "runtime"
+    },
+    {
+      "name": "Rock Salt",
+      "family": "\"Rock Salt\", sans-serif",
+      "source": "runtime"
+    }
+  ],
+  "cmsCollections": [],
+  "sitePages": [
+    {
+      "componentName": "Home",
+      "routePath": "/",
+      "title": "Home",
+      "sourceTextLength": 981,
+      "nodeCount": 160,
+      "exportTreeNodeCount": 683,
+      "templateId": "/",
+      "templatePath": "/",
+      "routeKind": "page",
+      "templateKind": "static"
+    }
+  ],
+  "routeTemplates": [
+    {
+      "templateId": "/",
+      "templatePath": "/",
+      "templateKind": "static",
+      "representativeRoutePath": "/",
+      "routeCount": 1,
+      "nodeCount": 683,
+      "sourceTextLength": 981
+    }
+  ],
+  "exportTreeDiagnostics": {
+    "totalNodes": 683,
+    "pluginBackedNodes": 0,
+    "runtimeMatchedNodes": 683,
+    "unmatchedRuntimeNodes": 0,
+    "breakpointsWithSnapshots": [
+      "desktop",
+      "laptop",
+      "tablet",
+      "mobile"
+    ]
+  },
+  "warnings": [],
+  "artifactFormat": "summary",
+  "artifactNote": "Materialized node trees are stored in export-tree.json and generated page files."
+}

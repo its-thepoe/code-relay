@@ -1,0 +1,86 @@
+{
+  "status": "passed",
+  "generatedFileCount": 75,
+  "tsxBytes": 632669,
+  "cssBytes": 918674,
+  "previewHtmlBytes": 1205636,
+  "buildDurationMs": 43544,
+  "renderedElementCount": 1061,
+  "renderedTextLength": 13884,
+  "consoleErrors": [],
+  "pageErrors": [],
+  "externalRequests": [],
+  "failedRequests": [],
+  "runtimeLocalization": {
+    "downloaded": 34,
+    "replaced": 136,
+    "failed": 0,
+    "manifestPath": "runtime-localization-report.json"
+  },
+  "codeFileExecutions": [],
+  "interactionContracts": [],
+  "routes": [
+    {
+      "path": "/",
+      "routeKind": "page",
+      "sourceTextLength": 13884,
+      "sourceNodeCount": 1167,
+      "rootChildCount": 1,
+      "renderedElementCount": 1061,
+      "renderedTextLength": 13884,
+      "rootWidth": 1280,
+      "innerWidth": 1280,
+      "scrollWidth": 1280,
+      "bodyScrollWidth": 1280,
+      "horizontalOverflow": false,
+      "fullWidthRoot": true,
+      "screenshotColorCount": 256,
+      "viewportChecks": [
+        {
+          "viewport": "desktop",
+          "innerWidth": 1440,
+          "rootWidth": 1440,
+          "scrollWidth": 1440,
+          "bodyScrollWidth": 1440,
+          "renderedElementCount": 1061,
+          "renderedTextLength": 13884,
+          "horizontalOverflow": false,
+          "fullWidthRoot": true
+        },
+        {
+          "viewport": "laptop",
+          "innerWidth": 1280,
+          "rootWidth": 1280,
+          "scrollWidth": 1280,
+          "bodyScrollWidth": 1280,
+          "renderedElementCount": 1061,
+          "renderedTextLength": 13884,
+          "horizontalOverflow": false,
+          "fullWidthRoot": true
+        },
+        {
+          "viewport": "tablet",
+          "innerWidth": 768,
+          "rootWidth": 768,
+          "scrollWidth": 768,
+          "bodyScrollWidth": 768,
+          "renderedElementCount": 805,
+          "renderedTextLength": 13884,
+          "horizontalOverflow": false,
+          "fullWidthRoot": true
+        },
+        {
+          "viewport": "mobile",
+          "innerWidth": 390,
+          "rootWidth": 390,
+          "scrollWidth": 390,
+          "bodyScrollWidth": 390,
+          "renderedElementCount": 805,
+          "renderedTextLength": 13884,
+          "horizontalOverflow": false,
+          "fullWidthRoot": true
+        }
+      ]
+    }
+  ]
+}

@@ -1,7 +1,7 @@
-import { mkdirp } from "fs-extra";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import prettier from "prettier";
+import { resolveExportRouteMetadata } from "../../shared/src/route-contract.js";
 const SUPPORTED_CODE_FILE_DEPENDENCIES = {
     clsx: {
         version: "2.1.1",
@@ -146,13 +146,13 @@ export async function generateNextProject(input) {
     const srcDir = path.join(input.projectDir, "src");
     const framerDataDir = path.join(srcDir, "framer-data");
     const routeDataDir = path.join(framerDataDir, "routes");
-    await mkdirp(componentDir);
-    await mkdirp(moduleDir);
-    await mkdirp(pageDir);
-    await mkdirp(templateDir);
-    await mkdirp(srcDir);
-    await mkdirp(framerDataDir);
-    await mkdirp(routeDataDir);
+    await mkdir(componentDir, { recursive: true });
+    await mkdir(moduleDir, { recursive: true });
+    await mkdir(pageDir, { recursive: true });
+    await mkdir(templateDir, { recursive: true });
+    await mkdir(srcDir, { recursive: true });
+    await mkdir(framerDataDir, { recursive: true });
+    await mkdir(routeDataDir, { recursive: true });
     const componentPath = path.join(componentDir, `${input.ir.componentName}.tsx`);
     const cssPath = path.join(componentDir, `${input.ir.componentName}.module.css`);
     const dtsPath = path.join(componentDir, `${input.ir.componentName}.d.ts`);
@@ -193,20 +193,29 @@ export async function generateNextProject(input) {
     await writeFile(path.join(input.projectDir, "export-tree.json"), `${JSON.stringify(input.ir.exportTree ?? [], null, 2)}\n`);
     await writeFile(path.join(input.projectDir, "motion-manifest.json"), `${JSON.stringify(createMotionManifest(input.ir), null, 2)}\n`);
     await writeFile(path.join(input.projectDir, "asset-manifest.json"), `${JSON.stringify(createAssetManifest(input.ir), null, 2)}\n`);
-    await writeFile(path.join(input.projectDir, "route-manifest.json"), `${JSON.stringify((input.ir.sitePages ?? []).map((page) => ({
-        componentName: page.componentName,
-        path: page.routePath,
-        title: page.title,
-        templateId: page.templateId ?? page.routePath,
-        templatePath: page.templatePath ?? page.routePath,
-        templateKind: page.templateKind ?? "static",
-        redirectTo: page.redirectTo ?? null,
-        redirectStatus: page.redirectStatus ?? null,
-        sourceTextLength: page.sourceTextLength ?? 0,
-        sourceNodeCount: page.exportTree
-            ? countExportTreeNodes(page.exportTree)
-            : page.nodes.length,
-    })), null, 2)}\n`);
+    await writeFile(path.join(input.projectDir, "runtime-strategy-manifest.json"), `${JSON.stringify(createRuntimeStrategyManifest(input.ir), null, 2)}\n`);
+    await writeFile(path.join(input.projectDir, "agent-handoff-manifest.json"), `${JSON.stringify(createAgentHandoffManifest(input.ir), null, 2)}\n`);
+    await writeFile(path.join(input.projectDir, "route-manifest.json"), `${JSON.stringify((input.ir.sitePages ?? []).map((page) => {
+        const routeMetadata = resolveExportRouteMetadata(page);
+        return {
+            componentName: page.componentName,
+            path: page.routePath,
+            title: page.title,
+            routeKind: routeMetadata.routeKind,
+            templateId: page.templateId ?? page.routePath,
+            templatePath: page.templatePath ?? page.routePath,
+            template: page.template ?? null,
+            templateKind: routeMetadata.templateKind ?? page.templateKind ?? "static",
+            destination: routeMetadata.destination ?? null,
+            destinationKind: routeMetadata.destinationKind ?? null,
+            redirectTo: routeMetadata.redirectTo ?? null,
+            redirectStatus: routeMetadata.redirectStatus ?? null,
+            sourceTextLength: page.sourceTextLength ?? 0,
+            sourceNodeCount: page.exportTree
+                ? countExportTreeNodes(page.exportTree)
+                : page.nodes.length,
+        };
+    }), null, 2)}\n`);
     await writeFile(path.join(input.projectDir, "route-template-manifest.json"), `${JSON.stringify(input.ir.routeTemplates ?? [], null, 2)}\n`);
     for (const module of runtimeComponentModules) {
         const modulePath = path.join(moduleDir, `${toSafeIdentifier(module.name)}Remote.tsx`);
@@ -287,7 +296,7 @@ export async function generateNextProject(input) {
     await writeFile(path.join(srcDir, "styles.css"), globalCss);
     for (const executable of executableCodeFiles) {
         const targetPath = path.join(input.projectDir, executable.generatedSourcePath.replace(/^src\//, "src/"));
-        await mkdirp(path.dirname(targetPath));
+        await mkdir(path.dirname(targetPath), { recursive: true });
         const adapterImportPath = toPosixModulePath(path.posix.relative(path.posix.dirname(executable.generatedSourcePath), path.posix.join("src", "framer-data", "framer-adapter")));
         await writeFile(targetPath, await formatTsx(rewriteCodeFileSource(executable.file.content ?? "", adapterImportPath), "typescript"));
     }
@@ -775,6 +784,62 @@ function createAssetManifest(ir) {
         cmsAssets,
     };
 }
+function createRuntimeStrategyManifest(ir) {
+    const routeCount = ir.sitePages?.length ?? 0;
+    return {
+        strategy: ir.exportMode === "full-site" ? "runtime-kept-full-site" : "reconstructed-react",
+        runtimeKept: ir.exportMode === "full-site",
+        intendedEditor: ir.exportMode === "full-site" ? "agent-first" : "human-or-agent",
+        sourceUrl: ir.sourceUrl,
+        captureMode: ir.captureMode ?? "plugin-only",
+        exportEngine: ir.exportEngine ?? "plugin-approximation",
+        routeCount,
+        routeTemplateCount: ir.routeTemplates?.length ?? 0,
+        componentModuleCount: ir.componentModules?.length ?? 0,
+        codeFileCount: ir.codeFiles?.length ?? 0,
+        cmsCollectionCount: ir.cmsCollections?.length ?? 0,
+        framerStyleCssPreserved: Boolean(ir.runtimeCapture.framerStyleCss?.trim()),
+        breakpointsCaptured: ir.runtimeCapture.captureDiagnostics?.breakpointsCaptured ?? [],
+        artifacts: {
+            routeManifest: "route-manifest.json",
+            routeTemplateManifest: "route-template-manifest.json",
+            assetManifest: "asset-manifest.json",
+            runtimeLocalizationReport: "runtime-localization-report.json",
+            cmsManifest: "framer-cms-collections.json",
+            codeFilesManifest: "framer-code-files.json",
+            fontsManifest: "framer-fonts.json",
+            rawRuntimeCapture: "raw-runtime-capture.json",
+            exportReport: "export-report.json",
+        },
+    };
+}
+function createAgentHandoffManifest(ir) {
+    return {
+        handoffMode: ir.exportMode === "full-site" ? "runtime-kept" : "reconstructed-react",
+        intendedEditor: ir.exportMode === "full-site" ? "agent-first" : "human-or-agent",
+        guidance: [
+            "Start with export-report.json and AGENT_BRIEF.md.",
+            "Preserve visual fidelity and route behavior unless explicitly instructed otherwise.",
+            "Use route-manifest.json and raw-runtime-capture.json to audit path coverage before editing.",
+            "Use asset-manifest.json, framer-cms-collections.json, and framer-code-files.json to patch dynamic areas safely.",
+        ],
+        artifacts: {
+            report: "export-report.json",
+            readme: "README.md",
+            agentBrief: "AGENT_BRIEF.md",
+            routeManifest: "route-manifest.json",
+            routeTemplateManifest: "route-template-manifest.json",
+            runtimeStrategyManifest: "runtime-strategy-manifest.json",
+            assetManifest: "asset-manifest.json",
+            runtimeLocalizationReport: "runtime-localization-report.json",
+            cmsManifest: "framer-cms-collections.json",
+            codeFilesManifest: "framer-code-files.json",
+            fontsManifest: "framer-fonts.json",
+            rawRuntimeCapture: "raw-runtime-capture.json",
+            patchHistory: "patch-history.json",
+        },
+    };
+}
 function extractFirstCssUrl(value) {
     if (!value)
         return undefined;
@@ -987,29 +1052,39 @@ export default function App() {
 `;
 }
 function createViteSiteApp(base, pages) {
-    const hasGlobalCodeFiles = (base.codeFiles?.length ?? 0) > 0;
     const sitePages = base.sitePages ??
         pages.map((entry) => ({
             componentName: entry.componentName,
             routePath: "/",
             title: entry.componentName,
             nodes: entry.component.nodes,
+            routeKind: "page",
             templateId: "/",
             templatePath: "/",
+            template: "static",
             templateKind: "static",
+            destination: undefined,
+            destinationKind: undefined,
             redirectTo: undefined,
             redirectStatus: undefined,
         }));
-    const pageMetadata = sitePages.map((page, index) => ({
-        componentName: pages[index]?.componentName ?? page.componentName,
-        routePath: page.routePath,
-        title: page.title,
-        templateId: page.templateId ?? page.routePath,
-        templatePath: page.templatePath ?? page.routePath,
-        templateKind: page.templateKind ?? "static",
-        redirectTo: page.redirectTo ?? null,
-        redirectStatus: page.redirectStatus ?? null,
-    }));
+    const pageMetadata = sitePages.map((page, index) => {
+        const routeMetadata = resolveExportRouteMetadata(page);
+        return {
+            componentName: pages[index]?.componentName ?? page.componentName,
+            routePath: page.routePath,
+            title: page.title,
+            routeKind: routeMetadata.routeKind,
+            templateId: page.templateId ?? page.routePath,
+            templatePath: page.templatePath ?? page.routePath,
+            template: page.template ?? null,
+            templateKind: routeMetadata.templateKind ?? page.templateKind ?? "static",
+            destination: routeMetadata.destination ?? null,
+            destinationKind: routeMetadata.destinationKind ?? null,
+            redirectTo: routeMetadata.redirectTo ?? null,
+            redirectStatus: routeMetadata.redirectStatus ?? null,
+        };
+    });
     const lazyComponents = pages
         .map((entry) => `const ${entry.componentName} = lazy(() =>
   import('../pages/${entry.componentName}').then((module) => ({
@@ -1027,16 +1102,19 @@ function createViteSiteApp(base, pages) {
         .map((page) => `{
       path: ${JSON.stringify(page.routePath)},
       title: ${JSON.stringify(page.title)},
+      routeKind: ${JSON.stringify(page.routeKind)},
       templateId: ${JSON.stringify(page.templateId)},
       templatePath: ${JSON.stringify(page.templatePath)},
+      template: ${JSON.stringify(page.template ?? null)},
       templateKind: ${JSON.stringify(page.templateKind)},
+      destination: ${JSON.stringify(page.destination ?? null)},
+      destinationKind: ${JSON.stringify(page.destinationKind ?? null)},
       redirectTo: ${JSON.stringify(page.redirectTo ?? null)},
       redirectStatus: ${JSON.stringify(page.redirectStatus ?? null)},
       Component: ${page.componentName},
     }`)
         .join(",\n");
     return `import { Component, lazy, Suspense, startTransition, useEffect, useState, type ReactNode } from 'react'
-${hasGlobalCodeFiles ? `import { FramerCodeFileList } from './framer-data/code-files-runtime'` : ""}
 
 ${lazyComponents}
 
@@ -1187,9 +1265,7 @@ export default function App() {
 
   useEffect(() => {
     if (typeof document === 'undefined') return
-    document.title = currentPage?.title
-      ? \`\${currentPage.title} · CodeRelay Preview\`
-      : 'CodeRelay Preview'
+    document.title = currentPage?.title || '${escapeJs(base.componentName)}'
   }, [currentPage])
 
   useEffect(() => {
@@ -1203,16 +1279,13 @@ export default function App() {
 
   useEffect(() => {
     if (!currentPage?.redirectTo || typeof window === 'undefined') return
-    if (isExternalUrl(currentPage.redirectTo)) {
-      window.location.replace(currentPage.redirectTo)
-      return
-    }
+    if (isExternalUrl(currentPage.redirectTo)) return
     navigateTo(currentPage.redirectTo, { replace: true })
   }, [currentPage])
 
   if (!currentPage) {
     return (
-      <main className="previewShell">
+      <main data-coderelay-runtime-kept="true">
         <div className="routeStateCard" role="alert">
           <div className="routeStateEyebrow">No route</div>
           <h2>This export has no routable pages.</h2>
@@ -1224,18 +1297,7 @@ export default function App() {
   const Page = currentPage.Component
 
   return (
-    <main className="previewShell">
-      <header className="previewTopbar">
-        <div>
-          <div className="previewEyebrow">Coderelay export</div>
-          <h1>{currentPage.title}</h1>
-          <p className="previewRouteMeta">
-            <code>{currentPage.path}</code>
-            <span>{currentPage.templateKind} template</span>
-          </p>
-        </div>
-        <span>{pages.length} page{pages.length === 1 ? '' : 's'}</span>
-      </header>
+    <>
       {currentPage.redirectTo ? (
         <div className="routeStateCard" role="status">
           <div className="routeStateEyebrow">Redirect</div>
@@ -1258,21 +1320,7 @@ export default function App() {
           {currentPage.redirectTo ? null : <Page />}
         </Suspense>
       </RouteErrorBoundary>
-      ${hasGlobalCodeFiles
-        ? `<section className="previewItem">
-        <div className="previewHeader">
-          <div>
-            <div className="previewEyebrow">Code files</div>
-            <h2>Framer executable previews</h2>
-          </div>
-          <code>src/framer-data/code-files-runtime.tsx</code>
-        </div>
-        <div className="previewCanvas">
-          <FramerCodeFileList />
-        </div>
-      </section>`
-        : ""}
-    </main>
+    </>
   )
 }
 `;
@@ -1743,6 +1791,7 @@ function createTreeCss(ir) {
 ${rootBaseRules.map(([key, value]) => `  ${toKebabCase(key)}: ${value};`).join("\n")}
   background: ${pageBackground};
   color: ${pageTextColor};
+  overflow-x: hidden;
 }
 
 .surface {
@@ -4326,6 +4375,9 @@ function treeCssSelector(node) {
 function createViewportOverrideRules(nodes, viewport) {
     return nodes
         .map((node) => {
+        if (shouldHideNodeForViewport(node, viewport)) {
+            return `${treeCssSelector(node)} {\n  display: none;\n}`;
+        }
         const viewportEntries = treeCssEntries(node, viewport).filter(([key, value]) => node.styles[key] !== value);
         if (viewportEntries.length === 0)
             return "";
@@ -4335,6 +4387,31 @@ function createViewportOverrideRules(nodes, viewport) {
     })
         .filter(Boolean)
         .join("\n\n");
+}
+function shouldHideNodeForViewport(node, viewport) {
+    if (viewport === "desktop")
+        return false;
+    if (hasViewportSnapshot(node, viewport))
+        return false;
+    return !hasViewportSnapshotInSubtree(node, viewport);
+}
+function hasViewportSnapshotInSubtree(node, viewport) {
+    if (hasViewportSnapshot(node, viewport))
+        return true;
+    return node.children.some((child) => hasViewportSnapshotInSubtree(child, viewport));
+}
+function hasViewportSnapshot(node, viewport) {
+    if (node.source.runtimeNodeIdsByViewport?.[viewport])
+        return true;
+    if (node.rectByViewport?.[viewport])
+        return true;
+    if (node.stylesByViewport?.[viewport])
+        return true;
+    if (node.motionByViewport?.[viewport])
+        return true;
+    if (node.interactionStylesByViewport?.[viewport])
+        return true;
+    return false;
 }
 function indentCss(css, spaces) {
     const pad = " ".repeat(spaces);

@@ -1,0 +1,246 @@
+{
+  "generatedAt": "2026-07-15T08:33:34.979Z",
+  "downloaded": 34,
+  "replaced": 136,
+  "failed": 0,
+  "assets": [
+    {
+      "sourceUrl": "https://framerusercontent.com/images/um3bxT2WVFF4kr6enjXB8pntPlo.svg?width=100&height=100",
+      "localPath": "/runtime-assets/caf86e93a6fad1dd972109ba.svg",
+      "status": "localized",
+      "contentType": "image/svg+xml",
+      "byteLength": 291455
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/lWoxjUfzID4I2CJ2EAGpp1BxXk.svg?width=100&height=100",
+      "localPath": "/runtime-assets/0785aa4dff830e85c33ec49a.svg",
+      "status": "localized",
+      "contentType": "image/svg+xml",
+      "byteLength": 247243
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/LtSGTHttO0ZpuCVLNu4mPIpOuk.svg?width=100&height=100",
+      "localPath": "/runtime-assets/9cd6bfcc735c07aa824396bb.svg",
+      "status": "localized",
+      "contentType": "image/svg+xml",
+      "byteLength": 295523
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/CVICQI4s8tTiJBrNEN8nOXCzdK0.png?scale-down-to=1024",
+      "localPath": "/runtime-assets/97dad8b45d18fde388787f05.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 239961
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/0f09LEy6qZK1Y9gL9T6AG622ZZ8.png?scale-down-to=512&width=1024&height=1024",
+      "localPath": "/runtime-assets/3e55522768395012015a3c51.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 15469
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/m3YA9HpmQG8c9ThSe5XusCzYw.png?scale-down-to=512&width=1024&height=1024",
+      "localPath": "/runtime-assets/39cf3391ed33a1c87541eb6b.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 18474
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/lZLqIoLGAjMHHOlhOwugYSASrjc.png?scale-down-to=512&width=1024&height=1024",
+      "localPath": "/runtime-assets/ca2b70514b67740df3f29ab1.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 16642
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/l1KkpEI9tJzqQPgJDNKytRuxgeI.png?scale-down-to=512&width=1024&height=1024",
+      "localPath": "/runtime-assets/26db46cdc952fb6297e6c27c.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 19424
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/LUkmo3gFVQOfp5kvltA05Mc6K4.png?scale-down-to=512&width=1024&height=1024",
+      "localPath": "/runtime-assets/b3360bf6c0a502112a9faf4d.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 14847
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/jaVohrUAKzleX6rjxEEOPrqeysw.png?scale-down-to=512&width=1024&height=1024",
+      "localPath": "/runtime-assets/14602f31a42a8eb69dc35884.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 19251
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/53osOsH2OP7bAyFNQKbXOVwk.png?width=1024&height=1024",
+      "localPath": "/runtime-assets/4916883659a193a0c6dea3d1.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 40151
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/en9G6oaN8j6IT8H0gpgIS69gXg4.png?scale-down-to=1024&width=2048&height=2048",
+      "localPath": "/runtime-assets/c6c4f1a37a084cacbf111716.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 42032
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/21y9kg3DMhOUBxbQ3y9CwHNPQO8.png?width=192&height=192",
+      "localPath": "/runtime-assets/876b52102451c505e7164f7a.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 7702
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/2JNdM2O0RnZg1BcZHNgDWoMrhKA.png?width=192&height=192",
+      "localPath": "/runtime-assets/bfd24526e22b4c3ac0a66309.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 6341
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/lQFJ89Y2vFBRt0WU8OFpJ3ZkPlA.png?width=192&height=192",
+      "localPath": "/runtime-assets/732dfb4c038e6082581fddc4.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 8100
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/tLJlDufDxfRWX3e1UyLWQODdOaw.png?width=1024&height=1024",
+      "localPath": "/runtime-assets/dfaa96eda40a43e1cf6a2a65.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 105421
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/nSf6ya4FcQ5iCpFIBAboozmlgzA.png?scale-down-to=512&width=1024&height=1024",
+      "localPath": "/runtime-assets/5853b8fc75482431c573f9b6.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 9405
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/fbDdTEyddMlUKyioryX3T3M3I.png?scale-down-to=512&width=1024&height=1024",
+      "localPath": "/runtime-assets/5bcab767ce2e23f4000d5a54.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 12543
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/un1NlasO4xdJ3ogUjNzC5U3NsU.png?scale-down-to=512&width=1024&height=1024",
+      "localPath": "/runtime-assets/0911297430ff82934aa91eb1.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 21381
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/gshDWTLuPfNPn8ZUFpq49jhvIPk.png?scale-down-to=512&width=1024&height=1024",
+      "localPath": "/runtime-assets/9524af6748c9ba31170a22a7.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 18597
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/2YMs3TUoFSk6OAJu3tquJSjY.png?scale-down-to=512&width=1024&height=1024",
+      "localPath": "/runtime-assets/4be7c2289b56e2513a5bef8d.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 25406
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/eiTxkfpr6msnt5xKhves6aFLlTw.png?scale-down-to=512&width=1024&height=1024",
+      "localPath": "/runtime-assets/2ae339df456c100509509479.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 22581
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/YnQwe4Efg37DiOr8IRYEfPzKE.png?scale-down-to=512&width=1024&height=1024",
+      "localPath": "/runtime-assets/4ed5288555e7b89bf02abba2.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 20915
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/snuvetWlg8kNNuH4rBY2aSQch5c.png?scale-down-to=512&width=1024&height=1024",
+      "localPath": "/runtime-assets/7005524dcad896ff9952866f.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 13668
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/3YQ5k1hZdNkPRgquxbSfEunCE.png?scale-down-to=512&width=1024&height=1024",
+      "localPath": "/runtime-assets/c12749d52d48e718e25ea27b.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 12829
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/5PoEhJTKleU3AaFM5T9aYtiqo.png?scale-down-to=512&width=1024&height=1024",
+      "localPath": "/runtime-assets/ba9cb404234f30e2c6d2db96.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 16210
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/7Xrs4S6qdC6EyvyrM1EGw533im4.png?scale-down-to=512&width=1024&height=1024",
+      "localPath": "/runtime-assets/85d9f323e5097a98bf158bd6.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 16104
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/eZQ1X1Fpw11apl285CIeN8iEVI.png?scale-down-to=1024&width=4800&height=3600",
+      "localPath": "/runtime-assets/6c820c2de2b1a36575b4993c.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 221986
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/pwnBF4uZrCSugu0a8ZiDdaD4A4.png?scale-down-to=1024&width=4800&height=3600",
+      "localPath": "/runtime-assets/986c3356b19c76ff7fc1c6f7.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 106710
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/UFfz36PjDofFGqSVyD7dxLp6G4M.png?scale-down-to=1024&width=4800&height=3600",
+      "localPath": "/runtime-assets/61d4e1303de824c88c2d8c56.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 104455
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/LAZePzksNGsqwC1vEotMzZH3EdE.png?scale-down-to=1024&width=4800&height=3600",
+      "localPath": "/runtime-assets/7dd3de5154355ea3089f1fa0.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 113199
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/G3aJzgcFG0nJ4pDBy94oGqN6Q.png?scale-down-to=1024&width=4800&height=3600",
+      "localPath": "/runtime-assets/09436dc12aa30dd71f81aa74.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 69609
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/wtSXht7rnWOGDS3UivDigQQcwZo.png?scale-down-to=1024&width=4800&height=3600",
+      "localPath": "/runtime-assets/7086f6ed58620971629d3081.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 38216
+    },
+    {
+      "sourceUrl": "https://framerusercontent.com/images/IJyQj0yIema8tFABogHMDHcP6M.png?scale-down-to=2048&width=4800&height=3600",
+      "localPath": "/runtime-assets/5f78b9e34e5ffff03c5cd6b8.png",
+      "status": "localized",
+      "contentType": "image/png",
+      "byteLength": 142996
+    }
+  ]
+}

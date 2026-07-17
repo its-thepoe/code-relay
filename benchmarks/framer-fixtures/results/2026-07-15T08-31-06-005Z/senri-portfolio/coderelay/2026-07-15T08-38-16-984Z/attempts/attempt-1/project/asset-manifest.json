@@ -1,0 +1,349 @@
+{
+  "exportedAt": "2026-07-15T08:38:46.980Z",
+  "totals": {
+    "irAssets": 22,
+    "runtimeAssets": 40,
+    "cmsAssets": 0
+  },
+  "irAssets": [
+    {
+      "url": "/runtime-assets/341a0be696ebec3962815e53.png",
+      "kind": "image"
+    },
+    {
+      "url": "/runtime-assets/6648c29bf09b5e1f9b8b5100.png",
+      "kind": "image",
+      "alt": "Adam Neumann Unsplash"
+    },
+    {
+      "url": "/runtime-assets/0ddc0680f3786229939f7e54.png",
+      "kind": "image",
+      "alt": "Dmitry Novikov Unsplash"
+    },
+    {
+      "url": "/runtime-assets/24378885d07bed02a0d70044.png",
+      "kind": "image",
+      "alt": "Bilal Mansuri Unsplash"
+    },
+    {
+      "url": "/runtime-assets/5d8a4021f9724a4aa20f70fa.png",
+      "kind": "image",
+      "alt": "Possessed Photography Unsplash"
+    },
+    {
+      "url": "/runtime-assets/cced5105021bb4f708af5e74.png",
+      "kind": "image"
+    },
+    {
+      "url": "/runtime-assets/af9f05f75b0870f8ce776a93.svg",
+      "kind": "image"
+    },
+    {
+      "url": "/runtime-assets/7cf4065b20f7175746110980.jpg",
+      "kind": "image"
+    },
+    {
+      "url": "/runtime-assets/8e2abcf06fe63cf28a843602.svg",
+      "kind": "image"
+    },
+    {
+      "url": "/runtime-assets/11e1d912b3e7d6266202bc6f.jpg",
+      "kind": "image"
+    },
+    {
+      "url": "/runtime-assets/cb228b5d2d25b581dd74f8d9.svg",
+      "kind": "image"
+    },
+    {
+      "url": "/runtime-assets/f15824c512973befdaec5554.jpg",
+      "kind": "image"
+    },
+    {
+      "url": "/runtime-assets/82b04f30ff178bac0a90c0b4.svg",
+      "kind": "image"
+    },
+    {
+      "url": "/runtime-assets/edbff20015efa921ee048d9e.jpg",
+      "kind": "image"
+    },
+    {
+      "url": "/runtime-assets/28341a0b5048516eddefeb67.svg",
+      "kind": "image"
+    },
+    {
+      "url": "/runtime-assets/0a6f533a67689cd182a17284.jpg",
+      "kind": "image"
+    },
+    {
+      "url": "/runtime-assets/cc23ccd3abac0f574d21a6fc.svg",
+      "kind": "image"
+    },
+    {
+      "url": "/runtime-assets/10abc657ceb7002bd83eb925.png",
+      "kind": "image"
+    },
+    {
+      "url": "/runtime-assets/ffb3a91fe474958d44463f0e.svg",
+      "kind": "image"
+    },
+    {
+      "url": "/runtime-assets/b99c49cab6850a869669728c.jpg",
+      "kind": "image"
+    },
+    {
+      "url": "/runtime-assets/c8e39d3e0beded10286e17ef.svg",
+      "kind": "image"
+    },
+    {
+      "url": "/runtime-assets/9e01b2af7bd7a4cf5b142809.jpg",
+      "kind": "image"
+    }
+  ],
+  "runtimeAssets": [
+    {
+      "nodeId": "/::node-741",
+      "kind": "image",
+      "url": "/runtime-assets/341a0be696ebec3962815e53.png",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-806",
+      "kind": "link",
+      "url": "/work/hud",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-818",
+      "kind": "image",
+      "url": "/runtime-assets/6648c29bf09b5e1f9b8b5100.png",
+      "alt": "Adam Neumann Unsplash",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-918",
+      "kind": "link",
+      "url": "/work/london",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-930",
+      "kind": "image",
+      "url": "/runtime-assets/0ddc0680f3786229939f7e54.png",
+      "alt": "Dmitry Novikov Unsplash",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1040",
+      "kind": "link",
+      "url": "/work/smart-home",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1052",
+      "kind": "image",
+      "url": "/runtime-assets/24378885d07bed02a0d70044.png",
+      "alt": "Bilal Mansuri Unsplash",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1142",
+      "kind": "link",
+      "url": "/work/edge-runner",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1154",
+      "kind": "image",
+      "url": "/runtime-assets/5d8a4021f9724a4aa20f70fa.png",
+      "alt": "Possessed Photography Unsplash",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1255",
+      "kind": "link",
+      "url": "/work",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1426",
+      "kind": "link",
+      "url": "https://workspace.google.com/products/drive/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1429",
+      "kind": "link",
+      "url": "https://linkedin.com/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1519",
+      "kind": "image",
+      "url": "/runtime-assets/cced5105021bb4f708af5e74.png",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1534",
+      "kind": "image",
+      "url": "/runtime-assets/af9f05f75b0870f8ce776a93.svg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1537",
+      "kind": "image",
+      "url": "/runtime-assets/7cf4065b20f7175746110980.jpg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1543",
+      "kind": "image",
+      "url": "/runtime-assets/8e2abcf06fe63cf28a843602.svg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1546",
+      "kind": "image",
+      "url": "/runtime-assets/11e1d912b3e7d6266202bc6f.jpg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1552",
+      "kind": "image",
+      "url": "/runtime-assets/cb228b5d2d25b581dd74f8d9.svg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1555",
+      "kind": "image",
+      "url": "/runtime-assets/f15824c512973befdaec5554.jpg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1561",
+      "kind": "image",
+      "url": "/runtime-assets/82b04f30ff178bac0a90c0b4.svg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1564",
+      "kind": "image",
+      "url": "/runtime-assets/edbff20015efa921ee048d9e.jpg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1570",
+      "kind": "image",
+      "url": "/runtime-assets/28341a0b5048516eddefeb67.svg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1573",
+      "kind": "image",
+      "url": "/runtime-assets/0a6f533a67689cd182a17284.jpg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1579",
+      "kind": "image",
+      "url": "/runtime-assets/cc23ccd3abac0f574d21a6fc.svg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1582",
+      "kind": "image",
+      "url": "/runtime-assets/10abc657ceb7002bd83eb925.png",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1588",
+      "kind": "image",
+      "url": "/runtime-assets/ffb3a91fe474958d44463f0e.svg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1591",
+      "kind": "image",
+      "url": "/runtime-assets/b99c49cab6850a869669728c.jpg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1597",
+      "kind": "image",
+      "url": "/runtime-assets/c8e39d3e0beded10286e17ef.svg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1600",
+      "kind": "image",
+      "url": "/runtime-assets/9e01b2af7bd7a4cf5b142809.jpg",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1609",
+      "kind": "link",
+      "url": "/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1614",
+      "kind": "link",
+      "url": "/work",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1618",
+      "kind": "link",
+      "url": "/#info",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1622",
+      "kind": "link",
+      "url": "mailto: hello@senri.design",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1657",
+      "kind": "link",
+      "url": "mailto: hello@senri.design",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1663",
+      "kind": "link",
+      "url": "https://linkedin.com/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1667",
+      "kind": "link",
+      "url": "https://twitter.com/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1671",
+      "kind": "link",
+      "url": "https://behance.com/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1675",
+      "kind": "link",
+      "url": "https://dribbble.com/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1679",
+      "kind": "link",
+      "url": "/#go-top-trigger",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1683",
+      "kind": "link",
+      "url": "https://www.framer.com/",
+      "source": "runtime"
+    }
+  ],
+  "cmsAssets": []
+}

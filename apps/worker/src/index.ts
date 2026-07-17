@@ -4,6 +4,7 @@ import fssync from "node:fs";
 import { runLocalExport } from "../../../packages/exporter-core/src/local-export.js";
 import {
   createCompletedOutcomeCopy,
+  readExportCompletion,
   readExportHealth,
 } from "../../../packages/shared/src/export-health.js";
 import { createPredictedArtifacts } from "./artifacts.js";
@@ -46,6 +47,7 @@ type LocalExportJob = {
     previewPath?: string;
     resolvedRequestPath?: string;
     statusPath?: string;
+    captureProgressPath?: string;
     capabilityReportPath?: string;
     codeCompatibilityReportPath?: string;
     beforeAfterReportPath?: string;
@@ -215,6 +217,14 @@ async function processJob(job: LocalExportJob) {
         validation: result.validation,
       }),
     );
+    const completionEvidence = readExportCompletion({
+      generatedValidation: result.validation as unknown as Record<string, unknown>,
+    });
+    if (completionEvidence !== "verified") {
+      throw new Error(
+        "Export finished without the required completion evidence. Refusing to mark the job completed.",
+      );
+    }
     job.status = "completed";
     job.artifacts = {
       exportDir: result.exportDir,
@@ -223,6 +233,7 @@ async function processJob(job: LocalExportJob) {
       previewPath: result.previewPath,
       resolvedRequestPath: result.resolvedRequestPath,
       statusPath: result.statusPath,
+      captureProgressPath: result.captureProgressPath,
       capabilityReportPath: result.capabilityReportPath,
       codeCompatibilityReportPath: result.codeCompatibilityReportPath,
       beforeAfterReportPath: result.beforeAfterReportPath,

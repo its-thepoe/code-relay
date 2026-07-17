@@ -1,0 +1,26 @@
+{
+  "kind": "initial",
+  "requestedFocus": null,
+  "parentRevisionId": null,
+  "sourceDiff": {
+    "changedCodeFileArtifactIds": [],
+    "unchangedCodeFileArtifactIds": [],
+    "addedCodeFileArtifactIds": [],
+    "removedCodeFileArtifactIds": [],
+    "componentFamiliesChanged": false,
+    "overrideAssignmentsChanged": false,
+    "capabilityReportChanged": false
+  },
+  "reused": [],
+  "invalidated": [
+    {
+      "artifact": "generated/project",
+      "reason": "initial-export",
+      "dependsOn": [
+        "plugin/raw-payload",
+        "runtime/raw-capture",
+        "ir/normalized"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "strategy": "runtime-kept-full-site",
+  "runtimeKept": true,
+  "intendedEditor": "agent-first",
+  "sourceUrl": "https://cohesion.framer.ai/",
+  "captureMode": "runtime-first",
+  "exportEngine": "published-runtime",
+  "routeCount": 1,
+  "routeTemplateCount": 1,
+  "componentModuleCount": 0,
+  "codeFileCount": 0,
+  "cmsCollectionCount": 0,
+  "framerStyleCssPreserved": false,
+  "breakpointsCaptured": [
+    "desktop",
+    "laptop",
+    "tablet",
+    "mobile"
+  ],
+  "artifacts": {
+    "routeManifest": "route-manifest.json",
+    "routeTemplateManifest": "route-template-manifest.json",
+    "assetManifest": "asset-manifest.json",
+    "runtimeLocalizationReport": "runtime-localization-report.json",
+    "cmsManifest": "framer-cms-collections.json",
+    "codeFilesManifest": "framer-code-files.json",
+    "fontsManifest": "framer-fonts.json",
+    "rawRuntimeCapture": "raw-runtime-capture.json",
+    "exportReport": "export-report.json"
+  }
+}

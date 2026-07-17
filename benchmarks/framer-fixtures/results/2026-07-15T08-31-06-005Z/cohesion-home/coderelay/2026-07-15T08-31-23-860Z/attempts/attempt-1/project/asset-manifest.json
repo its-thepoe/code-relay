@@ -1,0 +1,759 @@
+{
+  "exportedAt": "2026-07-15T08:32:32.678Z",
+  "totals": {
+    "irAssets": 35,
+    "runtimeAssets": 89,
+    "cmsAssets": 0
+  },
+  "irAssets": [
+    {
+      "url": "/runtime-assets/caf86e93a6fad1dd972109ba.svg",
+      "kind": "image",
+      "alt": "Person 1"
+    },
+    {
+      "url": "/runtime-assets/0785aa4dff830e85c33ec49a.svg",
+      "kind": "image",
+      "alt": "Person 2"
+    },
+    {
+      "url": "/runtime-assets/9cd6bfcc735c07aa824396bb.svg",
+      "kind": "image",
+      "alt": "Person 3"
+    },
+    {
+      "url": "/runtime-assets/97dad8b45d18fde388787f05.png",
+      "kind": "image",
+      "alt": "Profile Picture"
+    },
+    {
+      "url": "/runtime-assets/3e55522768395012015a3c51.png",
+      "kind": "image",
+      "alt": "Orange Pyramid"
+    },
+    {
+      "url": "/runtime-assets/39cf3391ed33a1c87541eb6b.png",
+      "kind": "image",
+      "alt": "Purple Sphere"
+    },
+    {
+      "url": "/runtime-assets/ca2b70514b67740df3f29ab1.png",
+      "kind": "image",
+      "alt": "Blue Cylinder"
+    },
+    {
+      "url": "/runtime-assets/26db46cdc952fb6297e6c27c.png",
+      "kind": "image",
+      "alt": "Turquoise Star"
+    },
+    {
+      "url": "/runtime-assets/b3360bf6c0a502112a9faf4d.png",
+      "kind": "image",
+      "alt": "Lime Green Object"
+    },
+    {
+      "url": "/runtime-assets/14602f31a42a8eb69dc35884.png",
+      "kind": "image",
+      "alt": "Yellow Cube"
+    },
+    {
+      "url": "/runtime-assets/4916883659a193a0c6dea3d1.png",
+      "kind": "image",
+      "alt": "Purple Cube"
+    },
+    {
+      "url": "/runtime-assets/c6c4f1a37a084cacbf111716.png",
+      "kind": "image",
+      "alt": "Blue Pyramid"
+    },
+    {
+      "url": "/runtime-assets/876b52102451c505e7164f7a.png",
+      "kind": "image"
+    },
+    {
+      "url": "/runtime-assets/bfd24526e22b4c3ac0a66309.png",
+      "kind": "image",
+      "alt": "David Memoji Photo"
+    },
+    {
+      "url": "/runtime-assets/732dfb4c038e6082581fddc4.png",
+      "kind": "image",
+      "alt": "Emily Memoji Photo"
+    },
+    {
+      "url": "/runtime-assets/dfaa96eda40a43e1cf6a2a65.png",
+      "kind": "image",
+      "alt": "Turquoise Cube"
+    },
+    {
+      "url": "/runtime-assets/5853b8fc75482431c573f9b6.png",
+      "kind": "image",
+      "alt": "Red Pyramid"
+    },
+    {
+      "url": "/runtime-assets/5bcab767ce2e23f4000d5a54.png",
+      "kind": "image",
+      "alt": "Blue Cube"
+    },
+    {
+      "url": "/runtime-assets/0911297430ff82934aa91eb1.png",
+      "kind": "image",
+      "alt": "Green Cylinder"
+    },
+    {
+      "url": "/runtime-assets/9524af6748c9ba31170a22a7.png",
+      "kind": "image",
+      "alt": "Orange Sphere"
+    },
+    {
+      "url": "/runtime-assets/4be7c2289b56e2513a5bef8d.png",
+      "kind": "image",
+      "alt": "Purple Circle"
+    },
+    {
+      "url": "/runtime-assets/2ae339df456c100509509479.png",
+      "kind": "image",
+      "alt": "Yellow Heart"
+    },
+    {
+      "url": "/runtime-assets/4ed5288555e7b89bf02abba2.png",
+      "kind": "image",
+      "alt": "Orange Star"
+    },
+    {
+      "url": "/runtime-assets/7005524dcad896ff9952866f.png",
+      "kind": "image",
+      "alt": "Blue Gem"
+    },
+    {
+      "url": "/runtime-assets/c12749d52d48e718e25ea27b.png",
+      "kind": "image",
+      "alt": "Lime Green Cube"
+    },
+    {
+      "url": "/runtime-assets/ba9cb404234f30e2c6d2db96.png",
+      "kind": "image",
+      "alt": "Yellow Pill"
+    },
+    {
+      "url": "/runtime-assets/85d9f323e5097a98bf158bd6.png",
+      "kind": "image",
+      "alt": "Pink Gem"
+    },
+    {
+      "url": "/runtime-assets/6c820c2de2b1a36575b4993c.png",
+      "kind": "image",
+      "alt": "Vitalo Framer template"
+    },
+    {
+      "url": "/runtime-assets/986c3356b19c76ff7fc1c6f7.png",
+      "kind": "image",
+      "alt": "Artikle screen"
+    },
+    {
+      "url": "/runtime-assets/61d4e1303de824c88c2d8c56.png",
+      "kind": "image",
+      "alt": "Flowpath screen"
+    },
+    {
+      "url": "/runtime-assets/7dd3de5154355ea3089f1fa0.png",
+      "kind": "image",
+      "alt": "Kudos screen"
+    },
+    {
+      "url": "/runtime-assets/09436dc12aa30dd71f81aa74.png",
+      "kind": "image",
+      "alt": "Neozen"
+    },
+    {
+      "url": "/runtime-assets/7086f6ed58620971629d3081.png",
+      "kind": "image",
+      "alt": "Aerosound 01"
+    },
+    {
+      "url": "data:image/svg+xml,<svg display=\"block\" role=\"presentation\" viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M 24.635 22.866 C 25.123 23.355 25.123 24.147 24.635 24.635 C 24.147 25.123 23.355 25.123 22.866 24.635 L 12.501 14.268 L 2.135 24.635 C 1.647 25.123 0.855 25.123 0.366 24.635 C -0.122 24.147 -0.122 23.355 0.366 22.866 L 10.734 12.501 L 0.366 2.135 C -0.122 1.647 -0.122 0.855 0.366 0.366 C 0.855 -0.122 1.647 -0.122 2.135 0.366 L 12.501 10.734 L 22.866 0.366 C 23.355 -0.122 24.147 -0.122 24.635 0.366 C 25.123 0.855 25.123 1.647 24.635 2.135 L 14.268 12.501 Z\" fill=\"rgb(0, 0, 0)\" height=\"25.00139023844741px\" id=\"jBymG44fK\" transform=\"translate(7.499 7.499)\" width=\"25.001390238447406px\"/></svg>",
+      "kind": "image"
+    },
+    {
+      "url": "/runtime-assets/5f78b9e34e5ffff03c5cd6b8.png",
+      "kind": "image",
+      "alt": "Quomi Screen on a desktop"
+    }
+  ],
+  "runtimeAssets": [
+    {
+      "nodeId": "/::node-9",
+      "kind": "link",
+      "url": "/#home",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-15",
+      "kind": "link",
+      "url": "/#about",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-21",
+      "kind": "link",
+      "url": "/#stack",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-27",
+      "kind": "link",
+      "url": "/#services",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-33",
+      "kind": "link",
+      "url": "/#projects",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-39",
+      "kind": "link",
+      "url": "/#contact",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-79",
+      "kind": "image",
+      "url": "/runtime-assets/caf86e93a6fad1dd972109ba.svg",
+      "alt": "Person 1",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-84",
+      "kind": "image",
+      "url": "/runtime-assets/0785aa4dff830e85c33ec49a.svg",
+      "alt": "Person 2",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-89",
+      "kind": "image",
+      "url": "/runtime-assets/9cd6bfcc735c07aa824396bb.svg",
+      "alt": "Person 3",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-132",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-142",
+      "kind": "image",
+      "url": "/runtime-assets/97dad8b45d18fde388787f05.png",
+      "alt": "Profile Picture",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-145",
+      "kind": "link",
+      "url": "/#pricing",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-159",
+      "kind": "image",
+      "url": "/runtime-assets/3e55522768395012015a3c51.png",
+      "alt": "Orange Pyramid",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-163",
+      "kind": "image",
+      "url": "/runtime-assets/39cf3391ed33a1c87541eb6b.png",
+      "alt": "Purple Sphere",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-167",
+      "kind": "image",
+      "url": "/runtime-assets/ca2b70514b67740df3f29ab1.png",
+      "alt": "Blue Cylinder",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-171",
+      "kind": "image",
+      "url": "/runtime-assets/26db46cdc952fb6297e6c27c.png",
+      "alt": "Turquoise Star",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-175",
+      "kind": "image",
+      "url": "/runtime-assets/b3360bf6c0a502112a9faf4d.png",
+      "alt": "Lime Green Object",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-179",
+      "kind": "image",
+      "url": "/runtime-assets/14602f31a42a8eb69dc35884.png",
+      "alt": "Yellow Cube",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-189",
+      "kind": "image",
+      "url": "/runtime-assets/4916883659a193a0c6dea3d1.png",
+      "alt": "Purple Cube",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-193",
+      "kind": "image",
+      "url": "/runtime-assets/c6c4f1a37a084cacbf111716.png",
+      "alt": "Blue Pyramid",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-215",
+      "kind": "link",
+      "url": "https://twitter.com/CristianMielu",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-250",
+      "kind": "image",
+      "url": "/runtime-assets/876b52102451c505e7164f7a.png",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-264",
+      "kind": "image",
+      "url": "/runtime-assets/bfd24526e22b4c3ac0a66309.png",
+      "alt": "David Memoji Photo",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-278",
+      "kind": "image",
+      "url": "/runtime-assets/732dfb4c038e6082581fddc4.png",
+      "alt": "Emily Memoji Photo",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-292",
+      "kind": "image",
+      "url": "/runtime-assets/876b52102451c505e7164f7a.png",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-306",
+      "kind": "image",
+      "url": "/runtime-assets/bfd24526e22b4c3ac0a66309.png",
+      "alt": "David Memoji Photo",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-320",
+      "kind": "image",
+      "url": "/runtime-assets/732dfb4c038e6082581fddc4.png",
+      "alt": "Emily Memoji Photo",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-334",
+      "kind": "image",
+      "url": "/runtime-assets/876b52102451c505e7164f7a.png",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-348",
+      "kind": "image",
+      "url": "/runtime-assets/bfd24526e22b4c3ac0a66309.png",
+      "alt": "David Memoji Photo",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-362",
+      "kind": "image",
+      "url": "/runtime-assets/732dfb4c038e6082581fddc4.png",
+      "alt": "Emily Memoji Photo",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-376",
+      "kind": "image",
+      "url": "/runtime-assets/876b52102451c505e7164f7a.png",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-390",
+      "kind": "image",
+      "url": "/runtime-assets/bfd24526e22b4c3ac0a66309.png",
+      "alt": "David Memoji Photo",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-404",
+      "kind": "image",
+      "url": "/runtime-assets/732dfb4c038e6082581fddc4.png",
+      "alt": "Emily Memoji Photo",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-436",
+      "kind": "image",
+      "url": "/runtime-assets/dfaa96eda40a43e1cf6a2a65.png",
+      "alt": "Turquoise Cube",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-451",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-468",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-485",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-502",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-519",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-536",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-553",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-570",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-587",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-604",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-621",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-638",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-667",
+      "kind": "image",
+      "url": "/runtime-assets/5853b8fc75482431c573f9b6.png",
+      "alt": "Red Pyramid",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-677",
+      "kind": "image",
+      "url": "/runtime-assets/5bcab767ce2e23f4000d5a54.png",
+      "alt": "Blue Cube",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-687",
+      "kind": "image",
+      "url": "/runtime-assets/0911297430ff82934aa91eb1.png",
+      "alt": "Green Cylinder",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-697",
+      "kind": "image",
+      "url": "/runtime-assets/9524af6748c9ba31170a22a7.png",
+      "alt": "Orange Sphere",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-707",
+      "kind": "image",
+      "url": "/runtime-assets/4be7c2289b56e2513a5bef8d.png",
+      "alt": "Purple Circle",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-717",
+      "kind": "image",
+      "url": "/runtime-assets/2ae339df456c100509509479.png",
+      "alt": "Yellow Heart",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-727",
+      "kind": "image",
+      "url": "/runtime-assets/4ed5288555e7b89bf02abba2.png",
+      "alt": "Orange Star",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-737",
+      "kind": "image",
+      "url": "/runtime-assets/7005524dcad896ff9952866f.png",
+      "alt": "Blue Gem",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-747",
+      "kind": "image",
+      "url": "/runtime-assets/c12749d52d48e718e25ea27b.png",
+      "alt": "Lime Green Cube",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-757",
+      "kind": "image",
+      "url": "/runtime-assets/ba9cb404234f30e2c6d2db96.png",
+      "alt": "Yellow Pill",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-767",
+      "kind": "image",
+      "url": "/runtime-assets/85d9f323e5097a98bf158bd6.png",
+      "alt": "Pink Gem",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-794",
+      "kind": "link",
+      "url": "https://www.framer.com/pricing?via=u9kavnv&dub_id=XfGQ1apyWviE8U0U",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-874",
+      "kind": "link",
+      "url": "https://www.framer.com/pricing?via=u9kavnv&dub_id=XfGQ1apyWviE8U0U",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-949",
+      "kind": "link",
+      "url": "https://calendly.com/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-970",
+      "kind": "link",
+      "url": "/vitalo-personal-training-coaching-framer-template",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-975",
+      "kind": "image",
+      "url": "/runtime-assets/6c820c2de2b1a36575b4993c.png",
+      "alt": "Vitalo Framer template",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-984",
+      "kind": "link",
+      "url": "/artikle-membership-framer-template",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-989",
+      "kind": "image",
+      "url": "/runtime-assets/986c3356b19c76ff7fc1c6f7.png",
+      "alt": "Artikle screen",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-998",
+      "kind": "link",
+      "url": "/flowpath-ai-automation-template",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1003",
+      "kind": "image",
+      "url": "/runtime-assets/61d4e1303de824c88c2d8c56.png",
+      "alt": "Flowpath screen",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1012",
+      "kind": "link",
+      "url": "/kudos-design-agency-website",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1017",
+      "kind": "image",
+      "url": "/runtime-assets/7dd3de5154355ea3089f1fa0.png",
+      "alt": "Kudos screen",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1026",
+      "kind": "link",
+      "url": "/neozen-portfolio-framer-template",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1031",
+      "kind": "image",
+      "url": "/runtime-assets/09436dc12aa30dd71f81aa74.png",
+      "alt": "Neozen",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1040",
+      "kind": "link",
+      "url": "/aerosound-e-commerce-website",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1045",
+      "kind": "image",
+      "url": "/runtime-assets/7086f6ed58620971629d3081.png",
+      "alt": "Aerosound 01",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1082",
+      "kind": "link",
+      "url": "https://calendly.com/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1088",
+      "kind": "link",
+      "url": "mailto: mielucristian@gmail.com",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1098",
+      "kind": "link",
+      "url": "/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1104",
+      "kind": "link",
+      "url": "/404",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1110",
+      "kind": "link",
+      "url": "/licensing",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1116",
+      "kind": "link",
+      "url": "https://github.com/mielucristian/cohesion-documentation",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1126",
+      "kind": "link",
+      "url": "https://framer.link/UdEP7eA",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1132",
+      "kind": "link",
+      "url": "https://twitter.com/CristianMielu",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1138",
+      "kind": "link",
+      "url": "https://www.linkedin.com/in/cristian-mielu-a8b2b3b5/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1150",
+      "kind": "link",
+      "url": "/legal/privacy-policy",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1157",
+      "kind": "link",
+      "url": "/legal/cookie-policy",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1173",
+      "kind": "link",
+      "url": "https://www.uihub.design/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1178",
+      "kind": "link",
+      "url": "https://framer.link/cristianmielu",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1182",
+      "kind": "image",
+      "url": "data:image/svg+xml,<svg display=\"block\" role=\"presentation\" viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M 24.635 22.866 C 25.123 23.355 25.123 24.147 24.635 24.635 C 24.147 25.123 23.355 25.123 22.866 24.635 L 12.501 14.268 L 2.135 24.635 C 1.647 25.123 0.855 25.123 0.366 24.635 C -0.122 24.147 -0.122 23.355 0.366 22.866 L 10.734 12.501 L 0.366 2.135 C -0.122 1.647 -0.122 0.855 0.366 0.366 C 0.855 -0.122 1.647 -0.122 2.135 0.366 L 12.501 10.734 L 22.866 0.366 C 23.355 -0.122 24.147 -0.122 24.635 0.366 C 25.123 0.855 25.123 1.647 24.635 2.135 L 14.268 12.501 Z\" fill=\"rgb(0, 0, 0)\" height=\"25.00139023844741px\" id=\"jBymG44fK\" transform=\"translate(7.499 7.499)\" width=\"25.001390238447406px\"/></svg>",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1188",
+      "kind": "image",
+      "url": "/runtime-assets/5f78b9e34e5ffff03c5cd6b8.png",
+      "alt": "Quomi Screen on a desktop",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1190",
+      "kind": "link",
+      "url": "https://framer.link/SW15EBF",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1198",
+      "kind": "link",
+      "url": "https://www.framer.com/",
+      "source": "runtime"
+    }
+  ],
+  "cmsAssets": []
+}

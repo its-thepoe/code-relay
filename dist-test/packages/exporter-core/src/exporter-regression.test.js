@@ -8,7 +8,24 @@ import { buildIntermediateRepresentation } from "./ir.js";
 import { assertPluginCaptureIntegrity } from "./local-export.js";
 import { generateNextProject } from "../../codegen/src/next-project.js";
 import { inspectGeneratedPreviewNodes } from "../../fidelity/src/compare.js";
-import { captureRuntimeRoutes, validateFullSiteCapture } from "./capture.js";
+import { __setForcedNavigateNetworkFailureRoutePaths, __setInteractionStyleCollectionTestMode, __setViewportDriftTestMode, captureRuntimeRoutes, validateFullSiteCapture, } from "./capture.js";
+function createRouteCompatibilityKey(input) {
+    return JSON.stringify({
+        sourceUrl: input.sourceUrl,
+        routePath: input.routePath,
+        viewportNames: [...input.viewportNames],
+        templateId: null,
+        templatePath: null,
+        routeKind: null,
+        template: null,
+        templateKind: null,
+        destination: null,
+        destinationKind: null,
+        redirectTo: null,
+        redirectStatus: null,
+        interactionReplayTimeoutMs: 20000,
+    });
+}
 function createPluginCapture() {
     return {
         mode: "framer-plugin",
@@ -727,6 +744,8 @@ test("full-site published URL export creates a page instead of fake component li
     assert.match(app, /window\.history\[method\]/);
     assert.match(app, /window\.addEventListener\('popstate'/);
     assert.match(app, /document\.addEventListener\('click'/);
+    assert.doesNotMatch(app, /previewTopbar/);
+    assert.doesNotMatch(app, /FramerCodeFileList/);
     assert.match(preview, /Full-site preview/);
     assert.doesNotMatch(preview, /Component library preview/);
     assert.equal(componentFiles.length, 0);
@@ -1005,6 +1024,64 @@ test("runtime capture records safe interaction replay without submitting blocked
         await fs.rm(workDir, { recursive: true, force: true });
     }
 });
+test("interaction replay screenshots survive blocked fonts", async () => {
+    const server = createServer((request, response) => {
+        if (request.url === "/blocked.woff2") {
+            setTimeout(() => {
+                response.statusCode = 200;
+                response.setHeader("content-type", "font/woff2");
+                response.end("not-a-real-font");
+            }, 7_000);
+            return;
+        }
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end(`<!doctype html>
+      <html>
+        <head>
+          <style>
+            @font-face { font-family: BlockedReplay; src: url("/blocked.woff2"); }
+            body { font-family: BlockedReplay, sans-serif; }
+          </style>
+        </head>
+        <body>
+          <main>
+            <h1>Replay survives blocked fonts</h1>
+            <button
+              id="toggle"
+              type="button"
+              aria-expanded="false"
+              onclick="this.setAttribute('aria-expanded', this.getAttribute('aria-expanded') === 'true' ? 'false' : 'true'); this.textContent = this.getAttribute('aria-expanded') === 'true' ? 'Expanded' : 'Collapsed';"
+            >
+              Collapsed
+            </button>
+          </main>
+        </body>
+      </html>`);
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-replay-blocked-fonts-"));
+    try {
+        const capture = await captureRuntimeRoutes({
+            originUrl: `http://127.0.0.1:${address.port}/`,
+            routes: [{ path: "/", title: "Replay blocked fonts" }],
+            workDir,
+        });
+        const replay = capture.routeCaptures?.[0]?.interactionReplay ?? [];
+        const clickRecord = replay.find((record) => record.action === "click" &&
+            record.target.text?.includes("Collapsed"));
+        assert.equal(replay.length > 0, true);
+        assert.equal(clickRecord?.allowed, true);
+        await fs.access(clickRecord?.beforeScreenshotPath ?? "");
+        await fs.access(clickRecord?.afterScreenshotPath ?? "");
+    }
+    finally {
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(() => resolve()));
+        await fs.rm(workDir, { recursive: true, force: true });
+    }
+});
 test("interaction replay timeout preserves mandatory full-site evidence", async () => {
     const server = createServer((_request, response) => {
         response.setHeader("content-type", "text/html; charset=utf-8");
@@ -1089,6 +1166,13 @@ test("full-site capture validation requires every route and all four exact viewp
     try {
         await validateFullSiteCapture({ routes: [{ path: "/" }], capture });
         await assert.rejects(validateFullSiteCapture({ routes: [{ path: "/" }, { path: "/missing" }], capture }), /route \/missing was not captured/);
+        const failedRouteCapture = structuredClone(capture);
+        failedRouteCapture.routeCaptures = [];
+        failedRouteCapture.captureDiagnostics = {
+            ...(failedRouteCapture.captureDiagnostics ?? { breakpointsCaptured: viewportNames }),
+            routeFailures: [{ routePath: "/missing", error: "Route capture exceeded 3 minutes: /missing" }],
+        };
+        await assert.rejects(validateFullSiteCapture({ routes: [{ path: "/missing" }], capture: failedRouteCapture }), /route \/missing was not captured \(Route capture exceeded 3 minutes: \/missing\)/);
         const invalidCapture = structuredClone(capture);
         invalidCapture.routeCaptures[0].captureDiagnostics.viewportValidation.mobile.observedInnerWidth = 768;
         await assert.rejects(validateFullSiteCapture({ routes: [{ path: "/" }], capture: invalidCapture }), /duplicate observed viewport width|width mismatch/);
@@ -1212,7 +1296,510 @@ test("full-site route cache ignores legacy entries without viewport validation",
         await fs.rm(parentDir, { recursive: true, force: true });
     }
 });
-test("external redirects bypass Trusted Types protected documents", async () => {
+test("full-site route cache recaptures only a corrupted cached viewport screenshot", async () => {
+    let requests = 0;
+    const server = createServer((_request, response) => {
+        requests += 1;
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end("<main><h1>Corrupted cache</h1><p>Only one viewport should rerun.</p></main>");
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const parentDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-route-cache-corrupt-"));
+    const cacheDir = path.join(parentDir, "cache");
+    const originUrl = `http://127.0.0.1:${address.port}/`;
+    try {
+        const first = await captureRuntimeRoutes({
+            originUrl,
+            routes: [{ path: "/", title: "Home" }],
+            cacheDir,
+            workDir: path.join(parentDir, "first"),
+        });
+        const requestsAfterFirstRun = requests;
+        const mobileScreenshotPath = first.routeCaptures?.[0]?.viewports.mobile?.screenshotPath;
+        assert.ok(mobileScreenshotPath);
+        await fs.writeFile(mobileScreenshotPath, "not-a-png");
+        const second = await captureRuntimeRoutes({
+            originUrl,
+            routes: [{ path: "/", title: "Home" }],
+            cacheDir,
+            workDir: path.join(parentDir, "second"),
+        });
+        const reusedViewports = (second.routeCaptures?.[0]?.captureDiagnostics?.phaseHistory ?? [])
+            .filter((phase) => phase.status === "reused")
+            .map((phase) => phase.viewportName)
+            .filter((viewportName) => Boolean(viewportName));
+        const completedViewports = (second.routeCaptures?.[0]?.captureDiagnostics?.phaseHistory ?? [])
+            .filter((phase) => phase.status === "completed" && phase.phase.startsWith("capture-"))
+            .map((phase) => phase.viewportName)
+            .filter((viewportName) => Boolean(viewportName));
+        assert.equal(requests, requestsAfterFirstRun + 1);
+        assert.deepEqual(reusedViewports.sort(), ["desktop", "laptop", "tablet"]);
+        assert.equal(completedViewports.at(-1), "mobile");
+        assert.equal(second.routeCaptures?.[0]?.captureDiagnostics?.viewportValidation?.mobile
+            ?.valid, true);
+    }
+    finally {
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(() => resolve()));
+        await fs.rm(parentDir, { recursive: true, force: true });
+    }
+});
+test("full-site route cache ignores stale source URLs", async () => {
+    let firstRequests = 0;
+    const firstServer = createServer((_request, response) => {
+        firstRequests += 1;
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end("<main><h1>Original deployment</h1></main>");
+    });
+    await new Promise((resolve) => firstServer.listen(0, "127.0.0.1", resolve));
+    const firstAddress = firstServer.address();
+    assert.ok(firstAddress && typeof firstAddress !== "string");
+    let secondRequests = 0;
+    const secondServer = createServer((_request, response) => {
+        secondRequests += 1;
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end("<main><h1>New deployment</h1></main>");
+    });
+    await new Promise((resolve) => secondServer.listen(0, "127.0.0.1", resolve));
+    const secondAddress = secondServer.address();
+    assert.ok(secondAddress && typeof secondAddress !== "string");
+    const parentDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-route-cache-stale-source-"));
+    const cacheDir = path.join(parentDir, "cache");
+    try {
+        await captureRuntimeRoutes({
+            originUrl: `http://127.0.0.1:${firstAddress.port}/`,
+            routes: [{ path: "/", title: "Home" }],
+            cacheDir,
+            workDir: path.join(parentDir, "first"),
+        });
+        assert.ok(firstRequests > 0);
+        const second = await captureRuntimeRoutes({
+            originUrl: `http://127.0.0.1:${secondAddress.port}/`,
+            routes: [{ path: "/", title: "Home" }],
+            cacheDir,
+            workDir: path.join(parentDir, "second"),
+        });
+        assert.ok(secondRequests > 0);
+        assert.equal(second.captureDiagnostics?.routeProgress?.some((entry) => entry.reusedFromCache), false);
+    }
+    finally {
+        firstServer.closeAllConnections();
+        secondServer.closeAllConnections();
+        await Promise.all([
+            new Promise((resolve) => firstServer.close(() => resolve())),
+            new Promise((resolve) => secondServer.close(() => resolve())),
+        ]);
+        await fs.rm(parentDir, { recursive: true, force: true });
+    }
+});
+test("full-site route capture resumes a missing viewport from route progress", async () => {
+    let requests = 0;
+    const server = createServer((_request, response) => {
+        requests += 1;
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end("<main><h1>Resumable route</h1><p>One route, four breakpoints.</p></main>");
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const parentDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-route-resume-"));
+    const cacheDir = path.join(parentDir, "cache");
+    const firstWorkDir = path.join(parentDir, "first");
+    const secondWorkDir = path.join(parentDir, "second");
+    const originUrl = `http://127.0.0.1:${address.port}/`;
+    try {
+        const first = await captureRuntimeRoutes({
+            originUrl,
+            routes: [{ path: "/", title: "Home" }],
+            workDir: firstWorkDir,
+        });
+        const requestsAfterFirstRun = requests;
+        const partial = structuredClone(first.routeCaptures?.[0]);
+        assert.ok(partial);
+        delete partial.viewports.mobile;
+        const partialDiagnostics = partial.captureDiagnostics;
+        delete partialDiagnostics.viewportValidation.mobile;
+        delete partialDiagnostics.fontReadiness.mobile;
+        delete partialDiagnostics.stylesheetCount.mobile;
+        delete partialDiagnostics.nodeCount.mobile;
+        partialDiagnostics.breakpointsCaptured = (partial.captureDiagnostics.breakpointsCaptured ?? []).filter((viewportName) => viewportName !== "mobile");
+        await fs.mkdir(path.join(cacheDir, "home"), { recursive: true });
+        await fs.writeFile(path.join(cacheDir, "home", "route-progress.json"), `${JSON.stringify({
+            schemaVersion: 3,
+            sourceUrl: originUrl,
+            compatibilityKey: createRouteCompatibilityKey({
+                sourceUrl: originUrl,
+                routePath: "/",
+                viewportNames: ["desktop", "laptop", "tablet", "mobile"],
+                title: "Home",
+            }),
+            routePath: "/",
+            status: "partial",
+            phases: partial.captureDiagnostics?.phaseHistory ?? [],
+            capturedViewports: ["desktop", "laptop", "tablet"],
+            evidenceClasses: ["screenshot-backed", "dom-backed"],
+            warnings: [],
+            reusedFromProgress: false,
+            capture: partial,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+        }, null, 2)}\n`);
+        const second = await captureRuntimeRoutes({
+            originUrl,
+            routes: [{ path: "/", title: "Home" }],
+            workDir: secondWorkDir,
+            cacheDir,
+        });
+        assert.equal(requests, requestsAfterFirstRun + 1);
+        assert.equal(second.routeCaptures?.[0]?.captureDiagnostics?.breakpointsCaptured.includes("mobile"), true);
+        assert.equal(second.captureDiagnostics?.routeProgress?.some((entry) => entry.status === "retried"), true);
+    }
+    finally {
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(() => resolve()));
+        await fs.rm(parentDir, { recursive: true, force: true });
+    }
+});
+test("full-site route capture retries a transient navigation failure and still completes the route", async () => {
+    let requestCount = 0;
+    let transientFailures = 0;
+    const server = createServer((request, response) => {
+        requestCount += 1;
+        if (transientFailures < 1) {
+            transientFailures += 1;
+            request.socket.destroy();
+            return;
+        }
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end("<main><h1>Recovered route</h1><p>Transient network errors should retry.</p></main>");
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const parentDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-route-transient-retry-"));
+    const cacheDir = path.join(parentDir, "cache");
+    const workDir = path.join(parentDir, "work");
+    const originUrl = `http://127.0.0.1:${address.port}/`;
+    try {
+        const capture = await captureRuntimeRoutes({
+            originUrl,
+            routes: [{ path: "/", title: "Home" }],
+            cacheDir,
+            workDir,
+        });
+        assert.ok(requestCount >= 5);
+        assert.equal(transientFailures, 1);
+        assert.equal(capture.routeCaptures?.[0]?.captureDiagnostics?.viewportValidation?.mobile?.valid, true);
+        assert.equal(capture.captureDiagnostics?.routeProgress?.some((entry) => entry.routePath === "/" &&
+            entry.status === "fresh" &&
+            entry.reusedFromProgress !== true), true);
+        await assert.doesNotReject(() => validateFullSiteCapture({
+            routes: [{ path: "/" }],
+            capture,
+        }));
+    }
+    finally {
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(() => resolve()));
+        await fs.rm(parentDir, { recursive: true, force: true });
+    }
+});
+test("full-site capture does not abort early on three route-level DNS failures when the origin probe still succeeds", async () => {
+    let rootRequests = 0;
+    const server = createServer((request, response) => {
+        if (request.url === "/") {
+            rootRequests += 1;
+            response.setHeader("content-type", "text/html; charset=utf-8");
+            response.end("<main><h1>Home</h1></main>");
+            return;
+        }
+        response.statusCode = 404;
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end("<main><h1>Missing</h1></main>");
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const parentDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-route-network-probe-recovery-"));
+    const cacheDir = path.join(parentDir, "cache");
+    const workDir = path.join(parentDir, "work");
+    const originUrl = `http://127.0.0.1:${address.port}/`;
+    try {
+        __setForcedNavigateNetworkFailureRoutePaths([
+            "/blog/three-years-one-standard",
+            "/blog/plush-velvet",
+            "/blog/the-overlap",
+        ]);
+        const capture = await captureRuntimeRoutes({
+            originUrl,
+            routes: [
+                { path: "/", title: "Home" },
+                {
+                    path: "/blog/three-years-one-standard",
+                    title: "Broken 1",
+                },
+                {
+                    path: "/blog/plush-velvet",
+                    title: "Broken 2",
+                },
+                {
+                    path: "/blog/the-overlap",
+                    title: "Broken 3",
+                },
+            ],
+            cacheDir,
+            workDir,
+        });
+        assert.ok(rootRequests >= 2);
+        assert.equal(capture.routeCaptures?.some((route) => route.routePath === "/"), true);
+        assert.equal(capture.captureDiagnostics?.routeFailures?.length, 3);
+        await assert.doesNotReject(() => validateFullSiteCapture({
+            routes: [{ path: "/" }],
+            capture,
+        }));
+    }
+    finally {
+        __setForcedNavigateNetworkFailureRoutePaths([]);
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(() => resolve()));
+        await fs.rm(parentDir, { recursive: true, force: true });
+    }
+});
+test("full-site capture keeps required desktop evidence when interaction-style collection is slow", async () => {
+    const server = createServer((_request, response) => {
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end(`<!doctype html>
+      <html>
+        <body>
+          <main>
+            <a href="/work">Work</a>
+            <button type="button">Open</button>
+            <button type="button">Close</button>
+            <button type="button">More</button>
+          </main>
+        </body>
+      </html>`);
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const parentDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-slow-interaction-style-"));
+    const originUrl = `http://127.0.0.1:${address.port}/`;
+    try {
+        __setInteractionStyleCollectionTestMode("slow");
+        const capture = await captureRuntimeRoutes({
+            originUrl,
+            routes: [{ path: "/", title: "Home" }],
+            workDir: path.join(parentDir, "work"),
+            cacheDir: path.join(parentDir, "cache"),
+        });
+        assert.equal(capture.routeCaptures?.[0]?.captureDiagnostics?.viewportValidation?.desktop?.valid, true);
+        assert.equal(capture.captureDiagnostics?.routeProgress?.[0]?.warningCount, 1);
+        await assert.doesNotReject(() => validateFullSiteCapture({
+            routes: [{ path: "/" }],
+            capture,
+        }));
+    }
+    finally {
+        __setInteractionStyleCollectionTestMode("normal");
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(() => resolve()));
+        await fs.rm(parentDir, { recursive: true, force: true });
+    }
+});
+test("full-site route progress ignores stale source URLs", async () => {
+    let firstRequests = 0;
+    const firstServer = createServer((_request, response) => {
+        firstRequests += 1;
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end("<main><h1>Old progress</h1></main>");
+    });
+    await new Promise((resolve) => firstServer.listen(0, "127.0.0.1", resolve));
+    const firstAddress = firstServer.address();
+    assert.ok(firstAddress && typeof firstAddress !== "string");
+    let secondRequests = 0;
+    const secondServer = createServer((_request, response) => {
+        secondRequests += 1;
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end("<main><h1>Fresh progress</h1></main>");
+    });
+    await new Promise((resolve) => secondServer.listen(0, "127.0.0.1", resolve));
+    const secondAddress = secondServer.address();
+    assert.ok(secondAddress && typeof secondAddress !== "string");
+    const parentDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-route-progress-stale-source-"));
+    const cacheDir = path.join(parentDir, "cache");
+    const firstOriginUrl = `http://127.0.0.1:${firstAddress.port}/`;
+    const secondOriginUrl = `http://127.0.0.1:${secondAddress.port}/`;
+    try {
+        const first = await captureRuntimeRoutes({
+            originUrl: firstOriginUrl,
+            routes: [{ path: "/", title: "Home" }],
+            workDir: path.join(parentDir, "first"),
+        });
+        assert.ok(firstRequests > 0);
+        await fs.mkdir(path.join(cacheDir, "home"), { recursive: true });
+        await fs.writeFile(path.join(cacheDir, "home", "route-progress.json"), `${JSON.stringify({
+            schemaVersion: 3,
+            sourceUrl: firstOriginUrl,
+            compatibilityKey: createRouteCompatibilityKey({
+                sourceUrl: firstOriginUrl,
+                routePath: "/",
+                viewportNames: ["desktop", "laptop", "tablet", "mobile"],
+                title: "Home",
+            }),
+            routePath: "/",
+            status: "partial",
+            phases: first.routeCaptures?.[0]?.captureDiagnostics?.phaseHistory ?? [],
+            capturedViewports: ["desktop"],
+            evidenceClasses: ["screenshot-backed", "dom-backed"],
+            warnings: [],
+            reusedFromProgress: false,
+            capture: first.routeCaptures?.[0],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+        }, null, 2)}\n`);
+        const second = await captureRuntimeRoutes({
+            originUrl: secondOriginUrl,
+            routes: [{ path: "/", title: "Home" }],
+            workDir: path.join(parentDir, "second"),
+            cacheDir,
+        });
+        assert.ok(secondRequests > 0);
+        assert.equal(second.captureDiagnostics?.routeProgress?.some((entry) => entry.reusedFromProgress), false);
+    }
+    finally {
+        firstServer.closeAllConnections();
+        secondServer.closeAllConnections();
+        await Promise.all([
+            new Promise((resolve) => firstServer.close(() => resolve())),
+            new Promise((resolve) => secondServer.close(() => resolve())),
+        ]);
+        await fs.rm(parentDir, { recursive: true, force: true });
+    }
+});
+test("full-site route progress ignores legacy entries missing the compatibility key", async () => {
+    let requests = 0;
+    const server = createServer((_request, response) => {
+        requests += 1;
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end("<main><h1>Fresh progress only</h1></main>");
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const parentDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-route-progress-legacy-compat-"));
+    const cacheDir = path.join(parentDir, "cache");
+    const originUrl = `http://127.0.0.1:${address.port}/`;
+    try {
+        const first = await captureRuntimeRoutes({
+            originUrl,
+            routes: [{ path: "/", title: "Home" }],
+            workDir: path.join(parentDir, "first"),
+        });
+        assert.ok(first.routeCaptures?.[0]);
+        const requestsAfterFirst = requests;
+        await fs.mkdir(path.join(cacheDir, "home"), { recursive: true });
+        await fs.writeFile(path.join(cacheDir, "home", "route-progress.json"), `${JSON.stringify({
+            schemaVersion: 3,
+            sourceUrl: originUrl,
+            routePath: "/",
+            status: "partial",
+            phases: first.routeCaptures?.[0]?.captureDiagnostics?.phaseHistory ?? [],
+            capturedViewports: ["desktop"],
+            evidenceClasses: ["screenshot-backed", "dom-backed"],
+            warnings: [],
+            reusedFromProgress: false,
+            capture: first.routeCaptures?.[0],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+        }, null, 2)}\n`);
+        const second = await captureRuntimeRoutes({
+            originUrl,
+            routes: [{ path: "/", title: "Home" }],
+            workDir: path.join(parentDir, "second"),
+            cacheDir,
+        });
+        assert.ok(requests > requestsAfterFirst);
+        assert.equal(second.captureDiagnostics?.routeProgress?.some((entry) => entry.reusedFromProgress), false);
+    }
+    finally {
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(() => resolve()));
+        await fs.rm(parentDir, { recursive: true, force: true });
+    }
+});
+test("full-site route progress does not trust complete snapshots missing required phase evidence", async () => {
+    let requests = 0;
+    const server = createServer((_request, response) => {
+        requests += 1;
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end("<main><h1>Repair bad complete progress</h1><p>Missing phase evidence must force recapture.</p></main>");
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const parentDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-route-progress-missing-phase-"));
+    const cacheDir = path.join(parentDir, "cache");
+    const originUrl = `http://127.0.0.1:${address.port}/`;
+    try {
+        const first = await captureRuntimeRoutes({
+            originUrl,
+            routes: [{ path: "/", title: "Home" }],
+            workDir: path.join(parentDir, "first"),
+        });
+        const firstCapture = structuredClone(first.routeCaptures?.[0]);
+        assert.ok(firstCapture);
+        const requestsAfterFirst = requests;
+        await fs.mkdir(path.join(cacheDir, "home"), { recursive: true });
+        await fs.writeFile(path.join(cacheDir, "home", "route-progress.json"), `${JSON.stringify({
+            schemaVersion: 3,
+            sourceUrl: originUrl,
+            compatibilityKey: createRouteCompatibilityKey({
+                sourceUrl: originUrl,
+                routePath: "/",
+                viewportNames: ["desktop", "laptop", "tablet", "mobile"],
+                title: "Home",
+            }),
+            routePath: "/",
+            status: "complete",
+            phases: (firstCapture.captureDiagnostics?.phaseHistory ?? []).filter((phase) => !(phase.phase === "capture-mobile" &&
+                phase.viewportName === "mobile")),
+            capturedViewports: ["desktop", "laptop", "tablet", "mobile"],
+            evidenceClasses: ["screenshot-backed", "dom-backed"],
+            warnings: [],
+            reusedFromProgress: false,
+            capture: firstCapture,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+        }, null, 2)}\n`);
+        const second = await captureRuntimeRoutes({
+            originUrl,
+            routes: [{ path: "/", title: "Home" }],
+            workDir: path.join(parentDir, "second"),
+            cacheDir,
+        });
+        assert.equal(requests, requestsAfterFirst + 1);
+        const reusedViewports = (second.routeCaptures?.[0]?.captureDiagnostics?.phaseHistory ?? [])
+            .filter((phase) => phase.status === "reused")
+            .map((phase) => phase.viewportName)
+            .filter((viewportName) => Boolean(viewportName));
+        const completedViewports = (second.routeCaptures?.[0]?.captureDiagnostics?.phaseHistory ?? [])
+            .filter((phase) => phase.status === "completed" && phase.phase.startsWith("capture-"))
+            .map((phase) => phase.viewportName)
+            .filter((viewportName) => Boolean(viewportName));
+        assert.deepEqual(reusedViewports.sort(), ["desktop", "laptop", "tablet"]);
+        assert.equal(completedViewports.at(-1), "mobile");
+        assert.equal(second.captureDiagnostics?.routeProgress?.some((entry) => entry.status === "retried" && entry.reusedFromProgress), true);
+    }
+    finally {
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(() => resolve()));
+        await fs.rm(parentDir, { recursive: true, force: true });
+    }
+});
+test("late external redirects use a mobile-safe placeholder on Trusted Types protected documents", async () => {
     const target = createServer((_request, response) => {
         response.setHeader("content-security-policy", "require-trusted-types-for 'script'");
         response.setHeader("content-type", "text/html; charset=utf-8");
@@ -1221,10 +1808,11 @@ test("external redirects bypass Trusted Types protected documents", async () => 
     await new Promise((resolve) => target.listen(0, "127.0.0.1", resolve));
     const targetAddress = target.address();
     assert.ok(targetAddress && typeof targetAddress !== "string");
+    const targetUrl = `http://127.0.0.1:${targetAddress.port}/destination/` +
+        `${"unbroken-segment-".repeat(40)}?source=${"wide-value-".repeat(40)}`;
     const source = createServer((_request, response) => {
-        response.statusCode = 302;
-        response.setHeader("location", `http://127.0.0.1:${targetAddress.port}/destination`);
-        response.end();
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end(`<main>Redirecting</main><script>setTimeout(() => location.href = ${JSON.stringify(targetUrl)}, 50)</script>`);
     });
     await new Promise((resolve) => source.listen(0, "127.0.0.1", resolve));
     const sourceAddress = source.address();
@@ -1237,7 +1825,13 @@ test("external redirects bypass Trusted Types protected documents", async () => 
             workDir,
         });
         assert.equal(capture.title, "Redirect");
+        assert.equal(capture.routeCaptures?.[0]?.templateKind, "utility");
+        assert.equal(capture.routeCaptures?.[0]?.redirectTo, targetUrl);
         assert.equal(capture.nodes.some((node) => node.text?.startsWith("Continue to ")), true);
+        await assert.doesNotReject(() => validateFullSiteCapture({
+            routes: [{ path: "/" }],
+            capture,
+        }));
     }
     finally {
         source.closeAllConnections();
@@ -1246,6 +1840,316 @@ test("external redirects bypass Trusted Types protected documents", async () => 
             new Promise((resolve) => source.close(() => resolve())),
             new Promise((resolve) => target.close(() => resolve())),
         ]);
+        await fs.rm(workDir, { recursive: true, force: true });
+    }
+});
+test("internal delayed JavaScript redirects are captured as redirect routes", async () => {
+    const source = createServer((_request, response) => {
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end(`<!doctype html><html><body><main>Redirecting internally</main><script>setTimeout(() => location.href = '/learn?from=home#cta', 50)</script></body></html>`);
+    });
+    await new Promise((resolve) => source.listen(0, "127.0.0.1", resolve));
+    const address = source.address();
+    assert.ok(address && typeof address !== "string");
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-internal-js-redirect-"));
+    try {
+        const capture = await captureRuntimeRoutes({
+            originUrl: `http://127.0.0.1:${address.port}/`,
+            routes: [{ path: "/", title: "Redirect" }],
+            workDir,
+        });
+        assert.equal(capture.routeCaptures?.[0]?.routeKind, "redirect");
+        assert.equal(capture.routeCaptures?.[0]?.templateKind, "redirect");
+        assert.equal(capture.routeCaptures?.[0]?.redirectTo, "/learn?from=home#cta");
+        assert.equal(capture.routeCaptures?.[0]?.destinationKind, "internal");
+    }
+    finally {
+        source.closeAllConnections();
+        await new Promise((resolve) => source.close(() => resolve()));
+        await fs.rm(workDir, { recursive: true, force: true });
+    }
+});
+test("explicit external redirect metadata short-circuits capture into a redirect placeholder", async () => {
+    const source = createServer((_request, response) => {
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end("<!doctype html><html><body><main>Social shell</main></body></html>");
+    });
+    await new Promise((resolve) => source.listen(0, "127.0.0.1", resolve));
+    const address = source.address();
+    assert.ok(address && typeof address !== "string");
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-explicit-external-redirect-"));
+    try {
+        const capture = await captureRuntimeRoutes({
+            originUrl: `http://127.0.0.1:${address.port}/`,
+            routes: [
+                {
+                    path: "/twitter",
+                    title: "Twitter",
+                    routeKind: "redirect",
+                    templateKind: "utility",
+                    destination: "https://x.com/coderelay",
+                    destinationKind: "external",
+                    redirectTo: "https://x.com/coderelay",
+                },
+            ],
+            workDir,
+        });
+        const routeCapture = capture.routeCaptures?.[0];
+        assert.equal(routeCapture?.routeKind, "redirect");
+        assert.equal(routeCapture?.templateKind, "utility");
+        assert.equal(routeCapture?.redirectTo, "https://x.com/coderelay");
+        assert.equal(routeCapture?.nodes.some((node) => node.text?.startsWith("Continue to https://x.com/coderelay")), true);
+        assert.equal(routeCapture?.captureDiagnostics?.phaseHistory?.some((phase) => phase.phase === "stabilize" &&
+            phase.status === "skipped" &&
+            phase.detail === "redirect-placeholder"), true);
+    }
+    finally {
+        source.closeAllConnections();
+        await new Promise((resolve) => source.close(() => resolve()));
+        await fs.rm(workDir, { recursive: true, force: true });
+    }
+});
+test("declared redirect metadata alone does not reinterpret an explicit page capture as a redirect", async () => {
+    const source = createServer((_request, response) => {
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end("<!doctype html><html><body><main>Plain page</main></body></html>");
+    });
+    await new Promise((resolve) => source.listen(0, "127.0.0.1", resolve));
+    const address = source.address();
+    assert.ok(address && typeof address !== "string");
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-explicit-page-route-kind-"));
+    try {
+        const capture = await captureRuntimeRoutes({
+            originUrl: `http://127.0.0.1:${address.port}/`,
+            routes: [
+                {
+                    path: "/",
+                    title: "Home",
+                    routeKind: "page",
+                    templateKind: "static",
+                    destination: "https://example.com/should-not-win",
+                    destinationKind: "external",
+                    redirectTo: "https://example.com/should-not-win",
+                    redirectStatus: 302,
+                },
+            ],
+            workDir,
+        });
+        assert.equal(capture.routeCaptures?.[0]?.routeKind, "page");
+        assert.equal(capture.routeCaptures?.[0]?.templateKind, "static");
+        assert.equal(capture.routeCaptures?.[0]?.destination, undefined);
+        assert.equal(capture.routeCaptures?.[0]?.destinationKind, undefined);
+        assert.equal(capture.routeCaptures?.[0]?.redirectTo, undefined);
+        assert.equal(capture.routeCaptures?.[0]?.redirectStatus, undefined);
+    }
+    finally {
+        source.closeAllConnections();
+        await new Promise((resolve) => source.close(() => resolve()));
+        await fs.rm(workDir, { recursive: true, force: true });
+    }
+});
+test("redirects that happen during DOM extraction retry and resolve to a redirect placeholder", async () => {
+    const target = createServer((_request, response) => {
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end("<main>Late destination</main>");
+    });
+    await new Promise((resolve) => target.listen(0, "127.0.0.1", resolve));
+    const targetAddress = target.address();
+    assert.ok(targetAddress && typeof targetAddress !== "string");
+    const targetUrl = `http://127.0.0.1:${targetAddress.port}/late-destination`;
+    const source = createServer((_request, response) => {
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end(`<!doctype html>
+      <html>
+        <body>
+          <main>${"<section>Block</section>".repeat(4000)}</main>
+          <script>setTimeout(() => location.href = ${JSON.stringify(targetUrl)}, 850)</script>
+        </body>
+      </html>`);
+    });
+    await new Promise((resolve) => source.listen(0, "127.0.0.1", resolve));
+    const sourceAddress = source.address();
+    assert.ok(sourceAddress && typeof sourceAddress !== "string");
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-redirect-during-extraction-"));
+    try {
+        const capture = await captureRuntimeRoutes({
+            originUrl: `http://127.0.0.1:${sourceAddress.port}/`,
+            routes: [{ path: "/", title: "Late redirect" }],
+            workDir,
+        });
+        assert.equal(capture.routeCaptures?.[0]?.routeKind, "redirect");
+        assert.equal(capture.routeCaptures?.[0]?.templateKind, "utility");
+        assert.equal(capture.routeCaptures?.[0]?.redirectTo, targetUrl);
+        assert.equal(capture.routeCaptures?.[0]?.nodes.some((node) => node.text?.startsWith("Continue to ")), true);
+    }
+    finally {
+        source.closeAllConnections();
+        target.closeAllConnections();
+        await Promise.all([
+            new Promise((resolve) => source.close(() => resolve())),
+            new Promise((resolve) => target.close(() => resolve())),
+        ]);
+        await fs.rm(workDir, { recursive: true, force: true });
+    }
+});
+test("capture tolerates never-loading fonts and still records viewport evidence", async () => {
+    const fontRequests = [];
+    const server = createServer((request, response) => {
+        if (request.url === "/font.woff2") {
+            fontRequests.push(response);
+            return;
+        }
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end(`<!doctype html>
+      <html>
+        <head>
+          <style>
+            @font-face {
+              font-family: "HangingFont";
+              src: url("/font.woff2") format("woff2");
+            }
+            body { margin: 0; font-family: "HangingFont", system-ui, sans-serif; }
+          </style>
+        </head>
+        <body>
+          <main style="min-height:100vh;padding:48px">
+            <h1>Font fallback capture</h1>
+            <p>The font never finishes loading.</p>
+          </main>
+        </body>
+      </html>`);
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-never-loading-font-"));
+    try {
+        const capture = await captureRuntimeRoutes({
+            originUrl: `http://127.0.0.1:${address.port}/`,
+            routes: [{ path: "/", title: "Fonts" }],
+            workDir,
+        });
+        assert.equal(capture.routeCaptures?.[0]?.captureDiagnostics?.breakpointsCaptured.includes("mobile"), true);
+        assert.equal(capture.routeCaptures?.[0]?.captureDiagnostics?.fontReadiness?.desktop, false);
+    }
+    finally {
+        server.closeAllConnections();
+        for (const pending of fontRequests) {
+            pending.destroy();
+        }
+        await new Promise((resolve) => server.close(() => resolve()));
+        await fs.rm(workDir, { recursive: true, force: true });
+    }
+});
+test("capture retries a screenshot once when viewport dimensions drift mid-capture", async () => {
+    const server = createServer((_request, response) => {
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end(`<!doctype html>
+      <html>
+        <body style="margin:0">
+          <main style="min-height:100vh;padding:48px">
+            <h1>Viewport drift retry</h1>
+            <p>This route should succeed after one screenshot retry.</p>
+          </main>
+        </body>
+      </html>`);
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-viewport-drift-retry-"));
+    __setViewportDriftTestMode("force-single-post-screenshot-mismatch");
+    try {
+        const capture = await captureRuntimeRoutes({
+            originUrl: `http://127.0.0.1:${address.port}/`,
+            routes: [{ path: "/", title: "Viewport retry" }],
+            workDir,
+        });
+        const validation = capture.routeCaptures?.[0]?.captureDiagnostics?.viewportValidation?.desktop;
+        assert.equal(validation?.valid, true);
+        assert.equal(validation?.screenshotAttempts, 2);
+        assert.equal(validation?.observedBeforeInnerWidth, 1440);
+        assert.equal(validation?.observedInnerWidth, 1440);
+    }
+    finally {
+        __setViewportDriftTestMode("normal");
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(() => resolve()));
+        await fs.rm(workDir, { recursive: true, force: true });
+    }
+});
+test("capture fails with a precise viewport error when dimensions keep drifting", async () => {
+    const server = createServer((_request, response) => {
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end(`<!doctype html>
+      <html>
+        <body style="margin:0">
+          <main style="min-height:100vh;padding:48px">
+            <h1>Persistent viewport drift</h1>
+            <p>This route should fail after the bounded retry is exhausted.</p>
+          </main>
+        </body>
+      </html>`);
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-viewport-drift-fail-"));
+    __setViewportDriftTestMode("force-persistent-post-screenshot-mismatch");
+    try {
+        const capture = await captureRuntimeRoutes({
+            originUrl: `http://127.0.0.1:${address.port}/`,
+            routes: [{ path: "/", title: "Viewport failure" }],
+            workDir,
+        });
+        const validation = capture.routeCaptures?.[0]?.captureDiagnostics?.viewportValidation?.desktop;
+        assert.equal(validation?.valid, false);
+        assert.equal(validation?.screenshotAttempts, 2);
+        assert.match(validation?.reason ?? "", /viewport-drift|innerWidth-mismatch|screenshotWidth-mismatch/);
+        await assert.rejects(validateFullSiteCapture({
+            routes: [{ path: "/" }],
+            capture,
+        }), /viewport-drift|width mismatch/);
+    }
+    finally {
+        __setViewportDriftTestMode("normal");
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(() => resolve()));
+        await fs.rm(workDir, { recursive: true, force: true });
+    }
+});
+test("capture tolerates body replacement during hydration", async () => {
+    const server = createServer((_request, response) => {
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end(`<!doctype html>
+      <html>
+        <body>
+          <main id="shell" style="min-height:100vh;padding:32px">Shell</main>
+          <script>
+            setTimeout(() => {
+              const nextBody = document.createElement('body');
+              nextBody.innerHTML = '<main style="min-height:100vh;padding:32px"><h1>Hydrated page</h1><p>Body replaced safely.</p></main>';
+              document.body.replaceWith(nextBody);
+            }, 25);
+          </script>
+        </body>
+      </html>`);
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-body-replacement-"));
+    try {
+        const capture = await captureRuntimeRoutes({
+            originUrl: `http://127.0.0.1:${address.port}/`,
+            routes: [{ path: "/", title: "Hydrated" }],
+            workDir,
+        });
+        assert.equal(capture.routeCaptures?.[0]?.nodes.some((node) => node.text?.includes("Hydrated page")), true);
+    }
+    finally {
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(() => resolve()));
         await fs.rm(workDir, { recursive: true, force: true });
     }
 });
@@ -1481,10 +2385,195 @@ test("full-site app generation includes redirect route handling", async () => {
     assert.match(app, /window\.location\.replace/);
     assert.match(app, /navigateTo\(currentPage\.redirectTo, \{ replace: true \}\)/);
     assert.match(app, /Redirecting…/);
+    assert.equal(routeManifest[1]?.routeKind, "redirect");
+    assert.equal(routeManifest[1]?.destination, "https://twitter.com/coderelay");
+    assert.equal(routeManifest[1]?.destinationKind, "external");
     assert.equal(routeManifest[1]?.templateKind, "utility");
     assert.equal(routeManifest[1]?.redirectTo, "https://twitter.com/coderelay");
+    assert.equal(routeManifest[2]?.routeKind, "redirect");
+    assert.equal(routeManifest[2]?.destination, "/learn");
+    assert.equal(routeManifest[2]?.destinationKind, "internal");
     assert.equal(routeManifest[2]?.templateKind, "redirect");
     assert.equal(routeManifest[2]?.redirectTo, "/learn");
+});
+test("runtime-first full-site redirect captures preserve redirect metadata through IR and route manifest", async () => {
+    const runtimeCapture = createRuntimeCapture();
+    runtimeCapture.url = "https://example.com";
+    runtimeCapture.routeCaptures = [
+        {
+            ...createRuntimeCapture(),
+            url: "https://example.com/",
+            routePath: "/",
+            title: "Home",
+            nodes: [
+                {
+                    ...runtimeCapture.nodes[0],
+                    id: "home-root",
+                    text: undefined,
+                },
+                {
+                    ...runtimeCapture.nodes[1],
+                    id: "home-heading",
+                    text: "Home route",
+                },
+            ],
+            templateId: "/",
+            templatePath: "/",
+            routeKind: "page",
+            templateKind: "static",
+            captureDiagnostics: {
+                breakpointsCaptured: ["desktop", "laptop", "tablet", "mobile"],
+            },
+        },
+        {
+            ...createRuntimeCapture(),
+            url: "https://example.com/linkedin",
+            routePath: "/linkedin",
+            title: "LinkedIn",
+            nodes: [
+                {
+                    ...runtimeCapture.nodes[0],
+                    id: "linkedin-root",
+                    text: undefined,
+                },
+                {
+                    ...runtimeCapture.nodes[1],
+                    id: "linkedin-heading",
+                    text: "Redirecting to LinkedIn",
+                },
+            ],
+            templateId: "/linkedin",
+            templatePath: "/linkedin",
+            routeKind: "redirect",
+            templateKind: "utility",
+            destination: "https://linkedin.com/in/coderelay",
+            destinationKind: "external",
+            redirectTo: "https://linkedin.com/in/coderelay",
+            redirectStatus: 302,
+            captureDiagnostics: {
+                breakpointsCaptured: ["desktop", "laptop", "tablet", "mobile"],
+            },
+        },
+    ];
+    const pluginCapture = createPluginCapture();
+    pluginCapture.context = {
+        ...pluginCapture.context,
+        exportMode: "full-site",
+        captureMode: "runtime-first",
+        sitePages: [
+            { name: "Home", path: "/" },
+            {
+                name: "LinkedIn",
+                path: "/linkedin",
+                redirectTo: "https://linkedin.com/in/coderelay",
+                redirectStatus: 302,
+            },
+        ],
+    };
+    const ir = buildIntermediateRepresentation({
+        url: "https://example.com",
+        name: "RedirectRoundTrip",
+        exportMode: "full-site",
+        captureMode: "runtime-first",
+        runtimeCapture,
+        pluginCapture,
+        nodeMatches: createNodeMatches(),
+    });
+    const linkedInPage = ir.sitePages?.find((page) => page.routePath === "/linkedin");
+    assert.equal(linkedInPage?.routeKind, "redirect");
+    assert.equal(linkedInPage?.templateKind, "utility");
+    assert.equal(linkedInPage?.destination, "https://linkedin.com/in/coderelay");
+    assert.equal(linkedInPage?.destinationKind, "external");
+    assert.equal(linkedInPage?.redirectTo, "https://linkedin.com/in/coderelay");
+    assert.equal(linkedInPage?.redirectStatus, 302);
+    const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-runtime-redirect-roundtrip-"));
+    await generateNextProject({
+        ir,
+        projectDir,
+        strategy: {
+            id: "runtime-routes",
+            structuredLayout: true,
+            compactSpacing: false,
+            aggressiveMobileStacking: false,
+            preserveImageAspectRatio: true,
+        },
+    });
+    const routeManifest = JSON.parse(await fs.readFile(path.join(projectDir, "route-manifest.json"), "utf8"));
+    const route = routeManifest.find((entry) => entry.path === "/linkedin");
+    assert.deepEqual(route, {
+        componentName: "LinkedIn",
+        path: "/linkedin",
+        title: "LinkedIn",
+        routeKind: "redirect",
+        templateId: "/linkedin",
+        templatePath: "/linkedin",
+        template: null,
+        templateKind: "utility",
+        destination: "https://linkedin.com/in/coderelay",
+        destinationKind: "external",
+        redirectTo: "https://linkedin.com/in/coderelay",
+        redirectStatus: 302,
+        sourceTextLength: linkedInPage?.sourceTextLength ?? 0,
+        sourceNodeCount: route?.sourceNodeCount,
+    });
+});
+test("generated route metadata preserves explicit page kind instead of re-inferring a redirect", async () => {
+    const base = buildIntermediateRepresentation({
+        url: "https://example.com",
+        name: "PageRouteKindWins",
+        runtimeCapture: createRuntimeCapture(),
+        pluginCapture: createPluginCapture(),
+        nodeMatches: createNodeMatches(),
+    });
+    const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), "coderelay-page-route-kind-wins-"));
+    const pageIr = {
+        ...base,
+        exportMode: "full-site",
+        sitePages: [
+            {
+                componentName: "HomePage",
+                routePath: "/",
+                title: "Home",
+                templateId: "/",
+                templatePath: "/",
+                routeKind: "page",
+                template: "static",
+                templateKind: "static",
+                destination: "https://example.com/should-not-win",
+                destinationKind: "external",
+                redirectTo: "https://example.com/should-not-win",
+                redirectStatus: 302,
+                nodes: [
+                    {
+                        ...base.component.nodes[0],
+                        id: "home-page",
+                        text: "Home content",
+                    },
+                ],
+            },
+        ],
+    };
+    await generateNextProject({
+        ir: pageIr,
+        projectDir,
+        strategy: {
+            id: "runtime-routes",
+            structuredLayout: true,
+            compactSpacing: false,
+            aggressiveMobileStacking: false,
+            preserveImageAspectRatio: true,
+        },
+    });
+    const app = await fs.readFile(path.join(projectDir, "src", "App.tsx"), "utf8");
+    const routeManifest = JSON.parse(await fs.readFile(path.join(projectDir, "route-manifest.json"), "utf8"));
+    assert.match(app, /redirectTo: null/);
+    assert.doesNotMatch(app, /should-not-win/);
+    assert.equal(routeManifest[0]?.routeKind, "page");
+    assert.equal(routeManifest[0]?.templateKind, "static");
+    assert.equal(routeManifest[0]?.destination, null);
+    assert.equal(routeManifest[0]?.destinationKind, null);
+    assert.equal(routeManifest[0]?.redirectTo, null);
+    assert.equal(routeManifest[0]?.redirectStatus, null);
 });
 test("full-site page generation shares template modules for repeated template groups", async () => {
     const base = buildIntermediateRepresentation({

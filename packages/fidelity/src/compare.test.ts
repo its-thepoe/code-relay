@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
+import { createServer } from "node:http";
 import { PNG } from "pngjs";
 import {
   aggregateComparisonDiagnostics,
@@ -259,6 +260,172 @@ test("compareGeneratedPreview labels screenshot-backed fidelity when screenshots
   assert.equal(fidelity.evidence.sourceScreenshotViewports.length, 4);
   assert.equal(fidelity.evidence.generatedScreenshotViewports.length, 4);
   assert.equal(fidelity.fidelity.overall > 99, true);
+});
+
+test("compareGeneratedPreview records the underlying preview capture error when screenshots cannot be generated", async () => {
+  const attemptDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-compare-preview-error-"),
+  );
+  for (const [viewport, size] of Object.entries({
+    desktop: { width: 1440, height: 900 },
+    laptop: { width: 1280, height: 900 },
+    tablet: { width: 768, height: 1024 },
+    mobile: { width: 390, height: 844 },
+  }) as Array<[keyof ExportIR["runtimeCapture"]["viewports"], { width: number; height: number }]>) {
+    const png = new PNG({ width: size.width, height: size.height, fill: true });
+    png.data.fill(0xff);
+    await fs.writeFile(path.join(attemptDir, `${viewport}.png`), PNG.sync.write(png));
+  }
+
+  const missingPreviewPath = path.join(attemptDir, "missing-preview.html");
+  const fidelity = await compareGeneratedPreview({
+    ir: {
+      ...createIr(),
+      runtimeCapture: {
+        ...createIr().runtimeCapture,
+        viewports: {
+          desktop: {
+            screenshotPath: path.join(attemptDir, "desktop.png"),
+            width: 1440,
+            height: 900,
+          },
+          laptop: {
+            screenshotPath: path.join(attemptDir, "laptop.png"),
+            width: 1280,
+            height: 900,
+          },
+          tablet: {
+            screenshotPath: path.join(attemptDir, "tablet.png"),
+            width: 768,
+            height: 1024,
+          },
+          mobile: {
+            screenshotPath: path.join(attemptDir, "mobile.png"),
+            width: 390,
+            height: 844,
+          },
+        },
+        nodes: [],
+      },
+      exportTree: [],
+    },
+    previewHtmlPath: missingPreviewPath,
+    attemptDir,
+  });
+
+  assert.equal(fidelity.evidence.mode, "heuristic");
+  assert.match(
+    fidelity.evidence.reason,
+    /Generated preview capture error:/,
+  );
+  const captureError = JSON.parse(
+    await fs.readFile(
+      path.join(attemptDir, "generated-preview-capture-error.json"),
+      "utf8",
+    ),
+  ) as {
+    previewHtmlPath: string;
+    error: string;
+  };
+  assert.equal(captureError.previewHtmlPath, missingPreviewPath);
+  assert.match(captureError.error, /ENOENT|ERR_FILE_NOT_FOUND|net::ERR_FILE_NOT_FOUND/);
+});
+
+test("compareGeneratedPreview stays screenshot-backed when preview fonts are slow", async () => {
+  const attemptDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-compare-preview-slow-fonts-"),
+  );
+  const server = createServer((request, response) => {
+    if (request.url === "/slow.woff2") {
+      setTimeout(() => {
+        response.statusCode = 200;
+        response.setHeader("content-type", "font/woff2");
+        response.end("not-a-real-font");
+      }, 20_000);
+      return;
+    }
+    response.statusCode = 404;
+    response.end("not found");
+  });
+  await new Promise<void>((resolve) =>
+    server.listen(0, "127.0.0.1", resolve),
+  );
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+
+  try {
+    const previewPath = path.join(attemptDir, "preview.html");
+    await fs.writeFile(
+      previewPath,
+      `<!doctype html>
+      <html>
+        <head>
+          <style>
+            @font-face { font-family: SlowPreview; src: url("http://127.0.0.1:${address.port}/slow.woff2"); }
+            html, body { margin: 0; background: #ffffff; }
+            body { font-family: SlowPreview, sans-serif; }
+          </style>
+        </head>
+        <body></body>
+      </html>\n`,
+    );
+    for (const [viewport, size] of Object.entries({
+      desktop: { width: 1440, height: 900 },
+      laptop: { width: 1280, height: 900 },
+      tablet: { width: 768, height: 1024 },
+      mobile: { width: 390, height: 844 },
+    }) as Array<[keyof ExportIR["runtimeCapture"]["viewports"], { width: number; height: number }]>) {
+      const png = new PNG({ width: size.width, height: size.height, fill: true });
+      png.data.fill(0xff);
+      await fs.writeFile(path.join(attemptDir, `${viewport}.png`), PNG.sync.write(png));
+    }
+
+    const fidelity = await compareGeneratedPreview({
+      ir: {
+        ...createIr(),
+        runtimeCapture: {
+          ...createIr().runtimeCapture,
+          viewports: {
+            desktop: {
+              screenshotPath: path.join(attemptDir, "desktop.png"),
+              width: 1440,
+              height: 900,
+            },
+            laptop: {
+              screenshotPath: path.join(attemptDir, "laptop.png"),
+              width: 1280,
+              height: 900,
+            },
+            tablet: {
+              screenshotPath: path.join(attemptDir, "tablet.png"),
+              width: 768,
+              height: 1024,
+            },
+            mobile: {
+              screenshotPath: path.join(attemptDir, "mobile.png"),
+              width: 390,
+              height: 844,
+            },
+          },
+          nodes: [],
+        },
+        exportTree: [],
+      },
+      previewHtmlPath: previewPath,
+      attemptDir,
+    });
+
+    assert.equal(fidelity.evidence.mode, "screenshot-backed");
+    assert.equal(fidelity.evidence.generatedScreenshotViewports.length, 4);
+    await fs.access(path.join(attemptDir, "generated-desktop.png"));
+    await fs.access(path.join(attemptDir, "generated-mobile.png"));
+    await assert.rejects(
+      fs.access(path.join(attemptDir, "generated-preview-capture-error.json")),
+    );
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });
 
 test("scorePreviewValidation rewards found styled nodes", () => {

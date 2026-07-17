@@ -1,0 +1,759 @@
+{
+  "exportedAt": "2026-07-15T08:33:06.567Z",
+  "totals": {
+    "irAssets": 35,
+    "runtimeAssets": 89,
+    "cmsAssets": 0
+  },
+  "irAssets": [
+    {
+      "url": "https://framerusercontent.com/images/um3bxT2WVFF4kr6enjXB8pntPlo.svg?width=100&height=100",
+      "kind": "image",
+      "alt": "Person 1"
+    },
+    {
+      "url": "https://framerusercontent.com/images/lWoxjUfzID4I2CJ2EAGpp1BxXk.svg?width=100&height=100",
+      "kind": "image",
+      "alt": "Person 2"
+    },
+    {
+      "url": "https://framerusercontent.com/images/LtSGTHttO0ZpuCVLNu4mPIpOuk.svg?width=100&height=100",
+      "kind": "image",
+      "alt": "Person 3"
+    },
+    {
+      "url": "https://framerusercontent.com/images/CVICQI4s8tTiJBrNEN8nOXCzdK0.png?scale-down-to=1024",
+      "kind": "image",
+      "alt": "Profile Picture"
+    },
+    {
+      "url": "https://framerusercontent.com/images/0f09LEy6qZK1Y9gL9T6AG622ZZ8.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Orange Pyramid"
+    },
+    {
+      "url": "https://framerusercontent.com/images/m3YA9HpmQG8c9ThSe5XusCzYw.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Purple Sphere"
+    },
+    {
+      "url": "https://framerusercontent.com/images/lZLqIoLGAjMHHOlhOwugYSASrjc.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Blue Cylinder"
+    },
+    {
+      "url": "https://framerusercontent.com/images/l1KkpEI9tJzqQPgJDNKytRuxgeI.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Turquoise Star"
+    },
+    {
+      "url": "https://framerusercontent.com/images/LUkmo3gFVQOfp5kvltA05Mc6K4.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Lime Green Object"
+    },
+    {
+      "url": "https://framerusercontent.com/images/jaVohrUAKzleX6rjxEEOPrqeysw.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Yellow Cube"
+    },
+    {
+      "url": "https://framerusercontent.com/images/53osOsH2OP7bAyFNQKbXOVwk.png?width=1024&height=1024",
+      "kind": "image",
+      "alt": "Purple Cube"
+    },
+    {
+      "url": "https://framerusercontent.com/images/en9G6oaN8j6IT8H0gpgIS69gXg4.png?scale-down-to=1024&width=2048&height=2048",
+      "kind": "image",
+      "alt": "Blue Pyramid"
+    },
+    {
+      "url": "https://framerusercontent.com/images/21y9kg3DMhOUBxbQ3y9CwHNPQO8.png?width=192&height=192",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/2JNdM2O0RnZg1BcZHNgDWoMrhKA.png?width=192&height=192",
+      "kind": "image",
+      "alt": "David Memoji Photo"
+    },
+    {
+      "url": "https://framerusercontent.com/images/lQFJ89Y2vFBRt0WU8OFpJ3ZkPlA.png?width=192&height=192",
+      "kind": "image",
+      "alt": "Emily Memoji Photo"
+    },
+    {
+      "url": "https://framerusercontent.com/images/tLJlDufDxfRWX3e1UyLWQODdOaw.png?width=1024&height=1024",
+      "kind": "image",
+      "alt": "Turquoise Cube"
+    },
+    {
+      "url": "https://framerusercontent.com/images/nSf6ya4FcQ5iCpFIBAboozmlgzA.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Red Pyramid"
+    },
+    {
+      "url": "https://framerusercontent.com/images/fbDdTEyddMlUKyioryX3T3M3I.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Blue Cube"
+    },
+    {
+      "url": "https://framerusercontent.com/images/un1NlasO4xdJ3ogUjNzC5U3NsU.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Green Cylinder"
+    },
+    {
+      "url": "https://framerusercontent.com/images/gshDWTLuPfNPn8ZUFpq49jhvIPk.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Orange Sphere"
+    },
+    {
+      "url": "https://framerusercontent.com/images/2YMs3TUoFSk6OAJu3tquJSjY.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Purple Circle"
+    },
+    {
+      "url": "https://framerusercontent.com/images/eiTxkfpr6msnt5xKhves6aFLlTw.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Yellow Heart"
+    },
+    {
+      "url": "https://framerusercontent.com/images/YnQwe4Efg37DiOr8IRYEfPzKE.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Orange Star"
+    },
+    {
+      "url": "https://framerusercontent.com/images/snuvetWlg8kNNuH4rBY2aSQch5c.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Blue Gem"
+    },
+    {
+      "url": "https://framerusercontent.com/images/3YQ5k1hZdNkPRgquxbSfEunCE.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Lime Green Cube"
+    },
+    {
+      "url": "https://framerusercontent.com/images/5PoEhJTKleU3AaFM5T9aYtiqo.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Yellow Pill"
+    },
+    {
+      "url": "https://framerusercontent.com/images/7Xrs4S6qdC6EyvyrM1EGw533im4.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Pink Gem"
+    },
+    {
+      "url": "https://framerusercontent.com/images/eZQ1X1Fpw11apl285CIeN8iEVI.png?scale-down-to=1024&width=4800&height=3600",
+      "kind": "image",
+      "alt": "Vitalo Framer template"
+    },
+    {
+      "url": "https://framerusercontent.com/images/pwnBF4uZrCSugu0a8ZiDdaD4A4.png?scale-down-to=1024&width=4800&height=3600",
+      "kind": "image",
+      "alt": "Artikle screen"
+    },
+    {
+      "url": "https://framerusercontent.com/images/UFfz36PjDofFGqSVyD7dxLp6G4M.png?scale-down-to=1024&width=4800&height=3600",
+      "kind": "image",
+      "alt": "Flowpath screen"
+    },
+    {
+      "url": "https://framerusercontent.com/images/LAZePzksNGsqwC1vEotMzZH3EdE.png?scale-down-to=1024&width=4800&height=3600",
+      "kind": "image",
+      "alt": "Kudos screen"
+    },
+    {
+      "url": "https://framerusercontent.com/images/G3aJzgcFG0nJ4pDBy94oGqN6Q.png?scale-down-to=1024&width=4800&height=3600",
+      "kind": "image",
+      "alt": "Neozen"
+    },
+    {
+      "url": "https://framerusercontent.com/images/wtSXht7rnWOGDS3UivDigQQcwZo.png?scale-down-to=1024&width=4800&height=3600",
+      "kind": "image",
+      "alt": "Aerosound 01"
+    },
+    {
+      "url": "data:image/svg+xml,<svg display=\"block\" role=\"presentation\" viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M 24.635 22.866 C 25.123 23.355 25.123 24.147 24.635 24.635 C 24.147 25.123 23.355 25.123 22.866 24.635 L 12.501 14.268 L 2.135 24.635 C 1.647 25.123 0.855 25.123 0.366 24.635 C -0.122 24.147 -0.122 23.355 0.366 22.866 L 10.734 12.501 L 0.366 2.135 C -0.122 1.647 -0.122 0.855 0.366 0.366 C 0.855 -0.122 1.647 -0.122 2.135 0.366 L 12.501 10.734 L 22.866 0.366 C 23.355 -0.122 24.147 -0.122 24.635 0.366 C 25.123 0.855 25.123 1.647 24.635 2.135 L 14.268 12.501 Z\" fill=\"rgb(0, 0, 0)\" height=\"25.00139023844741px\" id=\"jBymG44fK\" transform=\"translate(7.499 7.499)\" width=\"25.001390238447406px\"/></svg>",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/IJyQj0yIema8tFABogHMDHcP6M.png?scale-down-to=2048&width=4800&height=3600",
+      "kind": "image",
+      "alt": "Quomi Screen on a desktop"
+    }
+  ],
+  "runtimeAssets": [
+    {
+      "nodeId": "/::node-9",
+      "kind": "link",
+      "url": "/#home",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-15",
+      "kind": "link",
+      "url": "/#about",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-21",
+      "kind": "link",
+      "url": "/#stack",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-27",
+      "kind": "link",
+      "url": "/#services",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-33",
+      "kind": "link",
+      "url": "/#projects",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-39",
+      "kind": "link",
+      "url": "/#contact",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-79",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/um3bxT2WVFF4kr6enjXB8pntPlo.svg?width=100&height=100",
+      "alt": "Person 1",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-84",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/lWoxjUfzID4I2CJ2EAGpp1BxXk.svg?width=100&height=100",
+      "alt": "Person 2",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-89",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/LtSGTHttO0ZpuCVLNu4mPIpOuk.svg?width=100&height=100",
+      "alt": "Person 3",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-132",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-142",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/CVICQI4s8tTiJBrNEN8nOXCzdK0.png?scale-down-to=1024",
+      "alt": "Profile Picture",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-145",
+      "kind": "link",
+      "url": "/#pricing",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-159",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/0f09LEy6qZK1Y9gL9T6AG622ZZ8.png?scale-down-to=512&width=1024&height=1024",
+      "alt": "Orange Pyramid",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-163",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/m3YA9HpmQG8c9ThSe5XusCzYw.png?scale-down-to=512&width=1024&height=1024",
+      "alt": "Purple Sphere",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-167",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/lZLqIoLGAjMHHOlhOwugYSASrjc.png?scale-down-to=512&width=1024&height=1024",
+      "alt": "Blue Cylinder",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-171",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/l1KkpEI9tJzqQPgJDNKytRuxgeI.png?scale-down-to=512&width=1024&height=1024",
+      "alt": "Turquoise Star",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-175",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/LUkmo3gFVQOfp5kvltA05Mc6K4.png?scale-down-to=512&width=1024&height=1024",
+      "alt": "Lime Green Object",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-179",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/jaVohrUAKzleX6rjxEEOPrqeysw.png?scale-down-to=512&width=1024&height=1024",
+      "alt": "Yellow Cube",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-189",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/53osOsH2OP7bAyFNQKbXOVwk.png?width=1024&height=1024",
+      "alt": "Purple Cube",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-193",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/en9G6oaN8j6IT8H0gpgIS69gXg4.png?scale-down-to=1024&width=2048&height=2048",
+      "alt": "Blue Pyramid",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-215",
+      "kind": "link",
+      "url": "https://twitter.com/CristianMielu",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-250",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/21y9kg3DMhOUBxbQ3y9CwHNPQO8.png?width=192&height=192",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-264",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/2JNdM2O0RnZg1BcZHNgDWoMrhKA.png?width=192&height=192",
+      "alt": "David Memoji Photo",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-278",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/lQFJ89Y2vFBRt0WU8OFpJ3ZkPlA.png?width=192&height=192",
+      "alt": "Emily Memoji Photo",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-292",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/21y9kg3DMhOUBxbQ3y9CwHNPQO8.png?width=192&height=192",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-306",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/2JNdM2O0RnZg1BcZHNgDWoMrhKA.png?width=192&height=192",
+      "alt": "David Memoji Photo",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-320",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/lQFJ89Y2vFBRt0WU8OFpJ3ZkPlA.png?width=192&height=192",
+      "alt": "Emily Memoji Photo",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-334",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/21y9kg3DMhOUBxbQ3y9CwHNPQO8.png?width=192&height=192",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-348",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/2JNdM2O0RnZg1BcZHNgDWoMrhKA.png?width=192&height=192",
+      "alt": "David Memoji Photo",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-362",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/lQFJ89Y2vFBRt0WU8OFpJ3ZkPlA.png?width=192&height=192",
+      "alt": "Emily Memoji Photo",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-376",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/21y9kg3DMhOUBxbQ3y9CwHNPQO8.png?width=192&height=192",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-390",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/2JNdM2O0RnZg1BcZHNgDWoMrhKA.png?width=192&height=192",
+      "alt": "David Memoji Photo",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-404",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/lQFJ89Y2vFBRt0WU8OFpJ3ZkPlA.png?width=192&height=192",
+      "alt": "Emily Memoji Photo",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-436",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/tLJlDufDxfRWX3e1UyLWQODdOaw.png?width=1024&height=1024",
+      "alt": "Turquoise Cube",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-451",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-468",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-485",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-502",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-519",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-536",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-553",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-570",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-587",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-604",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-621",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-638",
+      "kind": "link",
+      "url": "/[object%20SVGAnimatedString]",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-667",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/nSf6ya4FcQ5iCpFIBAboozmlgzA.png?scale-down-to=512&width=1024&height=1024",
+      "alt": "Red Pyramid",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-677",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/fbDdTEyddMlUKyioryX3T3M3I.png?scale-down-to=512&width=1024&height=1024",
+      "alt": "Blue Cube",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-687",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/un1NlasO4xdJ3ogUjNzC5U3NsU.png?scale-down-to=512&width=1024&height=1024",
+      "alt": "Green Cylinder",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-697",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/gshDWTLuPfNPn8ZUFpq49jhvIPk.png?scale-down-to=512&width=1024&height=1024",
+      "alt": "Orange Sphere",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-707",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/2YMs3TUoFSk6OAJu3tquJSjY.png?scale-down-to=512&width=1024&height=1024",
+      "alt": "Purple Circle",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-717",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/eiTxkfpr6msnt5xKhves6aFLlTw.png?scale-down-to=512&width=1024&height=1024",
+      "alt": "Yellow Heart",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-727",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/YnQwe4Efg37DiOr8IRYEfPzKE.png?scale-down-to=512&width=1024&height=1024",
+      "alt": "Orange Star",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-737",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/snuvetWlg8kNNuH4rBY2aSQch5c.png?scale-down-to=512&width=1024&height=1024",
+      "alt": "Blue Gem",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-747",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/3YQ5k1hZdNkPRgquxbSfEunCE.png?scale-down-to=512&width=1024&height=1024",
+      "alt": "Lime Green Cube",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-757",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/5PoEhJTKleU3AaFM5T9aYtiqo.png?scale-down-to=512&width=1024&height=1024",
+      "alt": "Yellow Pill",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-767",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/7Xrs4S6qdC6EyvyrM1EGw533im4.png?scale-down-to=512&width=1024&height=1024",
+      "alt": "Pink Gem",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-794",
+      "kind": "link",
+      "url": "https://www.framer.com/pricing?via=u9kavnv&dub_id=XfGQ1apyWviE8U0U",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-874",
+      "kind": "link",
+      "url": "https://www.framer.com/pricing?via=u9kavnv&dub_id=XfGQ1apyWviE8U0U",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-949",
+      "kind": "link",
+      "url": "https://calendly.com/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-970",
+      "kind": "link",
+      "url": "/vitalo-personal-training-coaching-framer-template",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-975",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/eZQ1X1Fpw11apl285CIeN8iEVI.png?scale-down-to=1024&width=4800&height=3600",
+      "alt": "Vitalo Framer template",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-984",
+      "kind": "link",
+      "url": "/artikle-membership-framer-template",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-989",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/pwnBF4uZrCSugu0a8ZiDdaD4A4.png?scale-down-to=1024&width=4800&height=3600",
+      "alt": "Artikle screen",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-998",
+      "kind": "link",
+      "url": "/flowpath-ai-automation-template",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1003",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/UFfz36PjDofFGqSVyD7dxLp6G4M.png?scale-down-to=1024&width=4800&height=3600",
+      "alt": "Flowpath screen",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1012",
+      "kind": "link",
+      "url": "/kudos-design-agency-website",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1017",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/LAZePzksNGsqwC1vEotMzZH3EdE.png?scale-down-to=1024&width=4800&height=3600",
+      "alt": "Kudos screen",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1026",
+      "kind": "link",
+      "url": "/neozen-portfolio-framer-template",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1031",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/G3aJzgcFG0nJ4pDBy94oGqN6Q.png?scale-down-to=1024&width=4800&height=3600",
+      "alt": "Neozen",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1040",
+      "kind": "link",
+      "url": "/aerosound-e-commerce-website",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1045",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/wtSXht7rnWOGDS3UivDigQQcwZo.png?scale-down-to=1024&width=4800&height=3600",
+      "alt": "Aerosound 01",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1082",
+      "kind": "link",
+      "url": "https://calendly.com/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1088",
+      "kind": "link",
+      "url": "mailto: mielucristian@gmail.com",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1098",
+      "kind": "link",
+      "url": "/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1104",
+      "kind": "link",
+      "url": "/404",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1110",
+      "kind": "link",
+      "url": "/licensing",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1116",
+      "kind": "link",
+      "url": "https://github.com/mielucristian/cohesion-documentation",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1126",
+      "kind": "link",
+      "url": "https://framer.link/UdEP7eA",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1132",
+      "kind": "link",
+      "url": "https://twitter.com/CristianMielu",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1138",
+      "kind": "link",
+      "url": "https://www.linkedin.com/in/cristian-mielu-a8b2b3b5/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1150",
+      "kind": "link",
+      "url": "/legal/privacy-policy",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1157",
+      "kind": "link",
+      "url": "/legal/cookie-policy",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1173",
+      "kind": "link",
+      "url": "https://www.uihub.design/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1178",
+      "kind": "link",
+      "url": "https://framer.link/cristianmielu",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1182",
+      "kind": "image",
+      "url": "data:image/svg+xml,<svg display=\"block\" role=\"presentation\" viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M 24.635 22.866 C 25.123 23.355 25.123 24.147 24.635 24.635 C 24.147 25.123 23.355 25.123 22.866 24.635 L 12.501 14.268 L 2.135 24.635 C 1.647 25.123 0.855 25.123 0.366 24.635 C -0.122 24.147 -0.122 23.355 0.366 22.866 L 10.734 12.501 L 0.366 2.135 C -0.122 1.647 -0.122 0.855 0.366 0.366 C 0.855 -0.122 1.647 -0.122 2.135 0.366 L 12.501 10.734 L 22.866 0.366 C 23.355 -0.122 24.147 -0.122 24.635 0.366 C 25.123 0.855 25.123 1.647 24.635 2.135 L 14.268 12.501 Z\" fill=\"rgb(0, 0, 0)\" height=\"25.00139023844741px\" id=\"jBymG44fK\" transform=\"translate(7.499 7.499)\" width=\"25.001390238447406px\"/></svg>",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1188",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/IJyQj0yIema8tFABogHMDHcP6M.png?scale-down-to=2048&width=4800&height=3600",
+      "alt": "Quomi Screen on a desktop",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1190",
+      "kind": "link",
+      "url": "https://framer.link/SW15EBF",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1198",
+      "kind": "link",
+      "url": "https://www.framer.com/",
+      "source": "runtime"
+    }
+  ],
+  "cmsAssets": []
+}

@@ -1,0 +1,44 @@
+export const framerFonts = [
+  {
+    name: 'sans-serif',
+    family: 'sans-serif',
+    source: 'runtime',
+  },
+  {
+    name: 'Public Sans',
+    family: '"Public Sans", "Public Sans Placeholder", sans-serif',
+    source: 'runtime',
+  },
+  {
+    name: 'Public Sans',
+    family: '"Public Sans", sans-serif',
+    source: 'runtime',
+  },
+  {
+    name: 'PT Serif',
+    family: '"PT Serif", "PT Serif Placeholder", serif',
+    source: 'runtime',
+  },
+  {
+    name: 'Inter',
+    family: 'Inter, sans-serif',
+    source: 'runtime',
+  },
+  {
+    name: 'Inter',
+    family: 'Inter, "Inter Placeholder", sans-serif',
+    source: 'runtime',
+  },
+] as const
+
+export type FramerFontMeta = (typeof framerFonts)[number]
+
+export function getFramerFontByFamily(family: string) {
+  return framerFonts.find((entry) => entry.family === family)
+}
+
+export function getFramerFontByName(name: string) {
+  return framerFonts.find((entry) => entry.name === name)
+}
+
+export const framerFontFamilies = framerFonts.map((entry) => entry.family)

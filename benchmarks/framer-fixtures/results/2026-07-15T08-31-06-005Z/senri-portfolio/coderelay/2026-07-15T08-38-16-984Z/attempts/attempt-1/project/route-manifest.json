@@ -1,0 +1,18 @@
+[
+  {
+    "componentName": "Home",
+    "path": "/",
+    "title": "Home",
+    "routeKind": "page",
+    "templateId": "/",
+    "templatePath": "/",
+    "template": null,
+    "templateKind": "static",
+    "destination": null,
+    "destinationKind": null,
+    "redirectTo": null,
+    "redirectStatus": null,
+    "sourceTextLength": 2760,
+    "sourceNodeCount": 1646
+  }
+]

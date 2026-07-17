@@ -1,0 +1,109 @@
+{
+  "attempt": 2,
+  "strategy": "semantic-layout+structured",
+  "overall": 68.37,
+  "fidelity": {
+    "desktop": 65.49,
+    "laptop": 74.46,
+    "tablet": 80.4,
+    "mobile": 78.32,
+    "overall": 68.37,
+    "layout": 74.93,
+    "typography": 70,
+    "color": 73.49,
+    "assets": 100,
+    "motion": 100,
+    "nodeMatch": 0,
+    "breakpointScores": {
+      "desktop": 65.49,
+      "laptop": 74.46,
+      "tablet": 80.4,
+      "mobile": 78.32
+    }
+  },
+  "warningCount": 2,
+  "previewValidation": {
+    "status": "validated",
+    "summary": {
+      "viewportsValidated": 4,
+      "inspectedNodes": 480,
+      "foundNodes": 480,
+      "nodesWithNonDefaultStyles": 480,
+      "nodesExpectingMotion": 0,
+      "nodesWithNonDefaultMotion": 0
+    },
+    "byViewport": {
+      "desktop": {
+        "viewport": "desktop",
+        "inspectedNodes": 120,
+        "foundNodes": 120,
+        "nodesWithNonDefaultStyles": 120,
+        "nodesExpectingMotion": 0,
+        "nodesWithNonDefaultMotion": 0
+      },
+      "laptop": {
+        "viewport": "laptop",
+        "inspectedNodes": 120,
+        "foundNodes": 120,
+        "nodesWithNonDefaultStyles": 120,
+        "nodesExpectingMotion": 0,
+        "nodesWithNonDefaultMotion": 0
+      },
+      "tablet": {
+        "viewport": "tablet",
+        "inspectedNodes": 120,
+        "foundNodes": 120,
+        "nodesWithNonDefaultStyles": 120,
+        "nodesExpectingMotion": 0,
+        "nodesWithNonDefaultMotion": 0
+      },
+      "mobile": {
+        "viewport": "mobile",
+        "inspectedNodes": 120,
+        "foundNodes": 120,
+        "nodesWithNonDefaultStyles": 120,
+        "nodesExpectingMotion": 0,
+        "nodesWithNonDefaultMotion": 0
+      }
+    }
+  },
+  "diagnosis": [
+    "Layout fidelity stayed weak, so the next pass should keep wrappers and reinforce runtime-derived layout styles.",
+    "Node-match confidence stayed low, so the next pass should preserve more wrapper surfaces and runtime style evidence.",
+    "Typography fidelity fell below target, so the next pass should promote runtime font metrics into the export tree.",
+    "Overall fidelity stayed below target, so the next pass should reinforce runtime styles across the export tree."
+  ],
+  "diagnosisDetails": [
+    {
+      "category": "layout_mismatch",
+      "message": "Layout fidelity stayed weak, so the next pass should keep wrappers and reinforce runtime-derived layout styles."
+    },
+    {
+      "category": "low_node_match",
+      "message": "Node-match confidence stayed low, so the next pass should preserve more wrapper surfaces and runtime style evidence."
+    },
+    {
+      "category": "typography_mismatch",
+      "message": "Typography fidelity fell below target, so the next pass should promote runtime font metrics into the export tree."
+    },
+    {
+      "category": "low_overall_fidelity",
+      "message": "Overall fidelity stayed below target, so the next pass should reinforce runtime styles across the export tree."
+    }
+  ],
+  "patchOperations": [
+    "enable_structured_layout",
+    "preserve_wrapper_surfaces",
+    "reinforce_runtime_styles",
+    "boost_typography_from_runtime"
+  ],
+  "patchTargets": {
+    "boost_typography_from_runtime": [
+      "/::node-83",
+      "/::node-11"
+    ]
+  },
+  "patchPropertyHints": {},
+  "resetToBestStateForNextAttempt": false,
+  "selectedAsBest": false
+}

@@ -1,4 +1,6 @@
 import slugify from "slugify";
+import { classifyRouteDestinationKind, resolveExportRouteMetadata, } from "../../shared/src/route-contract.js";
+import { normalizeExportRoutePath, normalizePluginExportRoutes, readRedirectStatusFromRecord, readRedirectTargetFromRecord, } from "./export-routes.js";
 export function buildIntermediateRepresentation(input) {
     const contentNodes = promoteFallbackHeading(pickContentNodes(input.runtimeCapture.nodes));
     const componentName = toComponentName(input.name ?? inferName(input.runtimeCapture.title, contentNodes));
@@ -192,6 +194,8 @@ function buildComponentFamilyTransitions(variants, primaryVariant) {
 }
 function buildRuntimeSitePages(input, fallbackName) {
     const routeCaptures = input.runtimeCapture.routeCaptures ?? [];
+    const normalizedRoutes = normalizePluginExportRoutes(input.pluginCapture);
+    const normalizedRoutesByPath = new Map(normalizedRoutes.map((route) => [route.path, route]));
     if (routeCaptures.length === 0) {
         const fallback = buildRuntimeFallbackPage(input, fallbackName);
         return [
@@ -204,24 +208,49 @@ function buildRuntimeSitePages(input, fallbackName) {
     }
     const usedNames = new Map();
     return routeCaptures.map((capture, index) => {
-        const routePage = readPluginPageForRoute(input.pluginCapture.context?.sitePages, capture.routePath);
-        const title = (routePage ? readPageTitle(routePage) : undefined) ??
+        const normalizedRoute = normalizedRoutesByPath.get(normalizeExportRoutePath(capture.routePath));
+        const title = normalizedRoute?.title ??
             capture.title?.trim() ??
             (capture.routePath === "/" ? "Home" : fallbackName);
         const baseName = toComponentName(title);
         const count = usedNames.get(baseName) ?? 0;
         usedNames.set(baseName, count + 1);
         const nodes = promoteFallbackHeading(pickContentNodes(capture.nodes));
+        const destination = capture.destination ??
+            capture.redirectTo ??
+            normalizedRoute?.destination;
+        const routeMetadata = resolveExportRouteMetadata({
+            routeKind: capture.routeKind ?? normalizedRoute?.kind,
+            destination,
+            destinationKind: capture.destinationKind ?? normalizedRoute?.destinationKind,
+            redirectTo: capture.redirectTo ?? normalizedRoute?.redirectTo,
+            redirectStatus: capture.redirectStatus ?? normalizedRoute?.redirectStatus,
+            templateKind: capture.templateKind ?? normalizedRoute?.templateKind,
+        });
+        const templateKind = routeMetadata.templateKind ??
+            inferTemplateKind(capture.routePath);
         return {
             componentName: count === 0 ? baseName : `${baseName}${count + 1}`,
             routePath: capture.routePath,
             title,
             templateId: capture.templateId ??
+                normalizedRoute?.templateId ??
                 capture.templatePath ??
+                normalizedRoute?.templatePath ??
                 capture.routePath ??
                 `template-${index + 1}`,
-            templatePath: capture.templatePath ?? capture.routePath,
-            templateKind: capture.templateKind ?? inferTemplateKind(capture.routePath),
+            templatePath: capture.templatePath ??
+                normalizedRoute?.templatePath ??
+                capture.routePath,
+            routeKind: routeMetadata.routeKind,
+            template: routeMetadata.routeKind === "page"
+                ? normalizedRoute?.template
+                : undefined,
+            templateKind,
+            destination: routeMetadata.destination,
+            destinationKind: routeMetadata.destinationKind,
+            redirectTo: routeMetadata.redirectTo,
+            redirectStatus: routeMetadata.redirectStatus,
             nodes: nodes.length > 0
                 ? nodes
                 : [
@@ -234,53 +263,6 @@ function buildRuntimeSitePages(input, fallbackName) {
 }
 function inferTemplateKind(routePath) {
     return routePath.includes(":slug") ? "cms" : "static";
-}
-function readPageRedirectTarget(source) {
-    for (const key of [
-        "redirectTo",
-        "redirectUrl",
-        "targetUrl",
-        "destination",
-        "destinationUrl",
-        "externalUrl",
-    ]) {
-        const value = source[key];
-        if (typeof value === "string" && value.trim()) {
-            return value.trim();
-        }
-    }
-    const link = asRecord(source.link);
-    if (link) {
-        for (const key of ["url", "href", "path", "target"]) {
-            const value = link[key];
-            if (typeof value === "string" && value.trim()) {
-                return value.trim();
-            }
-        }
-    }
-    const metadata = asRecord(source.metadata);
-    if (metadata) {
-        return readPageRedirectTarget(metadata);
-    }
-    return undefined;
-}
-function readPageRedirectStatus(source) {
-    for (const key of ["redirectStatus", "statusCode", "status"]) {
-        const value = source[key];
-        if (typeof value === "number" && Number.isFinite(value))
-            return value;
-        if (typeof value === "string" && /^\d{3}$/.test(value.trim())) {
-            return Number(value.trim());
-        }
-    }
-    const metadata = asRecord(source.metadata);
-    if (metadata) {
-        return readPageRedirectStatus(metadata);
-    }
-    return undefined;
-}
-function isExternalRedirectTarget(value) {
-    return /^https?:\/\//i.test(value.trim());
 }
 function summarizeRouteTemplates(sitePages) {
     const groups = new Map();
@@ -438,10 +420,10 @@ function buildSitePages(input, fallbackName) {
         const componentName = count === 0 ? baseName : `${baseName}${count + 1}`;
         const matchingRuntimeNodes = findNodesForSource(input.runtimeCapture.nodes, sourceRecord, title);
         const nodes = promoteFallbackHeading(pickContentNodes(matchingRuntimeNodes));
-        const redirectTo = readPageRedirectTarget(sourceRecord);
-        const redirectStatus = readPageRedirectStatus(sourceRecord);
+        const redirectTo = readRedirectTargetFromRecord(sourceRecord);
+        const redirectStatus = readRedirectStatusFromRecord(sourceRecord);
         const templateKind = redirectTo
-            ? isExternalRedirectTarget(redirectTo)
+            ? classifyRouteDestinationKind(redirectTo) === "external"
                 ? "utility"
                 : "redirect"
             : undefined;
@@ -450,8 +432,14 @@ function buildSitePages(input, fallbackName) {
             routePath: readPageRoutePath(sourceRecord) ??
                 (index === 0 ? "/" : `/${toRouteSegment(title)}`),
             title,
+            routeKind: redirectTo ? "redirect" : "page",
+            destination: redirectTo,
+            destinationKind: redirectTo
+                ? classifyRouteDestinationKind(redirectTo)
+                : undefined,
             redirectTo,
             redirectStatus,
+            template: redirectTo ? undefined : "static",
             templateKind,
             nodes: nodes.length > 0
                 ? nodes
@@ -468,6 +456,8 @@ function buildRuntimeFallbackPage(input, fallbackName) {
         title,
         templateId: "/",
         templatePath: "/",
+        routeKind: "page",
+        template: "static",
         templateKind: "static",
         nodes: nodes.length > 0
             ? nodes
@@ -541,7 +531,7 @@ function readPageRoutePath(source) {
         const value = source[key];
         if (typeof value !== "string" || !value.trim())
             continue;
-        const normalized = normalizeRoutePath(value);
+        const normalized = normalizePageRoutePath(value);
         if (normalized)
             return normalized;
     }
@@ -553,14 +543,14 @@ function readPageRoutePath(source) {
     }
     return undefined;
 }
-function normalizeRoutePath(value) {
+function normalizePageRoutePath(value) {
     const trimmed = value.trim();
     if (!trimmed || /^root\s+\d+$/i.test(trimmed) || /^page\s+\d+$/i.test(trimmed)) {
         return "";
     }
     if (/^https?:\/\//.test(trimmed)) {
         try {
-            return normalizeRoutePath(new URL(trimmed).pathname);
+            return normalizePageRoutePath(new URL(trimmed).pathname);
         }
         catch {
             return "";
@@ -569,8 +559,7 @@ function normalizeRoutePath(value) {
     const withoutQuery = trimmed.split(/[?#]/)[0] ?? "";
     if (withoutQuery === "/" || withoutQuery.toLowerCase() === "home")
         return "/";
-    const route = withoutQuery.startsWith("/") ? withoutQuery : `/${withoutQuery}`;
-    return route.replace(/\/{2,}/g, "/").replace(/\/$/g, "") || "/";
+    return normalizeExportRoutePath(withoutQuery);
 }
 function findNodesForSource(nodes, source, sourceName) {
     const sourceId = typeof source.id === "string" ? source.id : undefined;

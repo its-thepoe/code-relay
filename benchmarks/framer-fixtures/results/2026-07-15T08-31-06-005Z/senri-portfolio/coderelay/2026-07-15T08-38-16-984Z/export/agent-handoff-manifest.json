@@ -1,0 +1,25 @@
+{
+  "handoffMode": "runtime-kept",
+  "intendedEditor": "agent-first",
+  "guidance": [
+    "Start with export-report.json and AGENT_BRIEF.md.",
+    "Preserve visual fidelity and route behavior unless explicitly instructed otherwise.",
+    "Use route-manifest.json and raw-runtime-capture.json to audit path coverage before editing.",
+    "Use asset-manifest.json, framer-cms-collections.json, and framer-code-files.json to patch dynamic areas safely."
+  ],
+  "artifacts": {
+    "report": "export-report.json",
+    "readme": "README.md",
+    "agentBrief": "AGENT_BRIEF.md",
+    "routeManifest": "route-manifest.json",
+    "routeTemplateManifest": "route-template-manifest.json",
+    "runtimeStrategyManifest": "runtime-strategy-manifest.json",
+    "assetManifest": "asset-manifest.json",
+    "runtimeLocalizationReport": "runtime-localization-report.json",
+    "cmsManifest": "framer-cms-collections.json",
+    "codeFilesManifest": "framer-code-files.json",
+    "fontsManifest": "framer-fonts.json",
+    "rawRuntimeCapture": "raw-runtime-capture.json",
+    "patchHistory": "patch-history.json"
+  }
+}

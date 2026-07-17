@@ -1,0 +1,349 @@
+{
+  "exportedAt": "2026-07-15T08:39:03.859Z",
+  "totals": {
+    "irAssets": 22,
+    "runtimeAssets": 40,
+    "cmsAssets": 0
+  },
+  "irAssets": [
+    {
+      "url": "https://framerusercontent.com/images/JdH1xlA9w3eB52WospxwhxahywA.png?width=1200&height=675",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/8U6Ljx8MSOgVqp1NJqHkYBCBkHU.png?scale-down-to=512&width=2038&height=2038",
+      "kind": "image",
+      "alt": "Adam Neumann Unsplash"
+    },
+    {
+      "url": "https://framerusercontent.com/images/oBjMClcXBJbohg0bpgzVvG5twVc.png?scale-down-to=1024&width=1740&height=2310",
+      "kind": "image",
+      "alt": "Dmitry Novikov Unsplash"
+    },
+    {
+      "url": "https://framerusercontent.com/images/XEPfDOs0VtLyIu4xBDMlM6iztig.png?width=3198&height=2308",
+      "kind": "image",
+      "alt": "Bilal Mansuri Unsplash"
+    },
+    {
+      "url": "https://framerusercontent.com/images/lzrZndvlkfyDAtYvFJUXrS6XyQ.png?width=1738&height=2308",
+      "kind": "image",
+      "alt": "Possessed Photography Unsplash"
+    },
+    {
+      "url": "https://framerusercontent.com/images/2fIzVPzTGizNnrqsc5a20YzUKEo.png?width=425&height=689",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/maRiwGSK7KxFB9dRJqHkd6aCKQ.svg?width=142&height=37",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/ZPmvOcIHPhU177lVVZBaAYzF3Q.jpg?width=600&height=600",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/KoRYIwtCiCNlNRDByk1uYuGfH2Q.svg?width=52&height=44",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/KgwN4QdIYPKcO4MtT3tt3vpjQ.jpg?width=600&height=600",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/gsHao2OAmGre5UVlkvmmJIWa3w.svg?width=142&height=25",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/9SzXGzDXeUdi4x3VlAccSfmKA.jpg?width=600&height=600",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/cohbvRDlihCRsVwrPRcDrQrssI.svg?width=108&height=28",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/khObUzRMY6kw85RI2kp3uPAGMN8.jpg?width=600&height=600",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/ZkML2yMShjkUVHt9XUPgccc.svg?width=67&height=41",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/ooNthhOR2jLuPqEunyLU3Efddo.jpg?width=600&height=600",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/WCnj7bPlHKfzwEwgH1LpdZzQ2k.svg?width=43&height=41",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/RaYcgWL1QiOyBIpsbBtwLhR6w.png?width=786&height=786",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/flJclJ0YpJGEBKtVhB7qvxDp9U.svg?width=47&height=52",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/VLu9iSA2TKGG1qjnx5VSzDF1WHw.jpg?width=600&height=600",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/N0yGHMFkkAB7r3UxEfIwCFDWa1M.svg?width=130&height=56",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/lpsHrx3CKBRpbmN7PmgT8VXipQ.jpg?width=600&height=600",
+      "kind": "image"
+    }
+  ],
+  "runtimeAssets": [
+    {
+      "nodeId": "/::node-741",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/JdH1xlA9w3eB52WospxwhxahywA.png?width=1200&height=675",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-806",
+      "kind": "link",
+      "url": "/work/hud",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-818",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/8U6Ljx8MSOgVqp1NJqHkYBCBkHU.png?scale-down-to=512&width=2038&height=2038",
+      "alt": "Adam Neumann Unsplash",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-918",
+      "kind": "link",
+      "url": "/work/london",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-930",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/oBjMClcXBJbohg0bpgzVvG5twVc.png?scale-down-to=1024&width=1740&height=2310",
+      "alt": "Dmitry Novikov Unsplash",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1040",
+      "kind": "link",
+      "url": "/work/smart-home",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1052",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/XEPfDOs0VtLyIu4xBDMlM6iztig.png?width=3198&height=2308",
+      "alt": "Bilal Mansuri Unsplash",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1142",
+      "kind": "link",
+      "url": "/work/edge-runner",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1154",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/lzrZndvlkfyDAtYvFJUXrS6XyQ.png?width=1738&height=2308",
+      "alt": "Possessed Photography Unsplash",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1255",
+      "kind": "link",
+      "url": "/work",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1426",
+      "kind": "link",
+      "url": "https://workspace.google.com/products/drive/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1429",
+      "kind": "link",
+      "url": "https://linkedin.com/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1519",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/2fIzVPzTGizNnrqsc5a20YzUKEo.png?width=425&height=689",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1534",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/maRiwGSK7KxFB9dRJqHkd6aCKQ.svg?width=142&height=37",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1537",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/ZPmvOcIHPhU177lVVZBaAYzF3Q.jpg?width=600&height=600",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1543",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/KoRYIwtCiCNlNRDByk1uYuGfH2Q.svg?width=52&height=44",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1546",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/KgwN4QdIYPKcO4MtT3tt3vpjQ.jpg?width=600&height=600",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1552",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/gsHao2OAmGre5UVlkvmmJIWa3w.svg?width=142&height=25",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1555",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/9SzXGzDXeUdi4x3VlAccSfmKA.jpg?width=600&height=600",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1561",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/cohbvRDlihCRsVwrPRcDrQrssI.svg?width=108&height=28",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1564",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/khObUzRMY6kw85RI2kp3uPAGMN8.jpg?width=600&height=600",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1570",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/ZkML2yMShjkUVHt9XUPgccc.svg?width=67&height=41",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1573",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/ooNthhOR2jLuPqEunyLU3Efddo.jpg?width=600&height=600",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1579",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/WCnj7bPlHKfzwEwgH1LpdZzQ2k.svg?width=43&height=41",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1582",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/RaYcgWL1QiOyBIpsbBtwLhR6w.png?width=786&height=786",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1588",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/flJclJ0YpJGEBKtVhB7qvxDp9U.svg?width=47&height=52",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1591",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/VLu9iSA2TKGG1qjnx5VSzDF1WHw.jpg?width=600&height=600",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1597",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/N0yGHMFkkAB7r3UxEfIwCFDWa1M.svg?width=130&height=56",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1600",
+      "kind": "image",
+      "url": "https://framerusercontent.com/images/lpsHrx3CKBRpbmN7PmgT8VXipQ.jpg?width=600&height=600",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1609",
+      "kind": "link",
+      "url": "/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1614",
+      "kind": "link",
+      "url": "/work",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1618",
+      "kind": "link",
+      "url": "/#info",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1622",
+      "kind": "link",
+      "url": "mailto: hello@senri.design",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1657",
+      "kind": "link",
+      "url": "mailto: hello@senri.design",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1663",
+      "kind": "link",
+      "url": "https://linkedin.com/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1667",
+      "kind": "link",
+      "url": "https://twitter.com/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1671",
+      "kind": "link",
+      "url": "https://behance.com/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1675",
+      "kind": "link",
+      "url": "https://dribbble.com/",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1679",
+      "kind": "link",
+      "url": "/#go-top-trigger",
+      "source": "runtime"
+    },
+    {
+      "nodeId": "/::node-1683",
+      "kind": "link",
+      "url": "https://www.framer.com/",
+      "source": "runtime"
+    }
+  ],
+  "cmsAssets": []
+}

@@ -1,0 +1,1043 @@
+{
+  "jobId": "local-1784104352556",
+  "sourceUrl": "https://cohesion.framer.ai/",
+  "componentName": "LARRYBRONX",
+  "exportMode": "full-site",
+  "captureMode": "runtime-first",
+  "exportEngine": "published-runtime",
+  "runtimeCapture": {
+    "url": "https://cohesion.framer.ai/",
+    "title": "Home",
+    "mode": "page",
+    "captureDiagnostics": {
+      "breakpointsCaptured": [
+        "desktop",
+        "laptop",
+        "tablet",
+        "mobile"
+      ],
+      "viewportValidation": {
+        "desktop": {
+          "requestedWidth": 1440,
+          "requestedHeight": 900,
+          "observedBeforeInnerWidth": 1440,
+          "observedBeforeInnerHeight": 900,
+          "observedBeforeClientWidth": 1440,
+          "observedInnerWidth": 1440,
+          "observedInnerHeight": 900,
+          "observedClientWidth": 1440,
+          "screenshotWidth": 1440,
+          "screenshotHeight": 22526,
+          "screenshotAttempts": 1,
+          "valid": true
+        },
+        "laptop": {
+          "requestedWidth": 1280,
+          "requestedHeight": 900,
+          "observedBeforeInnerWidth": 1280,
+          "observedBeforeInnerHeight": 900,
+          "observedBeforeClientWidth": 1280,
+          "observedInnerWidth": 1280,
+          "observedInnerHeight": 900,
+          "observedClientWidth": 1280,
+          "screenshotWidth": 1280,
+          "screenshotHeight": 22509,
+          "screenshotAttempts": 1,
+          "valid": true
+        },
+        "tablet": {
+          "requestedWidth": 768,
+          "requestedHeight": 1024,
+          "observedBeforeInnerWidth": 768,
+          "observedBeforeInnerHeight": 1024,
+          "observedBeforeClientWidth": 768,
+          "observedInnerWidth": 768,
+          "observedInnerHeight": 1024,
+          "observedClientWidth": 768,
+          "screenshotWidth": 768,
+          "screenshotHeight": 29307,
+          "screenshotAttempts": 1,
+          "valid": true
+        },
+        "mobile": {
+          "requestedWidth": 390,
+          "requestedHeight": 844,
+          "observedBeforeInnerWidth": 390,
+          "observedBeforeInnerHeight": 844,
+          "observedBeforeClientWidth": 390,
+          "observedInnerWidth": 390,
+          "observedInnerHeight": 844,
+          "observedClientWidth": 390,
+          "screenshotWidth": 390,
+          "screenshotHeight": 25171,
+          "screenshotAttempts": 1,
+          "valid": true
+        }
+      },
+      "fontReadiness": {
+        "desktop": true,
+        "laptop": true,
+        "tablet": true,
+        "mobile": true
+      },
+      "stylesheetCount": {
+        "desktop": 0,
+        "laptop": 0,
+        "tablet": 0,
+        "mobile": 0
+      },
+      "nodeCount": {
+        "desktop": 1167,
+        "laptop": 1167,
+        "tablet": 1208,
+        "mobile": 1208
+      },
+      "phaseHistory": [
+        {
+          "phase": "navigate",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:31:24.111Z",
+          "viewportName": "desktop"
+        },
+        {
+          "phase": "navigate",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:31:24.111Z",
+          "finishedAt": "2026-07-15T08:31:25.050Z",
+          "durationMs": 939,
+          "viewportName": "desktop"
+        },
+        {
+          "phase": "stabilize",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:31:25.050Z",
+          "viewportName": "desktop"
+        },
+        {
+          "phase": "stabilize",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:31:25.050Z",
+          "finishedAt": "2026-07-15T08:31:35.403Z",
+          "durationMs": 10353,
+          "viewportName": "desktop"
+        },
+        {
+          "phase": "capture-desktop",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:31:35.403Z",
+          "viewportName": "desktop"
+        },
+        {
+          "phase": "capture-desktop",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:31:35.403Z",
+          "finishedAt": "2026-07-15T08:31:40.705Z",
+          "durationMs": 5302,
+          "viewportName": "desktop"
+        },
+        {
+          "phase": "route-finalize",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:31:40.705Z",
+          "viewportName": "desktop"
+        },
+        {
+          "phase": "route-finalize",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:31:40.705Z",
+          "finishedAt": "2026-07-15T08:31:40.705Z",
+          "durationMs": 0,
+          "viewportName": "desktop"
+        },
+        {
+          "phase": "interaction-replay",
+          "routePath": "/",
+          "required": false,
+          "status": "running",
+          "startedAt": "2026-07-15T08:31:41.294Z",
+          "viewportName": "desktop"
+        },
+        {
+          "phase": "interaction-replay",
+          "routePath": "/",
+          "required": false,
+          "status": "skipped",
+          "startedAt": "2026-07-15T08:31:41.294Z",
+          "finishedAt": "2026-07-15T08:31:53.298Z",
+          "durationMs": 12004,
+          "viewportName": "desktop",
+          "detail": "Route / phase interaction-replay exceeded 12s at desktop."
+        },
+        {
+          "phase": "navigate",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:31:53.371Z",
+          "viewportName": "laptop"
+        },
+        {
+          "phase": "navigate",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:31:53.371Z",
+          "finishedAt": "2026-07-15T08:31:54.353Z",
+          "durationMs": 982,
+          "viewportName": "laptop"
+        },
+        {
+          "phase": "stabilize",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:31:54.353Z",
+          "viewportName": "laptop"
+        },
+        {
+          "phase": "stabilize",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:31:54.353Z",
+          "finishedAt": "2026-07-15T08:32:10.448Z",
+          "durationMs": 16095,
+          "viewportName": "laptop"
+        },
+        {
+          "phase": "capture-laptop",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:32:10.450Z",
+          "viewportName": "laptop"
+        },
+        {
+          "phase": "capture-laptop",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:32:10.450Z",
+          "finishedAt": "2026-07-15T08:32:14.621Z",
+          "durationMs": 4171,
+          "viewportName": "laptop"
+        },
+        {
+          "phase": "navigate",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:32:15.533Z",
+          "viewportName": "tablet"
+        },
+        {
+          "phase": "navigate",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:32:15.533Z",
+          "finishedAt": "2026-07-15T08:32:16.056Z",
+          "durationMs": 523,
+          "viewportName": "tablet"
+        },
+        {
+          "phase": "stabilize",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:32:16.056Z",
+          "viewportName": "tablet"
+        },
+        {
+          "phase": "stabilize",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:32:16.056Z",
+          "finishedAt": "2026-07-15T08:32:21.641Z",
+          "durationMs": 5585,
+          "viewportName": "tablet"
+        },
+        {
+          "phase": "capture-tablet",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:32:21.641Z",
+          "viewportName": "tablet"
+        },
+        {
+          "phase": "capture-tablet",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:32:21.641Z",
+          "finishedAt": "2026-07-15T08:32:23.390Z",
+          "durationMs": 1749,
+          "viewportName": "tablet"
+        },
+        {
+          "phase": "navigate",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:32:23.914Z",
+          "viewportName": "mobile"
+        },
+        {
+          "phase": "navigate",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:32:23.914Z",
+          "finishedAt": "2026-07-15T08:32:24.292Z",
+          "durationMs": 378,
+          "viewportName": "mobile"
+        },
+        {
+          "phase": "stabilize",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:32:24.292Z",
+          "viewportName": "mobile"
+        },
+        {
+          "phase": "stabilize",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:32:24.292Z",
+          "finishedAt": "2026-07-15T08:32:30.709Z",
+          "durationMs": 6417,
+          "viewportName": "mobile"
+        },
+        {
+          "phase": "capture-mobile",
+          "routePath": "/",
+          "required": true,
+          "status": "running",
+          "startedAt": "2026-07-15T08:32:30.709Z",
+          "viewportName": "mobile"
+        },
+        {
+          "phase": "capture-mobile",
+          "routePath": "/",
+          "required": true,
+          "status": "completed",
+          "startedAt": "2026-07-15T08:32:30.709Z",
+          "finishedAt": "2026-07-15T08:32:32.042Z",
+          "durationMs": 1333,
+          "viewportName": "mobile"
+        }
+      ],
+      "routeProgress": [
+        {
+          "routePath": "/",
+          "status": "fresh",
+          "evidenceClasses": [
+            "screenshot-backed",
+            "dom-backed"
+          ],
+          "capturedViewports": [
+            "desktop",
+            "laptop",
+            "tablet",
+            "mobile"
+          ],
+          "warningCount": 1,
+          "reusedFromProgress": false
+        }
+      ],
+      "routeFailures": []
+    },
+    "stylesheetUrls": [],
+    "routeCaptures": [
+      {
+        "routePath": "/",
+        "url": "https://cohesion.framer.ai/",
+        "title": "Home",
+        "captureDiagnostics": {
+          "breakpointsCaptured": [
+            "desktop",
+            "laptop",
+            "tablet",
+            "mobile"
+          ],
+          "viewportValidation": {
+            "desktop": {
+              "requestedWidth": 1440,
+              "requestedHeight": 900,
+              "observedBeforeInnerWidth": 1440,
+              "observedBeforeInnerHeight": 900,
+              "observedBeforeClientWidth": 1440,
+              "observedInnerWidth": 1440,
+              "observedInnerHeight": 900,
+              "observedClientWidth": 1440,
+              "screenshotWidth": 1440,
+              "screenshotHeight": 22526,
+              "screenshotAttempts": 1,
+              "valid": true
+            },
+            "laptop": {
+              "requestedWidth": 1280,
+              "requestedHeight": 900,
+              "observedBeforeInnerWidth": 1280,
+              "observedBeforeInnerHeight": 900,
+              "observedBeforeClientWidth": 1280,
+              "observedInnerWidth": 1280,
+              "observedInnerHeight": 900,
+              "observedClientWidth": 1280,
+              "screenshotWidth": 1280,
+              "screenshotHeight": 22509,
+              "screenshotAttempts": 1,
+              "valid": true
+            },
+            "tablet": {
+              "requestedWidth": 768,
+              "requestedHeight": 1024,
+              "observedBeforeInnerWidth": 768,
+              "observedBeforeInnerHeight": 1024,
+              "observedBeforeClientWidth": 768,
+              "observedInnerWidth": 768,
+              "observedInnerHeight": 1024,
+              "observedClientWidth": 768,
+              "screenshotWidth": 768,
+              "screenshotHeight": 29307,
+              "screenshotAttempts": 1,
+              "valid": true
+            },
+            "mobile": {
+              "requestedWidth": 390,
+              "requestedHeight": 844,
+              "observedBeforeInnerWidth": 390,
+              "observedBeforeInnerHeight": 844,
+              "observedBeforeClientWidth": 390,
+              "observedInnerWidth": 390,
+              "observedInnerHeight": 844,
+              "observedClientWidth": 390,
+              "screenshotWidth": 390,
+              "screenshotHeight": 25171,
+              "screenshotAttempts": 1,
+              "valid": true
+            }
+          },
+          "fontReadiness": {
+            "desktop": true,
+            "laptop": true,
+            "tablet": true,
+            "mobile": true
+          },
+          "stylesheetCount": {
+            "desktop": 0,
+            "laptop": 0,
+            "tablet": 0,
+            "mobile": 0
+          },
+          "nodeCount": {
+            "desktop": 1167,
+            "laptop": 1167,
+            "tablet": 1208,
+            "mobile": 1208
+          },
+          "phaseHistory": [
+            {
+              "phase": "navigate",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:31:24.111Z",
+              "viewportName": "desktop"
+            },
+            {
+              "phase": "navigate",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:31:24.111Z",
+              "finishedAt": "2026-07-15T08:31:25.050Z",
+              "durationMs": 939,
+              "viewportName": "desktop"
+            },
+            {
+              "phase": "stabilize",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:31:25.050Z",
+              "viewportName": "desktop"
+            },
+            {
+              "phase": "stabilize",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:31:25.050Z",
+              "finishedAt": "2026-07-15T08:31:35.403Z",
+              "durationMs": 10353,
+              "viewportName": "desktop"
+            },
+            {
+              "phase": "capture-desktop",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:31:35.403Z",
+              "viewportName": "desktop"
+            },
+            {
+              "phase": "capture-desktop",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:31:35.403Z",
+              "finishedAt": "2026-07-15T08:31:40.705Z",
+              "durationMs": 5302,
+              "viewportName": "desktop"
+            },
+            {
+              "phase": "route-finalize",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:31:40.705Z",
+              "viewportName": "desktop"
+            },
+            {
+              "phase": "route-finalize",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:31:40.705Z",
+              "finishedAt": "2026-07-15T08:31:40.705Z",
+              "durationMs": 0,
+              "viewportName": "desktop"
+            },
+            {
+              "phase": "interaction-replay",
+              "routePath": "/",
+              "required": false,
+              "status": "running",
+              "startedAt": "2026-07-15T08:31:41.294Z",
+              "viewportName": "desktop"
+            },
+            {
+              "phase": "interaction-replay",
+              "routePath": "/",
+              "required": false,
+              "status": "skipped",
+              "startedAt": "2026-07-15T08:31:41.294Z",
+              "finishedAt": "2026-07-15T08:31:53.298Z",
+              "durationMs": 12004,
+              "viewportName": "desktop",
+              "detail": "Route / phase interaction-replay exceeded 12s at desktop."
+            },
+            {
+              "phase": "navigate",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:31:53.371Z",
+              "viewportName": "laptop"
+            },
+            {
+              "phase": "navigate",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:31:53.371Z",
+              "finishedAt": "2026-07-15T08:31:54.353Z",
+              "durationMs": 982,
+              "viewportName": "laptop"
+            },
+            {
+              "phase": "stabilize",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:31:54.353Z",
+              "viewportName": "laptop"
+            },
+            {
+              "phase": "stabilize",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:31:54.353Z",
+              "finishedAt": "2026-07-15T08:32:10.448Z",
+              "durationMs": 16095,
+              "viewportName": "laptop"
+            },
+            {
+              "phase": "capture-laptop",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:32:10.450Z",
+              "viewportName": "laptop"
+            },
+            {
+              "phase": "capture-laptop",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:32:10.450Z",
+              "finishedAt": "2026-07-15T08:32:14.621Z",
+              "durationMs": 4171,
+              "viewportName": "laptop"
+            },
+            {
+              "phase": "navigate",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:32:15.533Z",
+              "viewportName": "tablet"
+            },
+            {
+              "phase": "navigate",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:32:15.533Z",
+              "finishedAt": "2026-07-15T08:32:16.056Z",
+              "durationMs": 523,
+              "viewportName": "tablet"
+            },
+            {
+              "phase": "stabilize",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:32:16.056Z",
+              "viewportName": "tablet"
+            },
+            {
+              "phase": "stabilize",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:32:16.056Z",
+              "finishedAt": "2026-07-15T08:32:21.641Z",
+              "durationMs": 5585,
+              "viewportName": "tablet"
+            },
+            {
+              "phase": "capture-tablet",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:32:21.641Z",
+              "viewportName": "tablet"
+            },
+            {
+              "phase": "capture-tablet",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:32:21.641Z",
+              "finishedAt": "2026-07-15T08:32:23.390Z",
+              "durationMs": 1749,
+              "viewportName": "tablet"
+            },
+            {
+              "phase": "navigate",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:32:23.914Z",
+              "viewportName": "mobile"
+            },
+            {
+              "phase": "navigate",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:32:23.914Z",
+              "finishedAt": "2026-07-15T08:32:24.292Z",
+              "durationMs": 378,
+              "viewportName": "mobile"
+            },
+            {
+              "phase": "stabilize",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:32:24.292Z",
+              "viewportName": "mobile"
+            },
+            {
+              "phase": "stabilize",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:32:24.292Z",
+              "finishedAt": "2026-07-15T08:32:30.709Z",
+              "durationMs": 6417,
+              "viewportName": "mobile"
+            },
+            {
+              "phase": "capture-mobile",
+              "routePath": "/",
+              "required": true,
+              "status": "running",
+              "startedAt": "2026-07-15T08:32:30.709Z",
+              "viewportName": "mobile"
+            },
+            {
+              "phase": "capture-mobile",
+              "routePath": "/",
+              "required": true,
+              "status": "completed",
+              "startedAt": "2026-07-15T08:32:30.709Z",
+              "finishedAt": "2026-07-15T08:32:32.042Z",
+              "durationMs": 1333,
+              "viewportName": "mobile"
+            }
+          ],
+          "routeProgress": [
+            {
+              "routePath": "/",
+              "status": "fresh",
+              "evidenceClasses": [
+                "screenshot-backed",
+                "dom-backed"
+              ],
+              "capturedViewports": [
+                "desktop",
+                "laptop",
+                "tablet",
+                "mobile"
+              ],
+              "warningCount": 1,
+              "reusedFromProgress": false
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "pluginCapture": {
+    "mode": "simulated",
+    "capturedAt": "2026-07-15T08:31:23.860Z",
+    "selectedNodeCount": 0
+  },
+  "nodeMatches": [],
+  "component": {
+    "semanticType": "hero",
+    "nodeCount": 160,
+    "sections": [
+      {
+        "index": 0,
+        "name": "Section 1",
+        "kind": "hero",
+        "confidence": 0,
+        "nodeCount": 13
+      },
+      {
+        "index": 1,
+        "name": "Hi, I'm !",
+        "kind": "content",
+        "confidence": 0,
+        "nodeCount": 6
+      },
+      {
+        "index": 2,
+        "name": "LARRY BRONX",
+        "kind": "media-grid",
+        "confidence": 0,
+        "nodeCount": 30
+      },
+      {
+        "index": 3,
+        "name": "About Me",
+        "kind": "media-grid",
+        "confidence": 0,
+        "nodeCount": 17
+      },
+      {
+        "index": 4,
+        "name": "Kind words from Clients",
+        "kind": "content",
+        "confidence": 0,
+        "nodeCount": 29
+      },
+      {
+        "index": 5,
+        "name": "My Stack",
+        "kind": "content",
+        "confidence": 0,
+        "nodeCount": 65
+      }
+    ]
+  },
+  "assets": [
+    {
+      "url": "https://framerusercontent.com/images/um3bxT2WVFF4kr6enjXB8pntPlo.svg?width=100&height=100",
+      "kind": "image",
+      "alt": "Person 1"
+    },
+    {
+      "url": "https://framerusercontent.com/images/lWoxjUfzID4I2CJ2EAGpp1BxXk.svg?width=100&height=100",
+      "kind": "image",
+      "alt": "Person 2"
+    },
+    {
+      "url": "https://framerusercontent.com/images/LtSGTHttO0ZpuCVLNu4mPIpOuk.svg?width=100&height=100",
+      "kind": "image",
+      "alt": "Person 3"
+    },
+    {
+      "url": "https://framerusercontent.com/images/CVICQI4s8tTiJBrNEN8nOXCzdK0.png?scale-down-to=1024",
+      "kind": "image",
+      "alt": "Profile Picture"
+    },
+    {
+      "url": "https://framerusercontent.com/images/0f09LEy6qZK1Y9gL9T6AG622ZZ8.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Orange Pyramid"
+    },
+    {
+      "url": "https://framerusercontent.com/images/m3YA9HpmQG8c9ThSe5XusCzYw.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Purple Sphere"
+    },
+    {
+      "url": "https://framerusercontent.com/images/lZLqIoLGAjMHHOlhOwugYSASrjc.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Blue Cylinder"
+    },
+    {
+      "url": "https://framerusercontent.com/images/l1KkpEI9tJzqQPgJDNKytRuxgeI.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Turquoise Star"
+    },
+    {
+      "url": "https://framerusercontent.com/images/LUkmo3gFVQOfp5kvltA05Mc6K4.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Lime Green Object"
+    },
+    {
+      "url": "https://framerusercontent.com/images/jaVohrUAKzleX6rjxEEOPrqeysw.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Yellow Cube"
+    },
+    {
+      "url": "https://framerusercontent.com/images/53osOsH2OP7bAyFNQKbXOVwk.png?width=1024&height=1024",
+      "kind": "image",
+      "alt": "Purple Cube"
+    },
+    {
+      "url": "https://framerusercontent.com/images/en9G6oaN8j6IT8H0gpgIS69gXg4.png?scale-down-to=1024&width=2048&height=2048",
+      "kind": "image",
+      "alt": "Blue Pyramid"
+    },
+    {
+      "url": "https://framerusercontent.com/images/21y9kg3DMhOUBxbQ3y9CwHNPQO8.png?width=192&height=192",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/2JNdM2O0RnZg1BcZHNgDWoMrhKA.png?width=192&height=192",
+      "kind": "image",
+      "alt": "David Memoji Photo"
+    },
+    {
+      "url": "https://framerusercontent.com/images/lQFJ89Y2vFBRt0WU8OFpJ3ZkPlA.png?width=192&height=192",
+      "kind": "image",
+      "alt": "Emily Memoji Photo"
+    },
+    {
+      "url": "https://framerusercontent.com/images/tLJlDufDxfRWX3e1UyLWQODdOaw.png?width=1024&height=1024",
+      "kind": "image",
+      "alt": "Turquoise Cube"
+    },
+    {
+      "url": "https://framerusercontent.com/images/nSf6ya4FcQ5iCpFIBAboozmlgzA.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Red Pyramid"
+    },
+    {
+      "url": "https://framerusercontent.com/images/fbDdTEyddMlUKyioryX3T3M3I.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Blue Cube"
+    },
+    {
+      "url": "https://framerusercontent.com/images/un1NlasO4xdJ3ogUjNzC5U3NsU.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Green Cylinder"
+    },
+    {
+      "url": "https://framerusercontent.com/images/gshDWTLuPfNPn8ZUFpq49jhvIPk.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Orange Sphere"
+    },
+    {
+      "url": "https://framerusercontent.com/images/2YMs3TUoFSk6OAJu3tquJSjY.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Purple Circle"
+    },
+    {
+      "url": "https://framerusercontent.com/images/eiTxkfpr6msnt5xKhves6aFLlTw.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Yellow Heart"
+    },
+    {
+      "url": "https://framerusercontent.com/images/YnQwe4Efg37DiOr8IRYEfPzKE.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Orange Star"
+    },
+    {
+      "url": "https://framerusercontent.com/images/snuvetWlg8kNNuH4rBY2aSQch5c.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Blue Gem"
+    },
+    {
+      "url": "https://framerusercontent.com/images/3YQ5k1hZdNkPRgquxbSfEunCE.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Lime Green Cube"
+    },
+    {
+      "url": "https://framerusercontent.com/images/5PoEhJTKleU3AaFM5T9aYtiqo.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Yellow Pill"
+    },
+    {
+      "url": "https://framerusercontent.com/images/7Xrs4S6qdC6EyvyrM1EGw533im4.png?scale-down-to=512&width=1024&height=1024",
+      "kind": "image",
+      "alt": "Pink Gem"
+    },
+    {
+      "url": "https://framerusercontent.com/images/eZQ1X1Fpw11apl285CIeN8iEVI.png?scale-down-to=1024&width=4800&height=3600",
+      "kind": "image",
+      "alt": "Vitalo Framer template"
+    },
+    {
+      "url": "https://framerusercontent.com/images/pwnBF4uZrCSugu0a8ZiDdaD4A4.png?scale-down-to=1024&width=4800&height=3600",
+      "kind": "image",
+      "alt": "Artikle screen"
+    },
+    {
+      "url": "https://framerusercontent.com/images/UFfz36PjDofFGqSVyD7dxLp6G4M.png?scale-down-to=1024&width=4800&height=3600",
+      "kind": "image",
+      "alt": "Flowpath screen"
+    },
+    {
+      "url": "https://framerusercontent.com/images/LAZePzksNGsqwC1vEotMzZH3EdE.png?scale-down-to=1024&width=4800&height=3600",
+      "kind": "image",
+      "alt": "Kudos screen"
+    },
+    {
+      "url": "https://framerusercontent.com/images/G3aJzgcFG0nJ4pDBy94oGqN6Q.png?scale-down-to=1024&width=4800&height=3600",
+      "kind": "image",
+      "alt": "Neozen"
+    },
+    {
+      "url": "https://framerusercontent.com/images/wtSXht7rnWOGDS3UivDigQQcwZo.png?scale-down-to=1024&width=4800&height=3600",
+      "kind": "image",
+      "alt": "Aerosound 01"
+    },
+    {
+      "url": "data:image/svg+xml,<svg display=\"block\" role=\"presentation\" viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M 24.635 22.866 C 25.123 23.355 25.123 24.147 24.635 24.635 C 24.147 25.123 23.355 25.123 22.866 24.635 L 12.501 14.268 L 2.135 24.635 C 1.647 25.123 0.855 25.123 0.366 24.635 C -0.122 24.147 -0.122 23.355 0.366 22.866 L 10.734 12.501 L 0.366 2.135 C -0.122 1.647 -0.122 0.855 0.366 0.366 C 0.855 -0.122 1.647 -0.122 2.135 0.366 L 12.501 10.734 L 22.866 0.366 C 23.355 -0.122 24.147 -0.122 24.635 0.366 C 25.123 0.855 25.123 1.647 24.635 2.135 L 14.268 12.501 Z\" fill=\"rgb(0, 0, 0)\" height=\"25.00139023844741px\" id=\"jBymG44fK\" transform=\"translate(7.499 7.499)\" width=\"25.001390238447406px\"/></svg>",
+      "kind": "image"
+    },
+    {
+      "url": "https://framerusercontent.com/images/IJyQj0yIema8tFABogHMDHcP6M.png?scale-down-to=2048&width=4800&height=3600",
+      "kind": "image",
+      "alt": "Quomi Screen on a desktop"
+    }
+  ],
+  "framerTree": [],
+  "componentModules": [],
+  "componentFamilies": [],
+  "overrideAssignments": [],
+  "codeFiles": [],
+  "fonts": [
+    {
+      "name": "sans-serif",
+      "family": "sans-serif",
+      "source": "runtime"
+    },
+    {
+      "name": "Public Sans",
+      "family": "\"Public Sans\", \"Public Sans Placeholder\", sans-serif",
+      "source": "runtime"
+    },
+    {
+      "name": "Public Sans",
+      "family": "\"Public Sans\", sans-serif",
+      "source": "runtime"
+    },
+    {
+      "name": "PT Serif",
+      "family": "\"PT Serif\", \"PT Serif Placeholder\", serif",
+      "source": "runtime"
+    },
+    {
+      "name": "Inter",
+      "family": "Inter, sans-serif",
+      "source": "runtime"
+    },
+    {
+      "name": "Inter",
+      "family": "Inter, \"Inter Placeholder\", sans-serif",
+      "source": "runtime"
+    }
+  ],
+  "cmsCollections": [],
+  "sitePages": [
+    {
+      "componentName": "Home",
+      "routePath": "/",
+      "title": "Home",
+      "sourceTextLength": 13884,
+      "nodeCount": 160,
+      "exportTreeNodeCount": 1167,
+      "templateId": "/",
+      "templatePath": "/",
+      "routeKind": "page",
+      "templateKind": "static"
+    }
+  ],
+  "routeTemplates": [
+    {
+      "templateId": "/",
+      "templatePath": "/",
+      "templateKind": "static",
+      "representativeRoutePath": "/",
+      "routeCount": 1,
+      "nodeCount": 1167,
+      "sourceTextLength": 13884
+    }
+  ],
+  "exportTreeDiagnostics": {
+    "totalNodes": 1167,
+    "pluginBackedNodes": 0,
+    "runtimeMatchedNodes": 1167,
+    "unmatchedRuntimeNodes": 0,
+    "breakpointsWithSnapshots": [
+      "desktop",
+      "laptop",
+      "tablet",
+      "mobile"
+    ]
+  },
+  "warnings": [],
+  "artifactFormat": "summary",
+  "artifactNote": "Materialized node trees are stored in export-tree.json and generated page files."
+}

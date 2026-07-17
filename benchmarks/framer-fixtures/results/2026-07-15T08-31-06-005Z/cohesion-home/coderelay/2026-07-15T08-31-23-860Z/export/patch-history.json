@@ -1,0 +1,90 @@
+[
+  {
+    "attempt": 1,
+    "strategy": "semantic-layout",
+    "patchesApplied": [
+      "baseline semantic-layout strategy"
+    ],
+    "patchOperations": [
+      "baseline_strategy"
+    ],
+    "diagnosis": [
+      "Initial export attempt uses the baseline semantic strategy."
+    ],
+    "diagnosisDetails": [
+      {
+        "category": "initial_baseline",
+        "message": "Start from the baseline export before applying corrective patches."
+      }
+    ],
+    "rerunReason": "typography, section mapping mismatches were above threshold.",
+    "resetToBestStateForNextAttempt": false
+  },
+  {
+    "attempt": 2,
+    "strategy": "semantic-layout+structured",
+    "patchesApplied": [
+      "preserved wrapper surfaces with runtime dimensions",
+      "reinforced runtime layout and surface styles",
+      "boosted runtime typography metrics",
+      "preserved runtime motion styles"
+    ],
+    "patchOperations": [
+      "preserve_wrapper_surfaces",
+      "reinforce_runtime_styles",
+      "boost_typography_from_runtime",
+      "preserve_motion_styles"
+    ],
+    "patchTargets": {
+      "preserve_motion_styles": [
+        "/::node-123"
+      ]
+    },
+    "patchPropertyHints": {
+      "preserve_motion_styles": {
+        "/::node-123": {
+          "desktop": [
+            "hover.aspectRatio"
+          ],
+          "laptop": [
+            "hover.aspectRatio"
+          ],
+          "tablet": [
+            "display",
+            "hover.aspectRatio"
+          ],
+          "mobile": [
+            "display",
+            "hover.aspectRatio"
+          ]
+        }
+      }
+    },
+    "diagnosis": [
+      "Node-match confidence stayed low, so the next pass should preserve more wrapper surfaces and runtime style evidence.",
+      "Typography fidelity fell below target, so the next pass should promote runtime font metrics into the export tree.",
+      "Rendered preview validation found nodes that should preserve motion but no non-default motion was applied, so the next pass should preserve runtime motion styles.",
+      "Overall fidelity stayed below target, so the next pass should reinforce runtime styles across the export tree."
+    ],
+    "diagnosisDetails": [
+      {
+        "category": "low_node_match",
+        "message": "Node-match confidence stayed low, so the next pass should preserve more wrapper surfaces and runtime style evidence."
+      },
+      {
+        "category": "typography_mismatch",
+        "message": "Typography fidelity fell below target, so the next pass should promote runtime font metrics into the export tree."
+      },
+      {
+        "category": "motion_mismatch",
+        "message": "Rendered preview validation found nodes that should preserve motion but no non-default motion was applied, so the next pass should preserve runtime motion styles."
+      },
+      {
+        "category": "low_overall_fidelity",
+        "message": "Overall fidelity stayed below target, so the next pass should reinforce runtime styles across the export tree."
+      }
+    ],
+    "rerunReason": "typography, section mapping mismatches were above threshold.",
+    "resetToBestStateForNextAttempt": false
+  }
+]

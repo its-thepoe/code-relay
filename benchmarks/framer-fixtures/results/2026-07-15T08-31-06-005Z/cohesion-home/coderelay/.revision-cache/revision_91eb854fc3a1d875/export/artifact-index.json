@@ -1,0 +1,2207 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-15T08:34:19.026Z",
+  "revisionId": "revision_91eb854fc3a1d875",
+  "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+  "fileCount": 145,
+  "entries": [
+    {
+      "id": "artifact/agent_brief.md",
+      "path": "AGENT_BRIEF.md",
+      "byteSize": 1682,
+      "hash": "cc59dc4283d5b946746e8480bd5baa4c37dfb01d85ba6ec6256d73af17a46823",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.996Z"
+    },
+    {
+      "id": "artifact/agent-handoff-manifest.json",
+      "path": "agent-handoff-manifest.json",
+      "byteSize": 1098,
+      "hash": "164e48fba17a2fb0af9ed7c186513d8a1559170b70f490709666c9104e6de068",
+      "artifactType": "json",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.996Z"
+    },
+    {
+      "id": "artifact/asset-manifest.json",
+      "path": "asset-manifest.json",
+      "byteSize": 20038,
+      "hash": "07337cfb691eccb088eeeb1a4463e7f0b3db93c2bd860949364f2a520c0cbff4",
+      "artifactType": "json",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.996Z"
+    },
+    {
+      "id": "attempt/best",
+      "path": "best-attempt.json",
+      "byteSize": 672521,
+      "hash": "3a909804590eeddbd6734694bc0187476c4dcb40534b700f6e3639f3f965d16c",
+      "artifactType": "best-attempt",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "ir/normalized"
+      ],
+      "dependencyHashes": [
+        "b8bb66562d0dbcc2b3522bd601306751799fd14529bf81f9a08d0502de88bbd0"
+      ],
+      "dependsOn": [
+        "ir/normalized"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.001Z"
+    },
+    {
+      "id": "manifest/capture-progress",
+      "path": "capture-progress.json",
+      "byteSize": 645,
+      "hash": "66b991a11d1614839b6bcbfeae79db1943896477cef5017fd325cb59687c1be0",
+      "artifactType": "capture-progress",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "runtime/raw-capture"
+      ],
+      "dependencyHashes": [
+        "949c1592cc5b4d34c624f7a45afefcaa54e299dbcc940ffe4e21a6a5c5d51dcf"
+      ],
+      "dependsOn": [
+        "runtime/raw-capture"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.996Z"
+    },
+    {
+      "id": "debug/debug-attempts-attempt-1-compare-diagnostics.json",
+      "path": "debug/attempts/attempt-1/compare-diagnostics.json",
+      "byteSize": 642704,
+      "hash": "f2b28655c6ebdfaf8f20b4581fe8f4a7a0010622a2a11d2b2e7602dddcfe768d",
+      "artifactType": "debug",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "generated/project"
+      ],
+      "dependencyHashes": [
+        "b3528477387b37227d565c7d70806ee09cd54c9df3baa13b77bf763520c26ab5"
+      ],
+      "dependsOn": [
+        "generated/project"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.001Z"
+    },
+    {
+      "id": "debug/debug-attempts-attempt-1-generated-desktop.png",
+      "path": "debug/attempts/attempt-1/generated-desktop.png",
+      "byteSize": 1577623,
+      "hash": "5b751122f885d8aa522f29f28f96e8b9971175d8240ac16ffb8bdc75ce9dbff0",
+      "artifactType": "debug",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "generated/project"
+      ],
+      "dependencyHashes": [
+        "b3528477387b37227d565c7d70806ee09cd54c9df3baa13b77bf763520c26ab5"
+      ],
+      "dependsOn": [
+        "generated/project"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.008Z"
+    },
+    {
+      "id": "debug/debug-attempts-attempt-1-generated-laptop.png",
+      "path": "debug/attempts/attempt-1/generated-laptop.png",
+      "byteSize": 1561509,
+      "hash": "da3b3b511f068c3424c3032814b2b6ac1fd6b7b4002cb09eca93c9a868716605",
+      "artifactType": "debug",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "generated/project"
+      ],
+      "dependencyHashes": [
+        "b3528477387b37227d565c7d70806ee09cd54c9df3baa13b77bf763520c26ab5"
+      ],
+      "dependsOn": [
+        "generated/project"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.004Z"
+    },
+    {
+      "id": "debug/debug-attempts-attempt-1-generated-mobile.png",
+      "path": "debug/attempts/attempt-1/generated-mobile.png",
+      "byteSize": 224536,
+      "hash": "b5e213ab582e1145d5a095bc552577511084a989d786041f328c843fa11403e2",
+      "artifactType": "debug",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "generated/project"
+      ],
+      "dependencyHashes": [
+        "b3528477387b37227d565c7d70806ee09cd54c9df3baa13b77bf763520c26ab5"
+      ],
+      "dependsOn": [
+        "generated/project"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.996Z"
+    },
+    {
+      "id": "debug/debug-attempts-attempt-1-generated-tablet.png",
+      "path": "debug/attempts/attempt-1/generated-tablet.png",
+      "byteSize": 297664,
+      "hash": "e64dca79f6c7433edf02e6d55b6d427a9d88533313950a943e3bdc528ff22bed",
+      "artifactType": "debug",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "generated/project"
+      ],
+      "dependencyHashes": [
+        "b3528477387b37227d565c7d70806ee09cd54c9df3baa13b77bf763520c26ab5"
+      ],
+      "dependsOn": [
+        "generated/project"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.996Z"
+    },
+    {
+      "id": "debug/debug-attempts-attempt-1-summary.json",
+      "path": "debug/attempts/attempt-1/summary.json",
+      "byteSize": 2068,
+      "hash": "b08c36d13c1c739d548608ebb4b70804c0d439118a377a747d449cb0bfdf4669",
+      "artifactType": "debug",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "generated/project"
+      ],
+      "dependencyHashes": [
+        "b3528477387b37227d565c7d70806ee09cd54c9df3baa13b77bf763520c26ab5"
+      ],
+      "dependsOn": [
+        "generated/project"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.996Z"
+    },
+    {
+      "id": "debug/debug-attempts-attempt-2-compare-diagnostics.json",
+      "path": "debug/attempts/attempt-2/compare-diagnostics.json",
+      "byteSize": 686880,
+      "hash": "a5d901855366792f5a3c905f48dab3759b6adcdce5017cb6c261b9976f8c9aba",
+      "artifactType": "debug",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "generated/project"
+      ],
+      "dependencyHashes": [
+        "b3528477387b37227d565c7d70806ee09cd54c9df3baa13b77bf763520c26ab5"
+      ],
+      "dependsOn": [
+        "generated/project"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.001Z"
+    },
+    {
+      "id": "debug/debug-attempts-attempt-2-generated-desktop.png",
+      "path": "debug/attempts/attempt-2/generated-desktop.png",
+      "byteSize": 1577623,
+      "hash": "5b751122f885d8aa522f29f28f96e8b9971175d8240ac16ffb8bdc75ce9dbff0",
+      "artifactType": "debug",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "generated/project"
+      ],
+      "dependencyHashes": [
+        "b3528477387b37227d565c7d70806ee09cd54c9df3baa13b77bf763520c26ab5"
+      ],
+      "dependsOn": [
+        "generated/project"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.008Z"
+    },
+    {
+      "id": "debug/debug-attempts-attempt-2-generated-laptop.png",
+      "path": "debug/attempts/attempt-2/generated-laptop.png",
+      "byteSize": 1561509,
+      "hash": "da3b3b511f068c3424c3032814b2b6ac1fd6b7b4002cb09eca93c9a868716605",
+      "artifactType": "debug",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "generated/project"
+      ],
+      "dependencyHashes": [
+        "b3528477387b37227d565c7d70806ee09cd54c9df3baa13b77bf763520c26ab5"
+      ],
+      "dependsOn": [
+        "generated/project"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.005Z"
+    },
+    {
+      "id": "debug/debug-attempts-attempt-2-generated-mobile.png",
+      "path": "debug/attempts/attempt-2/generated-mobile.png",
+      "byteSize": 224536,
+      "hash": "b5e213ab582e1145d5a095bc552577511084a989d786041f328c843fa11403e2",
+      "artifactType": "debug",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "generated/project"
+      ],
+      "dependencyHashes": [
+        "b3528477387b37227d565c7d70806ee09cd54c9df3baa13b77bf763520c26ab5"
+      ],
+      "dependsOn": [
+        "generated/project"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.996Z"
+    },
+    {
+      "id": "debug/debug-attempts-attempt-2-generated-tablet.png",
+      "path": "debug/attempts/attempt-2/generated-tablet.png",
+      "byteSize": 297664,
+      "hash": "e64dca79f6c7433edf02e6d55b6d427a9d88533313950a943e3bdc528ff22bed",
+      "artifactType": "debug",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "generated/project"
+      ],
+      "dependencyHashes": [
+        "b3528477387b37227d565c7d70806ee09cd54c9df3baa13b77bf763520c26ab5"
+      ],
+      "dependsOn": [
+        "generated/project"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "debug/debug-attempts-attempt-2-summary.json",
+      "path": "debug/attempts/attempt-2/summary.json",
+      "byteSize": 3774,
+      "hash": "ec5282bf455b1b76582e03069520604ffd38d2f43af4bb704d25b1a90cd38a52",
+      "artifactType": "debug",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "generated/project"
+      ],
+      "dependencyHashes": [
+        "b3528477387b37227d565c7d70806ee09cd54c9df3baa13b77bf763520c26ab5"
+      ],
+      "dependsOn": [
+        "generated/project"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.996Z"
+    },
+    {
+      "id": "debug/debug-manifest.json",
+      "path": "debug/manifest.json",
+      "byteSize": 1079,
+      "hash": "438a29bed9d1ec22a0590689b6f4f2718398c5b1397d5eb01f47cbef8152776b",
+      "artifactType": "debug",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "generated/project"
+      ],
+      "dependencyHashes": [
+        "b3528477387b37227d565c7d70806ee09cd54c9df3baa13b77bf763520c26ab5"
+      ],
+      "dependsOn": [
+        "generated/project"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.996Z"
+    },
+    {
+      "id": "debug/debug-source-home-route-progress.json",
+      "path": "debug/source/home/route-progress.json",
+      "byteSize": 8322108,
+      "hash": "a65a44143baeaa6bea972f6056626390506b03e9a62f172bb564778c35516b43",
+      "artifactType": "debug",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "generated/project"
+      ],
+      "dependencyHashes": [
+        "b3528477387b37227d565c7d70806ee09cd54c9df3baa13b77bf763520c26ab5"
+      ],
+      "dependsOn": [
+        "generated/project"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.015Z"
+    },
+    {
+      "id": "artifact/dependency-license-report.json",
+      "path": "dependency-license-report.json",
+      "byteSize": 70,
+      "hash": "527f0c97a9c3f70489f264cc5838452a9e3872a023eb4a89283d268f624ae551",
+      "artifactType": "json",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.996Z"
+    },
+    {
+      "id": "artifact/dist-assets-home-cvronlk1.css",
+      "path": "dist/assets/Home-CvroNlK1.css",
+      "byteSize": 790039,
+      "hash": "e567286cf87d3fc4ad93c61a7f19b5cb4b74cf169aad187ff45ea29320c38abc",
+      "artifactType": "source-css",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.002Z"
+    },
+    {
+      "id": "artifact/dist-assets-home-djihfjxb.js",
+      "path": "dist/assets/Home-DJIHFJXB.js",
+      "byteSize": 740511,
+      "hash": "b443d36b382d8c4cdbda0bafe431e3ffa8b727b47a74fd5986005cfb64ed40c1",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.002Z"
+    },
+    {
+      "id": "artifact/dist-assets-index-b5_9b-xf.css",
+      "path": "dist/assets/index-B5_9B-xF.css",
+      "byteSize": 2531,
+      "hash": "c1638fde84ec780714748573da60dd404843e1101b14c415283f0558ffd65883",
+      "artifactType": "source-css",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-assets-index-bqcydjei.js",
+      "path": "dist/assets/index-BQCydjei.js",
+      "byteSize": 196356,
+      "hash": "f60aaa0dd8e63477d4f7e78d31d0dd6630312005a8b2eb636d4c9a0fa23efb90",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-index.html",
+      "path": "dist/index.html",
+      "byteSize": 414,
+      "hash": "4e7dc971cd32eefdcf11c221f8d2cba99577f29fba7e063d6dd8cb9a59dd04f3",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-0785aa4dff830e85c33ec49a.svg",
+      "path": "dist/runtime-assets/0785aa4dff830e85c33ec49a.svg",
+      "byteSize": 247243,
+      "hash": "0785aa4dff830e85c33ec49ab6e83d66bba4fdd387d85971e910b5111b9f51ff",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-0911297430ff82934aa91eb1.png",
+      "path": "dist/runtime-assets/0911297430ff82934aa91eb1.png",
+      "byteSize": 21381,
+      "hash": "0911297430ff82934aa91eb1d985be6ee534e43e7cbe9d2aab1860ee7f1f9fc5",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-09436dc12aa30dd71f81aa74.png",
+      "path": "dist/runtime-assets/09436dc12aa30dd71f81aa74.png",
+      "byteSize": 69609,
+      "hash": "09436dc12aa30dd71f81aa74b0aa47faea7077bddfe224546beb554143c80b58",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-14602f31a42a8eb69dc35884.png",
+      "path": "dist/runtime-assets/14602f31a42a8eb69dc35884.png",
+      "byteSize": 19251,
+      "hash": "14602f31a42a8eb69dc35884696fb556ab5201393bceb05a3ecc1f774d6522b1",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-26db46cdc952fb6297e6c27c.png",
+      "path": "dist/runtime-assets/26db46cdc952fb6297e6c27c.png",
+      "byteSize": 19424,
+      "hash": "26db46cdc952fb6297e6c27cf19e32d88147149252ac2aa09e04b81cf2953c73",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-2ae339df456c100509509479.png",
+      "path": "dist/runtime-assets/2ae339df456c100509509479.png",
+      "byteSize": 22581,
+      "hash": "2ae339df456c1005095094796def984c69d5254567c837a714f4c42cae5691ee",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-39cf3391ed33a1c87541eb6b.png",
+      "path": "dist/runtime-assets/39cf3391ed33a1c87541eb6b.png",
+      "byteSize": 18474,
+      "hash": "39cf3391ed33a1c87541eb6b18fc94850de950c3bb89eb50650e66639f790b14",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-3e55522768395012015a3c51.png",
+      "path": "dist/runtime-assets/3e55522768395012015a3c51.png",
+      "byteSize": 15469,
+      "hash": "3e55522768395012015a3c51c70a2c4c0a057186bf8b472bb54d66884dcc7d86",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-4916883659a193a0c6dea3d1.png",
+      "path": "dist/runtime-assets/4916883659a193a0c6dea3d1.png",
+      "byteSize": 40151,
+      "hash": "4916883659a193a0c6dea3d13fe2f73f782606b37a6c6764dd119b907e99bb1f",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-4be7c2289b56e2513a5bef8d.png",
+      "path": "dist/runtime-assets/4be7c2289b56e2513a5bef8d.png",
+      "byteSize": 25406,
+      "hash": "4be7c2289b56e2513a5bef8d9e22bd841fbfcc36ebd9fabe02a924a158611716",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-4ed5288555e7b89bf02abba2.png",
+      "path": "dist/runtime-assets/4ed5288555e7b89bf02abba2.png",
+      "byteSize": 20915,
+      "hash": "4ed5288555e7b89bf02abba2a3252c306a3cedf6f7e63f13c937db6a747ae4b5",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-5853b8fc75482431c573f9b6.png",
+      "path": "dist/runtime-assets/5853b8fc75482431c573f9b6.png",
+      "byteSize": 9405,
+      "hash": "5853b8fc75482431c573f9b66cb26f8323145fcad77d149b17d518f7866f8d14",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-5bcab767ce2e23f4000d5a54.png",
+      "path": "dist/runtime-assets/5bcab767ce2e23f4000d5a54.png",
+      "byteSize": 12543,
+      "hash": "5bcab767ce2e23f4000d5a54600753b0cddf29b2cf39807abf6410973cbd5b59",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-5f78b9e34e5ffff03c5cd6b8.png",
+      "path": "dist/runtime-assets/5f78b9e34e5ffff03c5cd6b8.png",
+      "byteSize": 142996,
+      "hash": "5f78b9e34e5ffff03c5cd6b8f7fafefcf8a9344257424cc776cd924ec117b73e",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-61d4e1303de824c88c2d8c56.png",
+      "path": "dist/runtime-assets/61d4e1303de824c88c2d8c56.png",
+      "byteSize": 104455,
+      "hash": "61d4e1303de824c88c2d8c5634fb80a7b87aa3a57ba33f4bf0ad3292a1189fb2",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-6c820c2de2b1a36575b4993c.png",
+      "path": "dist/runtime-assets/6c820c2de2b1a36575b4993c.png",
+      "byteSize": 221986,
+      "hash": "6c820c2de2b1a36575b4993c99e6eb7ccf7755258473011f40381ce9ebc27e68",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-7005524dcad896ff9952866f.png",
+      "path": "dist/runtime-assets/7005524dcad896ff9952866f.png",
+      "byteSize": 13668,
+      "hash": "7005524dcad896ff9952866f11fd50e324b886a875dd1de169ef3b1c6ee1f1ca",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-7086f6ed58620971629d3081.png",
+      "path": "dist/runtime-assets/7086f6ed58620971629d3081.png",
+      "byteSize": 38216,
+      "hash": "7086f6ed58620971629d30814081b53d88fba52847cc56624d290c354bd97a53",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-732dfb4c038e6082581fddc4.png",
+      "path": "dist/runtime-assets/732dfb4c038e6082581fddc4.png",
+      "byteSize": 8100,
+      "hash": "732dfb4c038e6082581fddc493979b97d3ef1f845200abd083155c525de7cf95",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-7dd3de5154355ea3089f1fa0.png",
+      "path": "dist/runtime-assets/7dd3de5154355ea3089f1fa0.png",
+      "byteSize": 113199,
+      "hash": "7dd3de5154355ea3089f1fa0fa34067d921e6ab0a006231290dd55ffd3760a42",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-85d9f323e5097a98bf158bd6.png",
+      "path": "dist/runtime-assets/85d9f323e5097a98bf158bd6.png",
+      "byteSize": 16104,
+      "hash": "85d9f323e5097a98bf158bd6e3d014d4a021bdf78f2987214ddb4e4bc6f576c2",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-876b52102451c505e7164f7a.png",
+      "path": "dist/runtime-assets/876b52102451c505e7164f7a.png",
+      "byteSize": 7702,
+      "hash": "876b52102451c505e7164f7a19ed761decf6886e419a7c3793f59a872a3fa9cc",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.997Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-9524af6748c9ba31170a22a7.png",
+      "path": "dist/runtime-assets/9524af6748c9ba31170a22a7.png",
+      "byteSize": 18597,
+      "hash": "9524af6748c9ba31170a22a72f91e18e501c84b76a8a96b999b2cf5d9efaba44",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-97dad8b45d18fde388787f05.png",
+      "path": "dist/runtime-assets/97dad8b45d18fde388787f05.png",
+      "byteSize": 239961,
+      "hash": "97dad8b45d18fde388787f059ad9262b0f9c5865d455cc5f7a041213e1f213d2",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-986c3356b19c76ff7fc1c6f7.png",
+      "path": "dist/runtime-assets/986c3356b19c76ff7fc1c6f7.png",
+      "byteSize": 106710,
+      "hash": "986c3356b19c76ff7fc1c6f7fbb96e0dfb55f1991eb2826ecdb2440b1c5a2544",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-9cd6bfcc735c07aa824396bb.svg",
+      "path": "dist/runtime-assets/9cd6bfcc735c07aa824396bb.svg",
+      "byteSize": 295523,
+      "hash": "9cd6bfcc735c07aa824396bb1e73ba86e9b8214952ca211d3243726d12422d91",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-b3360bf6c0a502112a9faf4d.png",
+      "path": "dist/runtime-assets/b3360bf6c0a502112a9faf4d.png",
+      "byteSize": 14847,
+      "hash": "b3360bf6c0a502112a9faf4dd44cfcbc0f1cca6f7bac2906e1551317a614f0c2",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-ba9cb404234f30e2c6d2db96.png",
+      "path": "dist/runtime-assets/ba9cb404234f30e2c6d2db96.png",
+      "byteSize": 16210,
+      "hash": "ba9cb404234f30e2c6d2db9685bedcda5b1b3b0c81a7ecaa86461f23e52d12b7",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-bfd24526e22b4c3ac0a66309.png",
+      "path": "dist/runtime-assets/bfd24526e22b4c3ac0a66309.png",
+      "byteSize": 6341,
+      "hash": "bfd24526e22b4c3ac0a663090bc2b051811c8c2e738fa6d1e3a48b2181cfc9cf",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-c12749d52d48e718e25ea27b.png",
+      "path": "dist/runtime-assets/c12749d52d48e718e25ea27b.png",
+      "byteSize": 12829,
+      "hash": "c12749d52d48e718e25ea27b06c7678817ba204a288ae553eeac75d1c9d4a95d",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-c6c4f1a37a084cacbf111716.png",
+      "path": "dist/runtime-assets/c6c4f1a37a084cacbf111716.png",
+      "byteSize": 42032,
+      "hash": "c6c4f1a37a084cacbf1117160cf71bb509202b9187f9cec9dbe8aaeb48c9e22a",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-ca2b70514b67740df3f29ab1.png",
+      "path": "dist/runtime-assets/ca2b70514b67740df3f29ab1.png",
+      "byteSize": 16642,
+      "hash": "ca2b70514b67740df3f29ab10b4edc2c9ce29d1f41b3dd5b734acbe29599239a",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-caf86e93a6fad1dd972109ba.svg",
+      "path": "dist/runtime-assets/caf86e93a6fad1dd972109ba.svg",
+      "byteSize": 291455,
+      "hash": "caf86e93a6fad1dd972109badc9f593fc035172e768c1a6414506be5db8ff891",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "artifact/dist-runtime-assets-dfaa96eda40a43e1cf6a2a65.png",
+      "path": "dist/runtime-assets/dfaa96eda40a43e1cf6a2a65.png",
+      "byteSize": 105421,
+      "hash": "dfaa96eda40a43e1cf6a2a6598869c12a335fa7560392566f4e1a1ed312579d0",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "report/export",
+      "path": "export-report.json",
+      "byteSize": 1540314,
+      "hash": "7b6cfca4ac9abb73d5a86de0bad393957d4c827e7234da777db6e6d7a6c6973a",
+      "artifactType": "report",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "generated/project",
+        "validation/generated",
+        "ir/normalized"
+      ],
+      "dependencyHashes": [
+        "b3528477387b37227d565c7d70806ee09cd54c9df3baa13b77bf763520c26ab5",
+        "f1f11f0731d7c989b658af8daeeaac80464b2996e55afc11f60eca900a0f3585",
+        "b8bb66562d0dbcc2b3522bd601306751799fd14529bf81f9a08d0502de88bbd0"
+      ],
+      "dependsOn": [
+        "generated/project",
+        "validation/generated",
+        "ir/normalized"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.006Z"
+    },
+    {
+      "id": "artifact/export-tree.json",
+      "path": "export-tree.json",
+      "byteSize": 9384685,
+      "hash": "0ef602a9ed495cb96d3268591628f3eb9357d4fdbe5565a726e66628e106f2a2",
+      "artifactType": "json",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.026Z"
+    },
+    {
+      "id": "artifact/framer-cms-collections.json",
+      "path": "framer-cms-collections.json",
+      "byteSize": 3,
+      "hash": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "artifactType": "json",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "artifact/framer-code-files.json",
+      "path": "framer-code-files.json",
+      "byteSize": 3,
+      "hash": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "artifactType": "json",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "artifact/framer-component-modules.json",
+      "path": "framer-component-modules.json",
+      "byteSize": 3,
+      "hash": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "artifactType": "json",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "artifact/framer-fonts.json",
+      "path": "framer-fonts.json",
+      "byteSize": 650,
+      "hash": "2898532ac6dd0266dc386a7dbee0e5f084d7c59267bb2dc4b41afc40b15cfcf6",
+      "artifactType": "json",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "artifact/framer-tree.json",
+      "path": "framer-tree.json",
+      "byteSize": 3,
+      "hash": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "artifactType": "json",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "validation/generated",
+      "path": "generated-validation.json",
+      "byteSize": 2300,
+      "hash": "f1f11f0731d7c989b658af8daeeaac80464b2996e55afc11f60eca900a0f3585",
+      "artifactType": "validation",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "generated/project"
+      ],
+      "dependencyHashes": [
+        "b3528477387b37227d565c7d70806ee09cd54c9df3baa13b77bf763520c26ab5"
+      ],
+      "dependsOn": [
+        "generated/project"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "artifact/index.html",
+      "path": "index.html",
+      "byteSize": 316,
+      "hash": "20d70f402f424b79189edbd7d67a9f08ad58fa3cd77da88016136fa343a7ae48",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "manifest/invalidation",
+      "path": "invalidation-plan.json",
+      "byteSize": 609,
+      "hash": "2833b4b1fbf9cc256044a09789e33841a3951ad0f6a31020f9696e9333b4653b",
+      "artifactType": "invalidation-plan",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "manifest/revision"
+      ],
+      "dependencyHashes": [
+        "71a52c5c85fe71d56f08e5814f7c87d236acca4cc1aa301809c3f9687ce33e98"
+      ],
+      "dependsOn": [
+        "manifest/revision"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "artifact/motion-manifest.json",
+      "path": "motion-manifest.json",
+      "byteSize": 2276,
+      "hash": "df61fb0320229597a81bc3b16a737920907a74d8dc3aa71d0f7c88eb26d4f8f1",
+      "artifactType": "json",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "ir/normalized",
+      "path": "normalized-ir.json",
+      "byteSize": 33091,
+      "hash": "b8bb66562d0dbcc2b3522bd601306751799fd14529bf81f9a08d0502de88bbd0",
+      "artifactType": "normalized-ir",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "plugin/raw-payload",
+        "runtime/raw-capture"
+      ],
+      "dependencyHashes": [
+        "58da1f58fdc30e059f35af215fab23f6e6469ed5d8b5892eda7619f6ad007ca2",
+        "949c1592cc5b4d34c624f7a45afefcaa54e299dbcc940ffe4e21a6a5c5d51dcf"
+      ],
+      "dependsOn": [
+        "plugin/raw-payload",
+        "runtime/raw-capture"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "artifact/package-lock.json",
+      "path": "package-lock.json",
+      "byteSize": 33110,
+      "hash": "6d87382526e8ac79d9bc644a7fe3aa800cafc8dedbb53addb53e282b5818c637",
+      "artifactType": "json",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "artifact/package.json",
+      "path": "package.json",
+      "byteSize": 487,
+      "hash": "cebbcd064676e0fcc1cfbc8718e5520f2daea93f98e947f0f66620b95f5b2df7",
+      "artifactType": "json",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "artifact/pages-home.d.ts",
+      "path": "pages/Home.d.ts",
+      "byteSize": 133,
+      "hash": "6e7ad008ea58730468f0880b863becb786bbde50d89f5d3959a476705011b56d",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "artifact/pages-home.module.css",
+      "path": "pages/Home.module.css",
+      "byteSize": 915438,
+      "hash": "1e24a6ee519f49dc7f2eb6029b82339d9dc51be2729679c5920f497630d64100",
+      "artifactType": "source-css",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.003Z"
+    },
+    {
+      "id": "artifact/pages-home.tsx",
+      "path": "pages/Home.tsx",
+      "byteSize": 585361,
+      "hash": "16dac2055bab4fe3168b7818e121c6498991c40786cc370add038f5b68885206",
+      "artifactType": "source-tsx",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.003Z"
+    },
+    {
+      "id": "attempt/patch-history",
+      "path": "patch-history.json",
+      "byteSize": 3132,
+      "hash": "2e1e0477b9c386012dd432614d7edb4ac9fe8307303189c0cb0dfa1679d97674",
+      "artifactType": "patch-history",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "ir/normalized"
+      ],
+      "dependencyHashes": [
+        "b8bb66562d0dbcc2b3522bd601306751799fd14529bf81f9a08d0502de88bbd0"
+      ],
+      "dependsOn": [
+        "ir/normalized"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "generated/project",
+      "path": "preview.html",
+      "byteSize": 1205636,
+      "hash": "b3528477387b37227d565c7d70806ee09cd54c9df3baa13b77bf763520c26ab5",
+      "artifactType": "preview",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "ir/normalized"
+      ],
+      "dependencyHashes": [
+        "b8bb66562d0dbcc2b3522bd601306751799fd14529bf81f9a08d0502de88bbd0"
+      ],
+      "dependsOn": [
+        "ir/normalized"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.007Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-0785aa4dff830e85c33ec49a.svg",
+      "path": "public/runtime-assets/0785aa4dff830e85c33ec49a.svg",
+      "byteSize": 247243,
+      "hash": "0785aa4dff830e85c33ec49ab6e83d66bba4fdd387d85971e910b5111b9f51ff",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.998Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-0911297430ff82934aa91eb1.png",
+      "path": "public/runtime-assets/0911297430ff82934aa91eb1.png",
+      "byteSize": 21381,
+      "hash": "0911297430ff82934aa91eb1d985be6ee534e43e7cbe9d2aab1860ee7f1f9fc5",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-09436dc12aa30dd71f81aa74.png",
+      "path": "public/runtime-assets/09436dc12aa30dd71f81aa74.png",
+      "byteSize": 69609,
+      "hash": "09436dc12aa30dd71f81aa74b0aa47faea7077bddfe224546beb554143c80b58",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-14602f31a42a8eb69dc35884.png",
+      "path": "public/runtime-assets/14602f31a42a8eb69dc35884.png",
+      "byteSize": 19251,
+      "hash": "14602f31a42a8eb69dc35884696fb556ab5201393bceb05a3ecc1f774d6522b1",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-26db46cdc952fb6297e6c27c.png",
+      "path": "public/runtime-assets/26db46cdc952fb6297e6c27c.png",
+      "byteSize": 19424,
+      "hash": "26db46cdc952fb6297e6c27cf19e32d88147149252ac2aa09e04b81cf2953c73",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-2ae339df456c100509509479.png",
+      "path": "public/runtime-assets/2ae339df456c100509509479.png",
+      "byteSize": 22581,
+      "hash": "2ae339df456c1005095094796def984c69d5254567c837a714f4c42cae5691ee",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-39cf3391ed33a1c87541eb6b.png",
+      "path": "public/runtime-assets/39cf3391ed33a1c87541eb6b.png",
+      "byteSize": 18474,
+      "hash": "39cf3391ed33a1c87541eb6b18fc94850de950c3bb89eb50650e66639f790b14",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-3e55522768395012015a3c51.png",
+      "path": "public/runtime-assets/3e55522768395012015a3c51.png",
+      "byteSize": 15469,
+      "hash": "3e55522768395012015a3c51c70a2c4c0a057186bf8b472bb54d66884dcc7d86",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-4916883659a193a0c6dea3d1.png",
+      "path": "public/runtime-assets/4916883659a193a0c6dea3d1.png",
+      "byteSize": 40151,
+      "hash": "4916883659a193a0c6dea3d13fe2f73f782606b37a6c6764dd119b907e99bb1f",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-4be7c2289b56e2513a5bef8d.png",
+      "path": "public/runtime-assets/4be7c2289b56e2513a5bef8d.png",
+      "byteSize": 25406,
+      "hash": "4be7c2289b56e2513a5bef8d9e22bd841fbfcc36ebd9fabe02a924a158611716",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-4ed5288555e7b89bf02abba2.png",
+      "path": "public/runtime-assets/4ed5288555e7b89bf02abba2.png",
+      "byteSize": 20915,
+      "hash": "4ed5288555e7b89bf02abba2a3252c306a3cedf6f7e63f13c937db6a747ae4b5",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-5853b8fc75482431c573f9b6.png",
+      "path": "public/runtime-assets/5853b8fc75482431c573f9b6.png",
+      "byteSize": 9405,
+      "hash": "5853b8fc75482431c573f9b66cb26f8323145fcad77d149b17d518f7866f8d14",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-5bcab767ce2e23f4000d5a54.png",
+      "path": "public/runtime-assets/5bcab767ce2e23f4000d5a54.png",
+      "byteSize": 12543,
+      "hash": "5bcab767ce2e23f4000d5a54600753b0cddf29b2cf39807abf6410973cbd5b59",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-5f78b9e34e5ffff03c5cd6b8.png",
+      "path": "public/runtime-assets/5f78b9e34e5ffff03c5cd6b8.png",
+      "byteSize": 142996,
+      "hash": "5f78b9e34e5ffff03c5cd6b8f7fafefcf8a9344257424cc776cd924ec117b73e",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-61d4e1303de824c88c2d8c56.png",
+      "path": "public/runtime-assets/61d4e1303de824c88c2d8c56.png",
+      "byteSize": 104455,
+      "hash": "61d4e1303de824c88c2d8c5634fb80a7b87aa3a57ba33f4bf0ad3292a1189fb2",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-6c820c2de2b1a36575b4993c.png",
+      "path": "public/runtime-assets/6c820c2de2b1a36575b4993c.png",
+      "byteSize": 221986,
+      "hash": "6c820c2de2b1a36575b4993c99e6eb7ccf7755258473011f40381ce9ebc27e68",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-7005524dcad896ff9952866f.png",
+      "path": "public/runtime-assets/7005524dcad896ff9952866f.png",
+      "byteSize": 13668,
+      "hash": "7005524dcad896ff9952866f11fd50e324b886a875dd1de169ef3b1c6ee1f1ca",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-7086f6ed58620971629d3081.png",
+      "path": "public/runtime-assets/7086f6ed58620971629d3081.png",
+      "byteSize": 38216,
+      "hash": "7086f6ed58620971629d30814081b53d88fba52847cc56624d290c354bd97a53",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-732dfb4c038e6082581fddc4.png",
+      "path": "public/runtime-assets/732dfb4c038e6082581fddc4.png",
+      "byteSize": 8100,
+      "hash": "732dfb4c038e6082581fddc493979b97d3ef1f845200abd083155c525de7cf95",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-7dd3de5154355ea3089f1fa0.png",
+      "path": "public/runtime-assets/7dd3de5154355ea3089f1fa0.png",
+      "byteSize": 113199,
+      "hash": "7dd3de5154355ea3089f1fa0fa34067d921e6ab0a006231290dd55ffd3760a42",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-85d9f323e5097a98bf158bd6.png",
+      "path": "public/runtime-assets/85d9f323e5097a98bf158bd6.png",
+      "byteSize": 16104,
+      "hash": "85d9f323e5097a98bf158bd6e3d014d4a021bdf78f2987214ddb4e4bc6f576c2",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-876b52102451c505e7164f7a.png",
+      "path": "public/runtime-assets/876b52102451c505e7164f7a.png",
+      "byteSize": 7702,
+      "hash": "876b52102451c505e7164f7a19ed761decf6886e419a7c3793f59a872a3fa9cc",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-9524af6748c9ba31170a22a7.png",
+      "path": "public/runtime-assets/9524af6748c9ba31170a22a7.png",
+      "byteSize": 18597,
+      "hash": "9524af6748c9ba31170a22a72f91e18e501c84b76a8a96b999b2cf5d9efaba44",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-97dad8b45d18fde388787f05.png",
+      "path": "public/runtime-assets/97dad8b45d18fde388787f05.png",
+      "byteSize": 239961,
+      "hash": "97dad8b45d18fde388787f059ad9262b0f9c5865d455cc5f7a041213e1f213d2",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-986c3356b19c76ff7fc1c6f7.png",
+      "path": "public/runtime-assets/986c3356b19c76ff7fc1c6f7.png",
+      "byteSize": 106710,
+      "hash": "986c3356b19c76ff7fc1c6f7fbb96e0dfb55f1991eb2826ecdb2440b1c5a2544",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-9cd6bfcc735c07aa824396bb.svg",
+      "path": "public/runtime-assets/9cd6bfcc735c07aa824396bb.svg",
+      "byteSize": 295523,
+      "hash": "9cd6bfcc735c07aa824396bb1e73ba86e9b8214952ca211d3243726d12422d91",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-b3360bf6c0a502112a9faf4d.png",
+      "path": "public/runtime-assets/b3360bf6c0a502112a9faf4d.png",
+      "byteSize": 14847,
+      "hash": "b3360bf6c0a502112a9faf4dd44cfcbc0f1cca6f7bac2906e1551317a614f0c2",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-ba9cb404234f30e2c6d2db96.png",
+      "path": "public/runtime-assets/ba9cb404234f30e2c6d2db96.png",
+      "byteSize": 16210,
+      "hash": "ba9cb404234f30e2c6d2db9685bedcda5b1b3b0c81a7ecaa86461f23e52d12b7",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-bfd24526e22b4c3ac0a66309.png",
+      "path": "public/runtime-assets/bfd24526e22b4c3ac0a66309.png",
+      "byteSize": 6341,
+      "hash": "bfd24526e22b4c3ac0a663090bc2b051811c8c2e738fa6d1e3a48b2181cfc9cf",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-c12749d52d48e718e25ea27b.png",
+      "path": "public/runtime-assets/c12749d52d48e718e25ea27b.png",
+      "byteSize": 12829,
+      "hash": "c12749d52d48e718e25ea27b06c7678817ba204a288ae553eeac75d1c9d4a95d",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-c6c4f1a37a084cacbf111716.png",
+      "path": "public/runtime-assets/c6c4f1a37a084cacbf111716.png",
+      "byteSize": 42032,
+      "hash": "c6c4f1a37a084cacbf1117160cf71bb509202b9187f9cec9dbe8aaeb48c9e22a",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-ca2b70514b67740df3f29ab1.png",
+      "path": "public/runtime-assets/ca2b70514b67740df3f29ab1.png",
+      "byteSize": 16642,
+      "hash": "ca2b70514b67740df3f29ab10b4edc2c9ce29d1f41b3dd5b734acbe29599239a",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.999Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-caf86e93a6fad1dd972109ba.svg",
+      "path": "public/runtime-assets/caf86e93a6fad1dd972109ba.svg",
+      "byteSize": 291455,
+      "hash": "caf86e93a6fad1dd972109badc9f593fc035172e768c1a6414506be5db8ff891",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/public-runtime-assets-dfaa96eda40a43e1cf6a2a65.png",
+      "path": "public/runtime-assets/dfaa96eda40a43e1cf6a2a65.png",
+      "byteSize": 105421,
+      "hash": "dfaa96eda40a43e1cf6a2a6598869c12a335fa7560392566f4e1a1ed312579d0",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "plugin/raw-payload",
+      "path": "raw-plugin-payload.json",
+      "byteSize": 93,
+      "hash": "58da1f58fdc30e059f35af215fab23f6e6469ed5d8b5892eda7619f6ad007ca2",
+      "artifactType": "plugin-payload",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "runtime/raw-capture",
+      "path": "raw-runtime-capture.json",
+      "byteSize": 7954198,
+      "hash": "949c1592cc5b4d34c624f7a45afefcaa54e299dbcc940ffe4e21a6a5c5d51dcf",
+      "artifactType": "runtime-capture",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.020Z"
+    },
+    {
+      "id": "artifact/readme.md",
+      "path": "README.md",
+      "byteSize": 1471,
+      "hash": "2f8db9077d82553f405674256e052db2db50ee7bd09894c80bdad4c99f95e066",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:18.996Z"
+    },
+    {
+      "id": "request/resolved",
+      "path": "resolved-request.json",
+      "byteSize": 465,
+      "hash": "3f72376b449bb0e1b32ef4aca6b83c7ccc24433e2a993548e45aa2da350ca1e2",
+      "artifactType": "resolved-request",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "plugin/raw-payload"
+      ],
+      "dependencyHashes": [
+        "58da1f58fdc30e059f35af215fab23f6e6469ed5d8b5892eda7619f6ad007ca2"
+      ],
+      "dependsOn": [
+        "plugin/raw-payload"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "manifest/responsive-recapture",
+      "path": "responsive-recapture-plan.json",
+      "byteSize": 953,
+      "hash": "38f241e732945b94c6e4a85eba1a006376e952424ac4cfd67753ef3c8dad0a38",
+      "artifactType": "responsive-recapture-plan",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "runtime/raw-capture",
+        "manifest/revision"
+      ],
+      "dependencyHashes": [
+        "949c1592cc5b4d34c624f7a45afefcaa54e299dbcc940ffe4e21a6a5c5d51dcf",
+        "71a52c5c85fe71d56f08e5814f7c87d236acca4cc1aa301809c3f9687ce33e98"
+      ],
+      "dependsOn": [
+        "runtime/raw-capture",
+        "manifest/revision"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "manifest/revision",
+      "path": "revision-manifest.json",
+      "byteSize": 43191,
+      "hash": "71a52c5c85fe71d56f08e5814f7c87d236acca4cc1aa301809c3f9687ce33e98",
+      "artifactType": "revision-manifest",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [
+        "ir/normalized",
+        "validation/generated",
+        "manifest/source-artifacts"
+      ],
+      "dependencyHashes": [
+        "b8bb66562d0dbcc2b3522bd601306751799fd14529bf81f9a08d0502de88bbd0",
+        "f1f11f0731d7c989b658af8daeeaac80464b2996e55afc11f60eca900a0f3585",
+        "9074d4e78ce8c7c135b33219588b780b8cf9422c76a24a54399976361fb3c156"
+      ],
+      "dependsOn": [
+        "ir/normalized",
+        "validation/generated",
+        "manifest/source-artifacts"
+      ],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/route-manifest.json",
+      "path": "route-manifest.json",
+      "byteSize": 369,
+      "hash": "9dcb3ac2b9e4dfd915da463d6a4a66eaca201b0a67eaa7eac27ebbcdc6496352",
+      "artifactType": "json",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/route-template-manifest.json",
+      "path": "route-template-manifest.json",
+      "byteSize": 237,
+      "hash": "ac75a81d44162eea180e2f122ca82a420069bf5c58557161c3f2ad9730978a43",
+      "artifactType": "json",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/runtime-localization-report.json",
+      "path": "runtime-localization-report.json",
+      "byteSize": 10177,
+      "hash": "0fcabb9348103121c5eeb9cd52540b7e5654916146d6fa5ade72084bdc9c33ec",
+      "artifactType": "json",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/runtime-strategy-manifest.json",
+      "path": "runtime-strategy-manifest.json",
+      "byteSize": 945,
+      "hash": "5f720e9dbabecc6af36f17f40a823b8e8677cba0984d04720914b70ca06eee0b",
+      "artifactType": "json",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "manifest/source-artifacts",
+      "path": "source-artifacts/manifest.json",
+      "byteSize": 67,
+      "hash": "9074d4e78ce8c7c135b33219588b780b8cf9422c76a24a54399976361fb3c156",
+      "artifactType": "source-artifact-manifest",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/src-app.tsx",
+      "path": "src/App.tsx",
+      "byteSize": 6840,
+      "hash": "0e603603841fdc8986320c966f47cce825f97debd4eb6370b11c344d92379af0",
+      "artifactType": "source-tsx",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/src-framer-data-cms-runtime.tsx",
+      "path": "src/framer-data/cms-runtime.tsx",
+      "byteSize": 11028,
+      "hash": "5a581ea3d8a99f01347113c21ae0ed519a294f7ef2c78ef443550171193df789",
+      "artifactType": "source-tsx",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/src-framer-data-cms-sections.tsx",
+      "path": "src/framer-data/cms-sections.tsx",
+      "byteSize": 993,
+      "hash": "8b1e779f616b2af69e3bedb058fef218d5b3aef24cb8a123e7b228ca467b28ba",
+      "artifactType": "source-tsx",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/src-framer-data-cms.ts",
+      "path": "src/framer-data/cms.ts",
+      "byteSize": 499,
+      "hash": "e3f7d40618619a02c9c5208673da65b0896161614a100e52f207f938a685545d",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/src-framer-data-code-file-executables.tsx",
+      "path": "src/framer-data/code-file-executables.tsx",
+      "byteSize": 1778,
+      "hash": "c76cd1bdf1bf15a924535fe99c3f2743d21d6f02f34f3ea1580ab85812ebb181",
+      "artifactType": "source-tsx",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/src-framer-data-code-files-runtime.tsx",
+      "path": "src/framer-data/code-files-runtime.tsx",
+      "byteSize": 6527,
+      "hash": "b93c6dbfd1ff31f2b694d9ca3ac9ee5fadf016b0995b8f0a79a07055ab639620",
+      "artifactType": "source-tsx",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/src-framer-data-code-files.ts",
+      "path": "src/framer-data/code-files.ts",
+      "byteSize": 850,
+      "hash": "87443cec46176f9c2103ae31c6bbde6b97296e33b4160eed9e566d43b09c5ff0",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/src-framer-data-component-families-runtime.tsx",
+      "path": "src/framer-data/component-families-runtime.tsx",
+      "byteSize": 8542,
+      "hash": "030e64640b49a06701b9ebd2784a973805330a5b2a35c02391d8ca7628cd9ea5",
+      "artifactType": "source-tsx",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/src-framer-data-component-families.ts",
+      "path": "src/framer-data/component-families.ts",
+      "byteSize": 1203,
+      "hash": "1de3b3987ce1c49dfbe74b7568c198caec3a51aebfcb664358bce8adeb8c12ef",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/src-framer-data-component-modules.ts",
+      "path": "src/framer-data/component-modules.ts",
+      "byteSize": 266,
+      "hash": "a3cee7d486b1d3782b687a15a82d677f7d00c7e63504435773a410d2700787c8",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/src-framer-data-component-registry.ts",
+      "path": "src/framer-data/component-registry.ts",
+      "byteSize": 811,
+      "hash": "2ecd2668178692286a0d757e99a8be1ff18356e4bce1bb7c3c2964dcb159284c",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/src-framer-data-component-runtime.tsx",
+      "path": "src/framer-data/component-runtime.tsx",
+      "byteSize": 4318,
+      "hash": "b800a4fa55f6c06ce644226ef279b598d9b943d93c98f98d3d6d98d4db93634a",
+      "artifactType": "source-tsx",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.001Z"
+    },
+    {
+      "id": "artifact/src-framer-data-fonts.ts",
+      "path": "src/framer-data/fonts.ts",
+      "byteSize": 1014,
+      "hash": "57606347c534df00d96e9fff90d829268bf0bbe7d720d2b63396d4abae95e7c2",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/src-framer-data-framer-adapter.tsx",
+      "path": "src/framer-data/framer-adapter.tsx",
+      "byteSize": 2009,
+      "hash": "c2efcfe6d8f379ad8a31b91dde06b492c4d2729114efa7ad5b640d5e4fd09e3f",
+      "artifactType": "source-tsx",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/src-framer-data-index.ts",
+      "path": "src/framer-data/index.ts",
+      "byteSize": 2001,
+      "hash": "5a21b85abce32780533d4120ff006c7812db9337814622b3196d63dc94ef0891",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/src-framer-data-route-template-runtime.tsx",
+      "path": "src/framer-data/route-template-runtime.tsx",
+      "byteSize": 5043,
+      "hash": "deec38b2c89758bd8755a78f00cdf6632d4768f12cd267a02794747f3d1ec277",
+      "artifactType": "source-tsx",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/src-main.tsx",
+      "path": "src/main.tsx",
+      "byteSize": 230,
+      "hash": "1bc96e7259b2a03be76f16192b302b484a79d574ad26ec513b99fa4681839efe",
+      "artifactType": "source-tsx",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/src-styles.css",
+      "path": "src/styles.css",
+      "byteSize": 3236,
+      "hash": "18d605d259851046379047ea1ef1457f9ae6e281b14860a6b6052c3af70c825a",
+      "artifactType": "source-css",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/src-vite-env.d.ts",
+      "path": "src/vite-env.d.ts",
+      "byteSize": 38,
+      "hash": "65996936fbb042915f7b74a200fcdde7e410f32a669b1ab9597cfaa4b0faddb5",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/tsconfig.json",
+      "path": "tsconfig.json",
+      "byteSize": 564,
+      "hash": "0db076857af24e44c627d574c25e71e397a46909e35b4324dbc2b49a209023f3",
+      "artifactType": "json",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/tsconfig.tsbuildinfo",
+      "path": "tsconfig.tsbuildinfo",
+      "byteSize": 121,
+      "hash": "8c52cedec49e11bb5f3864114d04ea7494820e9732668ce825c7fb74010202e3",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    },
+    {
+      "id": "artifact/vite.config.ts",
+      "path": "vite.config.ts",
+      "byteSize": 133,
+      "hash": "6dc0ce25c4170ac9fbadb4dbd19ca5c2ceb57b9c5efc5090b82e2923f53dd679",
+      "artifactType": "file",
+      "schemaVersion": 2,
+      "sourceFingerprint": "40801972fa4cb77ed679f1920b7fdfec70e06a1f62cdc7417a8859880f179b30",
+      "dependencyArtifactIds": [],
+      "dependencyHashes": [],
+      "dependsOn": [],
+      "status": "complete",
+      "createdAt": "2026-07-15T08:34:19.000Z"
+    }
+  ]
+}

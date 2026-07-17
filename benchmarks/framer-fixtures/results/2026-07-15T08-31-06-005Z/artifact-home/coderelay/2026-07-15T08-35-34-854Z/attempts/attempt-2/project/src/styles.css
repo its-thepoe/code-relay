@@ -1,0 +1,192 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+img {
+  display: block;
+}
+
+.previewShell {
+  min-height: 100vh;
+  background: #f4f4f5;
+  color: #18181b;
+  padding: 28px 0;
+}
+
+.previewTopbar {
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto 18px;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.previewTopbar h1,
+.previewHeader h2 {
+  margin: 0;
+}
+
+.previewTopbar h1 {
+  font-size: 28px;
+  line-height: 1.1;
+}
+
+.previewRouteMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 0;
+  color: #52525b;
+  font-size: 13px;
+}
+
+.previewRouteMeta code {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgb(24 24 27 / 6%);
+}
+
+.routeStateCard {
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 24px;
+  border: 1px solid rgb(24 24 27 / 10%);
+  border-radius: 18px;
+  background: white;
+  box-shadow: 0 18px 50px rgb(24 24 27 / 8%);
+}
+
+.routeStateCard h2 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.routeStateCard p {
+  margin: 12px 0 0;
+  color: #52525b;
+  line-height: 1.6;
+}
+
+.routeStateEyebrow {
+  margin-bottom: 8px;
+  color: #71717a;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.previewEyebrow {
+  margin-bottom: 4px;
+  color: #71717a;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.previewItem {
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto 16px;
+  overflow: hidden;
+  border: 1px solid rgb(24 24 27 / 10%);
+  border-radius: 14px;
+  background: white;
+  box-shadow: 0 18px 50px rgb(24 24 27 / 8%);
+}
+
+.previewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgb(24 24 27 / 10%);
+}
+
+.previewHeader code {
+  color: #52525b;
+  font-size: 12px;
+}
+
+.previewCanvas {
+  min-height: 160px;
+  background: white;
+}
+
+.siteShell {
+  min-height: 100vh;
+  background: white;
+  color: #18181b;
+}
+
+.siteTopbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px 22px;
+  border-bottom: 1px solid rgb(24 24 27 / 10%);
+  background: rgb(255 255 255 / 92%);
+  backdrop-filter: blur(14px);
+}
+
+.siteTopbar h1 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.siteTopbar nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.siteTopbar button {
+  min-height: 34px;
+  border: 1px solid rgb(24 24 27 / 12%);
+  border-radius: 999px;
+  background: white;
+  color: #27272a;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 200ms ease, color 200ms ease, border-color 200ms ease;
+}
+
+.siteTopbar button[data-active="true"] {
+  border-color: #18181b;
+  background: #18181b;
+  color: white;
+}
+
+@media (max-width: 760px) {
+  .siteTopbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .siteTopbar nav {
+    justify-content: flex-start;
+  }
+}

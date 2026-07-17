@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-15T08:37:32.222Z",
+  "url": "https://artifact.framer.ai/",
+  "exportMode": "full-site",
+  "selector": null,
+  "name": null,
+  "maxAttempts": 2,
+  "targetFidelity": 0.9,
+  "revisionRequest": null,
+  "pluginCapture": {
+    "mode": "simulated",
+    "capturedAt": "2026-07-15T08:35:34.853Z",
+    "selectedNodeCount": 0,
+    "hasContext": false,
+    "codeFileCount": 0
+  },
+  "revisionId": "revision_19f573a00fadddbb"
+}

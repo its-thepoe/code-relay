@@ -9,8 +9,10 @@ test("createPredictedArtifacts maps revision-stage artifacts into the job export
 
   assert.deepEqual(artifacts, {
     exportDir: outDir,
+    reportPath: path.join(outDir, "export-report.json"),
     resolvedRequestPath: path.join(outDir, "resolved-request.json"),
     statusPath: path.join(outDir, "status.json"),
+    captureProgressPath: path.join(outDir, "capture-progress.json"),
     capabilityReportPath: path.join(outDir, "capability-report.json"),
     codeCompatibilityReportPath: path.join(
       outDir,

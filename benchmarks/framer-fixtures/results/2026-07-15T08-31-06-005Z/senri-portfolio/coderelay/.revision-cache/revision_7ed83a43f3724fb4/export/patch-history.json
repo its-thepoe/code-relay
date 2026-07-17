@@ -1,0 +1,72 @@
+[
+  {
+    "attempt": 1,
+    "strategy": "semantic-layout",
+    "patchesApplied": [
+      "baseline semantic-layout strategy"
+    ],
+    "patchOperations": [
+      "baseline_strategy"
+    ],
+    "diagnosis": [
+      "Initial export attempt uses the baseline semantic strategy."
+    ],
+    "diagnosisDetails": [
+      {
+        "category": "initial_baseline",
+        "message": "Start from the baseline export before applying corrective patches."
+      }
+    ],
+    "rerunReason": "typography, layout, mobile spacing, tablet layout, section mapping mismatches were above threshold.",
+    "resetToBestStateForNextAttempt": false
+  },
+  {
+    "attempt": 2,
+    "strategy": "semantic-layout+structured",
+    "patchesApplied": [
+      "enabled structured layout mode",
+      "preserved wrapper surfaces with runtime dimensions",
+      "reinforced runtime layout and surface styles",
+      "boosted runtime typography metrics"
+    ],
+    "patchOperations": [
+      "enable_structured_layout",
+      "preserve_wrapper_surfaces",
+      "reinforce_runtime_styles",
+      "boost_typography_from_runtime"
+    ],
+    "patchTargets": {
+      "boost_typography_from_runtime": [
+        "/::node-83",
+        "/::node-11"
+      ]
+    },
+    "patchPropertyHints": {},
+    "diagnosis": [
+      "Layout fidelity stayed weak, so the next pass should keep wrappers and reinforce runtime-derived layout styles.",
+      "Node-match confidence stayed low, so the next pass should preserve more wrapper surfaces and runtime style evidence.",
+      "Typography fidelity fell below target, so the next pass should promote runtime font metrics into the export tree.",
+      "Overall fidelity stayed below target, so the next pass should reinforce runtime styles across the export tree."
+    ],
+    "diagnosisDetails": [
+      {
+        "category": "layout_mismatch",
+        "message": "Layout fidelity stayed weak, so the next pass should keep wrappers and reinforce runtime-derived layout styles."
+      },
+      {
+        "category": "low_node_match",
+        "message": "Node-match confidence stayed low, so the next pass should preserve more wrapper surfaces and runtime style evidence."
+      },
+      {
+        "category": "typography_mismatch",
+        "message": "Typography fidelity fell below target, so the next pass should promote runtime font metrics into the export tree."
+      },
+      {
+        "category": "low_overall_fidelity",
+        "message": "Overall fidelity stayed below target, so the next pass should reinforce runtime styles across the export tree."
+      }
+    ],
+    "rerunReason": "typography, layout, mobile spacing, tablet layout, section mapping mismatches were above threshold.",
+    "resetToBestStateForNextAttempt": false
+  }
+]

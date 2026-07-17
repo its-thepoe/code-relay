@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 1,
+  "revisionId": "revision_19f573a00fadddbb",
+  "stage": "validating",
+  "updatedAt": "2026-07-15T08:37:53.820Z",
+  "createdAt": "2026-07-15T08:35:34.869Z",
+  "progress": {
+    "completed": 1,
+    "total": 1,
+    "routePath": "/"
+  },
+  "history": [
+    {
+      "stage": "planning",
+      "at": "2026-07-15T08:35:34.869Z",
+      "detail": "Preparing revision workspace and request context."
+    },
+    {
+      "stage": "capturing",
+      "at": "2026-07-15T08:35:34.871Z",
+      "detail": "Capturing runtime and plugin evidence."
+    },
+    {
+      "stage": "capturing",
+      "at": "2026-07-15T08:36:20.738Z",
+      "progress": {
+        "completed": 1,
+        "total": 1,
+        "routePath": "/",
+        "failed": 0
+      },
+      "detail": "Captured route / (1/1)."
+    },
+    {
+      "stage": "generating",
+      "at": "2026-07-15T08:36:20.808Z",
+      "detail": "Generating export attempts and source artifacts."
+    },
+    {
+      "stage": "validating",
+      "at": "2026-07-15T08:37:07.634Z",
+      "detail": "Validating generated project output."
+    },
+    {
+      "stage": "validating",
+      "at": "2026-07-15T08:37:07.901Z",
+      "progress": {},
+      "detail": "Installing generated project dependencies with npm."
+    },
+    {
+      "stage": "validating",
+      "at": "2026-07-15T08:37:10.037Z",
+      "progress": {},
+      "detail": "Building generated project with npm run build."
+    },
+    {
+      "stage": "validating",
+      "at": "2026-07-15T08:37:28.393Z",
+      "progress": {
+        "completed": 0,
+        "total": 1
+      },
+      "detail": "Running generated runtime validation across 1 routes."
+    },
+    {
+      "stage": "validating",
+      "at": "2026-07-15T08:37:28.607Z",
+      "progress": {
+        "completed": 0,
+        "total": 1,
+        "routePath": "/"
+      },
+      "detail": "Validating rendered route /."
+    },
+    {
+      "stage": "validating",
+      "at": "2026-07-15T08:37:29.566Z",
+      "progress": {
+        "completed": 1,
+        "total": 1,
+        "routePath": "/"
+      },
+      "detail": "Validated rendered route /."
+    },
+    {
+      "stage": "validating",
+      "at": "2026-07-15T08:37:32.379Z",
+      "detail": "Packaging generated export into a ZIP archive."
+    },
+    {
+      "stage": "validating",
+      "at": "2026-07-15T08:37:33.421Z",
+      "progress": {},
+      "detail": "Extracting generated ZIP into a clean verification directory."
+    },
+    {
+      "stage": "validating",
+      "at": "2026-07-15T08:37:33.686Z",
+      "progress": {},
+      "detail": "Revalidating extracted ZIP contents from a clean directory."
+    },
+    {
+      "stage": "validating",
+      "at": "2026-07-15T08:37:33.924Z",
+      "progress": {},
+      "detail": "Installing generated project dependencies with npm."
+    },
+    {
+      "stage": "validating",
+      "at": "2026-07-15T08:37:35.043Z",
+      "progress": {},
+      "detail": "Building generated project with npm run build."
+    },
+    {
+      "stage": "validating",
+      "at": "2026-07-15T08:37:52.565Z",
+      "progress": {
+        "completed": 0,
+        "total": 1
+      },
+      "detail": "Running generated runtime validation across 1 routes."
+    },
+    {
+      "stage": "validating",
+      "at": "2026-07-15T08:37:52.848Z",
+      "progress": {
+        "completed": 0,
+        "total": 1,
+        "routePath": "/"
+      },
+      "detail": "Validating rendered route /."
+    },
+    {
+      "stage": "validating",
+      "at": "2026-07-15T08:37:53.820Z",
+      "progress": {
+        "completed": 1,
+        "total": 1,
+        "routePath": "/"
+      },
+      "detail": "Validated rendered route /."
+    }
+  ]
+}

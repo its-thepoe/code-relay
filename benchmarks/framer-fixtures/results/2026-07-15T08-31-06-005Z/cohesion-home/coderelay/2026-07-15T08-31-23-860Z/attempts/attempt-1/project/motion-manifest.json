@@ -1,0 +1,73 @@
+{
+  "componentName": "LARRYBRONX",
+  "sourceUrl": "https://cohesion.framer.ai/",
+  "nodeCount": 2,
+  "nodes": [
+    {
+      "id": "/::node-123",
+      "tag": "div",
+      "name": "Main",
+      "source": {
+        "runtimeNodeId": "/::node-123",
+        "domPath": "body:nth-child(2) > div:nth-child(2) > div:nth-child(2) > div:nth-child(3) > main:nth-child(2) > section:nth-child(1) > div:nth-child(2) > div:nth-child(2) > div:nth-child(4) > div:nth-child(1) > div:nth-child(1) > div:nth-child(1)",
+        "runtimeNodeIdsByViewport": {
+          "desktop": "/::node-123",
+          "laptop": "/::node-123"
+        }
+      },
+      "motionByViewport": {},
+      "interactionStyles": {
+        "hover": {
+          "aspectRatio": "1 / 1"
+        }
+      },
+      "interactionStylesByViewport": {
+        "desktop": {
+          "hover": {
+            "aspectRatio": "1 / 1"
+          }
+        }
+      }
+    },
+    {
+      "id": "/::node-145",
+      "tag": "a",
+      "name": "Main",
+      "source": {
+        "runtimeNodeId": "/::node-145",
+        "domPath": "body:nth-child(2) > div:nth-child(2) > div:nth-child(2) > div:nth-child(3) > main:nth-child(2) > section:nth-child(1) > div:nth-child(2) > div:nth-child(2) > div:nth-child(5) > div:nth-child(1) > a:nth-child(1)",
+        "runtimeNodeIdsByViewport": {
+          "desktop": "/::node-145",
+          "laptop": "/::node-145"
+        }
+      },
+      "motionByViewport": {},
+      "interactionStyles": {
+        "hover": {
+          "borderRadius": "27.8923% / 114.286%",
+          "transform": "matrix(0.876861, 0, 0, 1, 0, 0)",
+          "width": "392.516px",
+          "transformOrigin": "196.258px 42px"
+        },
+        "focus": {
+          "borderRadius": "27.2999% / 114.286%",
+          "transform": "matrix(1.02967, 0, 0, 1, 0, 0)"
+        }
+      },
+      "interactionStylesByViewport": {
+        "desktop": {
+          "hover": {
+            "borderRadius": "27.8923% / 114.286%",
+            "transform": "matrix(0.876861, 0, 0, 1, 0, 0)",
+            "width": "392.516px",
+            "transformOrigin": "196.258px 42px"
+          },
+          "focus": {
+            "borderRadius": "27.2999% / 114.286%",
+            "transform": "matrix(1.02967, 0, 0, 1, 0, 0)"
+          }
+        }
+      }
+    }
+  ]
+}
