@@ -108,6 +108,81 @@ test("normalizeLocalizableRuntimeUrl strips trailing escape slashes from runtime
   );
 });
 
+test("generated validation ignores external document embeds while still validating local rendering", async () => {
+  const externalServer = createServer((_request, response) => {
+    response.setHeader("content-type", "text/html; charset=utf-8");
+    response.end("<!doctype html><html><body>Embedded document</body></html>");
+  });
+  await new Promise<void>((resolve) =>
+    externalServer.listen(0, "127.0.0.1", resolve),
+  );
+  const externalAddress = externalServer.address();
+  assert.ok(externalAddress && typeof externalAddress !== "string");
+
+  const projectDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-external-document-embed-"),
+  );
+  await fs.mkdir(path.join(projectDir, "dist"), { recursive: true });
+  await fs.writeFile(
+    path.join(projectDir, "package.json"),
+    JSON.stringify({
+      name: "external-document-embed",
+      private: true,
+      scripts: { build: "node -e \"process.exit(0)\"" },
+    }),
+  );
+  await fs.writeFile(
+    path.join(projectDir, "route-manifest.json"),
+    JSON.stringify([
+      {
+        path: "/",
+        sourceTextLength: 160,
+        sourceNodeCount: 6,
+      },
+    ]),
+  );
+  await fs.writeFile(
+    path.join(projectDir, "placeholder.tsx"),
+    "export const Placeholder = () => null\n",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "placeholder.css"),
+    "body { background: #fff; color: #111; }\n",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "preview.html"),
+    "<!doctype html><html><body>preview</body></html>",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "dist", "index.html"),
+    `<!doctype html>
+    <html>
+      <body style="margin:0;background:#fff;color:#111;font-family:system-ui,sans-serif">
+        <div id="root">
+          <main style="padding:24px;display:grid;gap:16px">
+            <h1>Embedded document test</h1>
+            <iframe
+              title="external document"
+              src="http://127.0.0.1:${externalAddress.port}/embed"
+              style="width:100%;height:120px;border:0"
+            ></iframe>
+          </main>
+        </div>
+      </body>
+    </html>`,
+  );
+
+  try {
+    const validation = await validateGeneratedProject(projectDir);
+    assert.deepEqual(validation.externalRequests, []);
+    assert.equal(validation.renderedElementCount > 0, true);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      externalServer.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
 async function runSpawnedCommand(input: {
   command: string;
   args: string[];
@@ -4231,6 +4306,11 @@ test("runLocalExport crawls, builds, and validates every full-site route", async
       pricingPageSource,
       /\/runtime-assets\/[^"\s]+(?:&amp;|&)width=/,
     );
+    const cmsSource = await fs.readFile(
+      path.join(result.exportDir, "src", "framer-data", "cms.ts"),
+      "utf8",
+    );
+    assert.match(cmsSource, /src=\\\"\/runtime-assets\/[^"\\]+\\\"/);
     const rawRuntime = JSON.parse(
       await fs.readFile(
         path.join(result.exportDir, "raw-runtime-capture.json"),

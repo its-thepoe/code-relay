@@ -5,11 +5,12 @@ import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { delimiter as pathDelimiter } from "node:path";
-import { chromium } from "playwright";
+import { chromium, } from "playwright";
 import { PNG } from "pngjs";
 import { generateNextProject } from "../../codegen/src/next-project.js";
 import { compareGeneratedPreview } from "../../fidelity/src/compare.js";
 import { matchPluginNodesToDom } from "../../matcher/src/match.js";
+import { canonicalEditAreas, createCanonicalContentBundle, migrateV1ContentContractToV2, writeCanonicalSiteBundle, } from "../../content-contract/src/index.js";
 import { resolveExportRouteMetadata } from "../../shared/src/route-contract.js";
 import { captureRuntime, captureRuntimeRoutes, createSimulatedPluginCapture, validateFullSiteCapture, } from "./capture.js";
 import { buildIntermediateRepresentation, buildPluginSourceSnapshot, } from "./ir.js";
@@ -337,6 +338,9 @@ export async function runLocalExport(input) {
         }
         const reportPath = path.join(exportDir, "export-report.json");
         await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
+        const contentContract = createCanonicalExportContentContract(ir, sourceArtifacts);
+        await writeJsonFile(path.join(exportDir, "content-contract.json"), contentContract);
+        await writeCanonicalBundleFromContentContract(exportDir, contentContract);
         const parentReport = await readParentRevisionReport(sharedRevisionCacheRoot, input.revisionRequest?.parentRevisionId);
         const beforeAfterReport = parentReport && input.revisionRequest?.kind === "improvement"
             ? createBeforeAfterReport(report, parentReport, {
@@ -654,6 +658,56 @@ export async function migrateLegacyExportToRevision(input) {
         },
     };
     await writeJsonFile(path.join(exportDir, "export-report.json"), nextReport);
+    const contentContract = createCanonicalExportContentContract({
+        jobId: input.jobId,
+        sourceUrl: input.sourceUrl,
+        componentName: typeof normalizedIr.componentName === "string"
+            ? normalizedIr.componentName
+            : input.jobId,
+        exportMode: typeof normalizedIr.exportMode === "string"
+            ? normalizedIr.exportMode
+            : undefined,
+        exportEngine: typeof normalizedIr.exportEngine === "string"
+            ? normalizedIr.exportEngine
+            : undefined,
+        runtimeCapture: runtimeCapture ?? {},
+        pluginCapture,
+        nodeMatches: [],
+        component: {
+            semanticType: "unknown",
+            nodes: [],
+            sections: [],
+        },
+        assets: [],
+        componentModules: Array.isArray(normalizedIr.componentModules)
+            ? normalizedIr.componentModules
+            : [],
+        componentFamilies: Array.isArray(normalizedIr.componentFamilies)
+            ? normalizedIr.componentFamilies
+            : [],
+        overrideAssignments: Array.isArray(normalizedIr.overrideAssignments)
+            ? normalizedIr.overrideAssignments
+            : [],
+        codeFiles: Array.isArray(normalizedIr.codeFiles)
+            ? normalizedIr.codeFiles
+            : [],
+        fonts: Array.isArray(normalizedIr.fonts)
+            ? normalizedIr.fonts
+            : [],
+        cmsCollections: Array.isArray(normalizedIr.cmsCollections)
+            ? normalizedIr.cmsCollections
+            : [],
+        libraryComponents: [],
+        sitePages: Array.isArray(normalizedIr.sitePages)
+            ? normalizedIr.sitePages
+            : [],
+        routeTemplates: Array.isArray(normalizedIr.routeTemplates)
+            ? normalizedIr.routeTemplates
+            : [],
+        warnings: [],
+    }, sourceArtifacts);
+    await writeJsonFile(path.join(exportDir, "content-contract.json"), contentContract);
+    await writeCanonicalBundleFromContentContract(exportDir, contentContract);
     await writeJsonFile(path.join(exportDir, "invalidation-plan.json"), invalidationPlan);
     await writeJsonFile(path.join(exportDir, "revision-manifest.json"), {
         ...revisionManifest,
@@ -1139,26 +1193,39 @@ async function localizeRuntimeKeptProjectAssets(projectDir) {
     await fs.mkdir(runtimeAssetsDir, { recursive: true });
     const replacements = new Map();
     const manifestEntries = [];
-    for (const [normalizedUrl, rawMatches] of rawMatchesByNormalizedUrl) {
+    const localizationResults = await mapWithConcurrency(Array.from(rawMatchesByNormalizedUrl.entries()), 8, async ([normalizedUrl, rawMatches]) => {
         try {
             const localized = await downloadLocalizedRuntimeAsset(normalizedUrl, runtimeAssetsDir);
-            for (const rawMatch of rawMatches) {
-                replacements.set(rawMatch, localized.publicPath);
-            }
-            manifestEntries.push({
+            return {
                 sourceUrl: normalizedUrl,
-                localPath: localized.publicPath,
-                status: "localized",
-                contentType: localized.contentType,
-                byteLength: localized.byteLength,
-            });
+                rawMatches,
+                entry: {
+                    sourceUrl: normalizedUrl,
+                    localPath: localized.publicPath,
+                    status: "localized",
+                    contentType: localized.contentType,
+                    byteLength: localized.byteLength,
+                },
+            };
         }
         catch (error) {
-            manifestEntries.push({
+            return {
                 sourceUrl: normalizedUrl,
-                status: "failed",
-                error: error instanceof Error ? error.message : String(error),
-            });
+                rawMatches,
+                entry: {
+                    sourceUrl: normalizedUrl,
+                    status: "failed",
+                    error: error instanceof Error ? error.message : String(error),
+                },
+            };
+        }
+    });
+    for (const result of localizationResults) {
+        manifestEntries.push(result.entry);
+        if (result.entry.status !== "localized" || !result.entry.localPath)
+            continue;
+        for (const rawMatch of result.rawMatches) {
+            replacements.set(rawMatch, `${result.entry.localPath}${extractLocalizedRuntimeUrlSuffix(rawMatch)}`);
         }
     }
     let replaced = 0;
@@ -1193,55 +1260,63 @@ async function localizeRuntimeKeptProjectAssets(projectDir) {
 }
 async function downloadLocalizedRuntimeAsset(sourceUrl, outputDir) {
     const normalizedSourceUrl = normalizeLocalizableRuntimeUrl(sourceUrl);
-    const response = await fetch(normalizedSourceUrl, {
-        headers: {
-            connection: "close",
-        },
-        redirect: "follow",
-        signal: AbortSignal.timeout(30_000),
-    });
-    if (!response.ok) {
-        throw new Error(`Download failed with ${response.status} ${response.statusText}`);
+    const cached = await readCachedLocalizedRuntimeAsset(normalizedSourceUrl);
+    if (cached) {
+        return await materializeLocalizedRuntimeAsset({
+            outputDir,
+            buffer: cached.buffer,
+            contentType: cached.contentType,
+            sourceUrl: normalizedSourceUrl,
+        });
     }
-    const contentType = response.headers.get("content-type") ?? undefined;
-    const normalizedContentType = normalizeRuntimeAssetContentType(contentType);
-    if (normalizedContentType &&
-        !isSupportedLocalizedRuntimeContentType(normalizedContentType)) {
-        throw new Error(`Unsupported localized asset content type: ${normalizedContentType}`);
-    }
-    const extension = inferAssetExtension(normalizedSourceUrl, contentType) ?? ".bin";
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    if (buffer.byteLength === 0) {
-        throw new Error("Downloaded asset is empty.");
-    }
-    const contentHash = crypto
-        .createHash("sha256")
-        .update(buffer)
-        .digest("hex")
-        .slice(0, 24);
-    const fileName = `${contentHash}${extension}`;
-    const targetPath = path.join(outputDir, fileName);
-    const existingAssetMatches = (await readLocalizedRuntimeAssetHash(targetPath)) === contentHash;
-    if (!existingAssetMatches) {
-        const tempPath = path.join(outputDir, `${fileName}.tmp-${crypto.randomUUID()}`);
-        await fs.writeFile(tempPath, buffer);
+    const timeoutMs = resolveRuntimeLocalizationDownloadTimeoutMs();
+    let lastError = null;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
         try {
-            await fs.rename(tempPath, targetPath);
+            const response = await fetch(normalizedSourceUrl, {
+                headers: {
+                    connection: "close",
+                },
+                redirect: "follow",
+                signal: AbortSignal.timeout(timeoutMs),
+            });
+            if (!response.ok) {
+                throw new Error(`Download failed with ${response.status} ${response.statusText}`);
+            }
+            const contentType = response.headers.get("content-type") ?? undefined;
+            const normalizedContentType = normalizeRuntimeAssetContentType(contentType);
+            if (normalizedContentType &&
+                !isSupportedLocalizedRuntimeContentType(normalizedContentType)) {
+                throw new Error(`Unsupported localized asset content type: ${normalizedContentType}`);
+            }
+            const extension = inferAssetExtension(normalizedSourceUrl, contentType) ?? ".bin";
+            const arrayBuffer = await response.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            if (buffer.byteLength === 0) {
+                throw new Error("Downloaded asset is empty.");
+            }
+            await writeCachedLocalizedRuntimeAsset({
+                sourceUrl: normalizedSourceUrl,
+                extension,
+                contentType,
+                buffer,
+            });
+            return await materializeLocalizedRuntimeAsset({
+                outputDir,
+                buffer,
+                contentType,
+                sourceUrl: normalizedSourceUrl,
+            });
         }
         catch (error) {
-            const renamedAssetMatches = (await readLocalizedRuntimeAssetHash(targetPath)) === contentHash;
-            if (!renamedAssetMatches) {
-                throw error;
+            lastError = error;
+            if (attempt >= 3 || !isRetryableRuntimeLocalizationError(error)) {
+                break;
             }
-            await fs.rm(tempPath, { force: true }).catch(() => undefined);
+            await new Promise((resolve) => setTimeout(resolve, attempt * 250));
         }
     }
-    return {
-        publicPath: `/runtime-assets/${fileName}`,
-        contentType,
-        byteLength: buffer.byteLength,
-    };
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 async function readLocalizedRuntimeAssetHash(targetPath) {
     try {
@@ -1258,11 +1333,107 @@ async function readLocalizedRuntimeAssetHash(targetPath) {
         return null;
     }
 }
+function localizedRuntimeAssetCacheRoot() {
+    return path.join(os.tmpdir(), "coderelay-runtime-asset-cache");
+}
+async function readCachedLocalizedRuntimeAsset(sourceUrl) {
+    const cacheKey = createLocalizedRuntimeAssetCacheKey(sourceUrl);
+    const metadataPath = path.join(localizedRuntimeAssetCacheRoot(), `${cacheKey}.json`);
+    try {
+        const metadata = JSON.parse(await fs.readFile(metadataPath, "utf8"));
+        if (!metadata.assetPath)
+            return null;
+        const buffer = await fs.readFile(metadata.assetPath);
+        if (buffer.byteLength === 0)
+            return null;
+        return {
+            buffer,
+            contentType: metadata.contentType,
+        };
+    }
+    catch {
+        return null;
+    }
+}
+async function writeCachedLocalizedRuntimeAsset(input) {
+    const cacheRoot = localizedRuntimeAssetCacheRoot();
+    await fs.mkdir(cacheRoot, { recursive: true });
+    const cacheKey = createLocalizedRuntimeAssetCacheKey(input.sourceUrl);
+    const assetPath = path.join(cacheRoot, `${cacheKey}${input.extension}`);
+    await fs.writeFile(assetPath, input.buffer);
+    await writeJsonFile(path.join(cacheRoot, `${cacheKey}.json`), {
+        sourceUrl: input.sourceUrl,
+        contentType: input.contentType,
+        assetPath,
+        byteLength: input.buffer.byteLength,
+        updatedAt: new Date().toISOString(),
+    });
+}
+function createLocalizedRuntimeAssetCacheKey(sourceUrl) {
+    return crypto
+        .createHash("sha256")
+        .update(sourceUrl)
+        .digest("hex")
+        .slice(0, 24);
+}
+async function materializeLocalizedRuntimeAsset(input) {
+    const extension = inferAssetExtension(input.sourceUrl, input.contentType) ?? ".bin";
+    const contentHash = crypto
+        .createHash("sha256")
+        .update(input.buffer)
+        .digest("hex")
+        .slice(0, 24);
+    const fileName = `${contentHash}${extension}`;
+    const targetPath = path.join(input.outputDir, fileName);
+    const existingAssetMatches = (await readLocalizedRuntimeAssetHash(targetPath)) === contentHash;
+    if (!existingAssetMatches) {
+        const tempPath = path.join(input.outputDir, `${fileName}.tmp-${crypto.randomUUID()}`);
+        await fs.writeFile(tempPath, input.buffer);
+        try {
+            await fs.rename(tempPath, targetPath);
+        }
+        catch (error) {
+            const renamedAssetMatches = (await readLocalizedRuntimeAssetHash(targetPath)) === contentHash;
+            if (!renamedAssetMatches) {
+                throw error;
+            }
+            await fs.rm(tempPath, { force: true }).catch(() => undefined);
+        }
+    }
+    return {
+        publicPath: `/runtime-assets/${fileName}`,
+        contentType: input.contentType,
+        byteLength: input.buffer.byteLength,
+    };
+}
+async function mapWithConcurrency(items, concurrency, mapper) {
+    if (items.length === 0)
+        return [];
+    const results = new Array(items.length);
+    const limit = Math.max(1, Math.min(concurrency, items.length));
+    let nextIndex = 0;
+    await Promise.all(Array.from({ length: limit }, async () => {
+        while (true) {
+            const currentIndex = nextIndex;
+            nextIndex += 1;
+            if (currentIndex >= items.length)
+                return;
+            results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+        }
+    }));
+    return results;
+}
+function resolveRuntimeLocalizationDownloadTimeoutMs() {
+    return resolveValidationTimeoutMs("CODERELAY_RUNTIME_LOCALIZATION_DOWNLOAD_TIMEOUT_MS", 90_000);
+}
 function decodeHtmlEntities(value) {
     return value.replace(/&amp;/g, "&");
 }
 export function normalizeLocalizableRuntimeUrl(value) {
     return decodeHtmlEntities(value).trim().replace(/\\+$/u, "");
+}
+function extractLocalizedRuntimeUrlSuffix(value) {
+    return value.match(/\\+$/u)?.[0] ?? "";
 }
 function isLocalizableRuntimeUrl(value) {
     try {
@@ -1353,6 +1524,12 @@ function isSupportedLocalizedRuntimeContentType(contentType) {
         contentType.startsWith("audio/") ||
         contentType.startsWith("font/"));
 }
+function isRetryableRuntimeLocalizationError(error) {
+    if (!(error instanceof Error))
+        return false;
+    return (error.name === "AbortError" ||
+        /timed out|timeout|network|fetch failed|socket/i.test(error.message));
+}
 function mergeRuntimeCaptures(parentRuntimeCapture, freshRuntimeCapture) {
     if (!parentRuntimeCapture?.routeCaptures?.length) {
         return freshRuntimeCapture;
@@ -1429,9 +1606,11 @@ export async function validateGeneratedProject(projectDir, input = {}) {
         await input.onProgress?.({
             detail: `Building generated project with ${packageManager} run build.`,
         });
-        const build = await runCommand(packageManager, ["run", "build"], projectDir, resolveValidationTimeoutMs("CODERELAY_BUILD_TIMEOUT_MS", 300_000));
+        const buildTimeoutMs = resolveGeneratedProjectBuildTimeoutMs(generated.generatedFileCount);
+        const build = await runCommand(packageManager, ["run", "build"], projectDir, buildTimeoutMs);
         console.log("[coderelay:core:build]", JSON.stringify({
             exitCode: build.exitCode,
+            timeoutMs: buildTimeoutMs,
             durationMs: build.durationMs,
             stdout: tail(build.stdout, 4_000),
             stderr: tail(build.stderr, 4_000),
@@ -1543,6 +1722,12 @@ export async function validateGeneratedProject(projectDir, input = {}) {
             force: true,
         });
     }
+}
+function resolveGeneratedProjectBuildTimeoutMs(generatedFileCount) {
+    const configuredTimeoutMs = resolveValidationTimeoutMs("CODERELAY_BUILD_TIMEOUT_MS", 300_000);
+    if (generatedFileCount < 500)
+        return configuredTimeoutMs;
+    return Math.max(configuredTimeoutMs, generatedFileCount * 750);
 }
 async function resolvePackageManager(projectDir) {
     const requested = process.env.CODERELAY_PACKAGE_MANAGER;
@@ -1843,6 +2028,8 @@ async function inspectBuiltProject(distDir, routeManifest, input = {}) {
                 return;
             if (url.hostname === "127.0.0.1" && url.port === String(address.port))
                 return;
+            if (!shouldTrackExternalRuntimeRequest(request))
+                return;
             externalRequests.add(request.url());
         }
         catch {
@@ -2069,6 +2256,14 @@ async function inspectBuiltProject(distDir, routeManifest, input = {}) {
         await browser.close();
         await new Promise((resolve) => server.close(() => resolve()));
     }
+}
+function shouldTrackExternalRuntimeRequest(request) {
+    const resourceType = request.resourceType();
+    if (resourceType === "document")
+        return false;
+    if (request.isNavigationRequest())
+        return false;
+    return true;
 }
 async function inspectComponentFamilyInteractions(page, routePath) {
     const routeMountedFamilies = await page
@@ -3243,6 +3438,64 @@ function createReport(ir, attempts, bestAttempt, debugArtifacts, validation, rev
         patchHistoryPath: "patch-history.json",
         warnings: bestAttempt.warnings,
     };
+}
+function createCanonicalExportContentContract(ir, sourceArtifacts) {
+    return createCanonicalContentBundle({
+        sourceUrl: ir.sourceUrl,
+        routePath: ir.sitePages?.[0]?.routePath,
+        title: ir.componentName,
+        description: ir.exportMode === "full-site"
+            ? `Canonical content contract for a full-site export with ${ir.sitePages?.length ?? 0} routes.`
+            : `Canonical content contract for a component export with ${ir.componentModules?.length ?? 0} generated component modules.`,
+        content: {
+            sourceUrl: ir.sourceUrl,
+            exportMode: ir.exportMode ?? null,
+            exportEngine: ir.exportEngine ?? null,
+            componentName: ir.componentName,
+            routeCount: ir.sitePages?.length ?? 0,
+            componentModuleCount: ir.componentModules?.length ?? 0,
+            codeFileCount: ir.codeFiles?.length ?? 0,
+            cmsCollectionCount: ir.cmsCollections?.length ?? 0,
+            routePaths: (ir.sitePages ?? []).map((page) => page.routePath),
+            templateKinds: [
+                ...new Set((ir.sitePages ?? []).map((page) => page.templateKind ?? "static")),
+            ],
+            sourceFileCount: sourceArtifacts?.codeFiles.length ?? 0,
+        },
+        routes: (ir.sitePages ?? []).map((page) => ({
+            routePath: page.routePath,
+            title: page.title,
+            templateKind: page.templateKind ?? "static",
+            templateId: page.templateId,
+            templatePath: page.templatePath,
+            routeKind: page.routeKind,
+            destination: page.destination ?? null,
+            destinationKind: page.destinationKind ?? null,
+            redirectTo: page.redirectTo ?? null,
+            redirectStatus: page.redirectStatus ?? null,
+            sourceTextLength: page.sourceTextLength ?? 0,
+        })),
+        componentModules: ir.componentModules ?? [],
+        safeEditAreas: canonicalEditAreas({
+            hasContentModule: (ir.sitePages?.length ?? 0) > 0 || (ir.cmsCollections?.length ?? 0) > 0,
+            hasSections: (ir.sitePages?.length ?? 0) > 1,
+            hasComponents: (ir.componentModules?.length ?? 0) > 0,
+            hasDocs: true,
+            hasStyles: true,
+        }),
+        generatedFiles: [
+            "content-contract.json",
+            "revision-manifest.json",
+            "export-report.json",
+            "source-artifacts/manifest.json",
+            "invalidation-plan.json",
+            "artifact-index.json",
+        ],
+        runtimeUtilities: [],
+    });
+}
+async function writeCanonicalBundleFromContentContract(exportDir, contentContract) {
+    await writeCanonicalSiteBundle(migrateV1ContentContractToV2(contentContract), path.join(exportDir, ".coderelay"));
 }
 function summarizeRuntimeInteractionReplay(runtimeCapture) {
     const records = [

@@ -1,0 +1,13 @@
+{
+  "name": "@coderelay/source-framer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@coderelay/content-contract": "0.1.0"
+  }
+}

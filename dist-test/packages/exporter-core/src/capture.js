@@ -330,7 +330,7 @@ export async function captureRuntime(input) {
         return await captureRuntimeWithBrowser(browser, input);
     }
     finally {
-        await browser.close();
+        await closePlaywrightResource(browser.close.bind(browser));
     }
 }
 export async function captureRuntimeRoutes(input) {
@@ -692,7 +692,15 @@ export async function validateFullSiteCapture(input) {
             }
             if (validation.requestedWidth !== expected.width ||
                 validation.observedInnerWidth !== expected.width ||
-                Math.abs(validation.screenshotWidth - expected.width) > 1) {
+                !isTolerableScreenshotWidthMismatch({ width: expected.width, height: expected.height }, {
+                    innerWidth: validation.observedInnerWidth,
+                    innerHeight: validation.observedInnerHeight,
+                    clientWidth: validation.observedClientWidth,
+                    devicePixelRatio: 1,
+                }, {
+                    width: validation.screenshotWidth,
+                    height: validation.screenshotHeight,
+                })) {
                 throw new Error(`Full-site capture width mismatch: route ${routePath} at ${viewportName} requested=${validation.requestedWidth}, observed=${validation.observedInnerWidth}, screenshot=${validation.screenshotWidth}.`);
             }
             if (!viewport.screenshotPath) {
@@ -1072,7 +1080,7 @@ async function captureRuntimeRouteWithResume(input) {
         throw new RouteCapturePhaseError(formatError(error), input.route.path, "route-finalize", true, failingProgress);
     }
     finally {
-        await browser.close().catch(() => undefined);
+        await closePlaywrightResource(browser.close.bind(browser));
     }
 }
 async function captureRuntimeWithBrowser(browser, input) {
@@ -1216,6 +1224,9 @@ async function withTimeout(promise, timeoutMs, message) {
             clearTimeout(timer);
     }
 }
+async function closePlaywrightResource(close, timeoutMs = 2_000) {
+    await withTimeout(close(), timeoutMs, `Playwright teardown exceeded ${Math.round(timeoutMs / 1000)}s.`).catch(() => undefined);
+}
 function normalizeRoutePath(value) {
     const trimmed = value.trim();
     if (!trimmed || trimmed === "/")
@@ -1266,7 +1277,7 @@ export function createSimulatedPluginCapture(nodes) {
 }
 async function captureViewport(browser, input, viewportName, captureDir) {
     const viewport = viewports[viewportName];
-    const page = await createPageWithViewport(browser, viewport);
+    const { page, close } = await createPageWithViewport(browser, viewport);
     const routePath = input.routePath ?? "/";
     const phaseHistory = [];
     const warnings = [];
@@ -1456,24 +1467,32 @@ async function captureViewport(browser, input, viewportName, captureDir) {
         };
     }
     finally {
-        await page.close().catch(() => undefined);
+        await closePlaywrightResource(close);
     }
 }
 async function createPageWithViewport(browser, viewport) {
     if ("newContext" in browser) {
         const context = await browser.newContext({ viewport });
         const page = await context.newPage();
-        return page;
+        return {
+            page,
+            close: () => context.close(),
+        };
     }
     const page = await browser.newPage();
     await page.setViewportSize(viewport);
-    return page;
+    return {
+        page,
+        close: () => page.close(),
+    };
 }
 async function readObservedViewport(page) {
     return page.evaluate(() => ({
         innerWidth: window.innerWidth,
         innerHeight: window.innerHeight,
-        clientWidth: document.documentElement.clientWidth,
+        clientWidth: document.documentElement?.clientWidth ??
+            document.body?.clientWidth ??
+            window.innerWidth,
         devicePixelRatio: window.devicePixelRatio,
     }));
 }
@@ -1566,7 +1585,7 @@ function createViewportValidation(requested, observed, screenshot, observedBefor
     if (Math.abs(observed.clientWidth - requested.width) > 1) {
         reasons.push("clientWidth-mismatch");
     }
-    if (Math.abs(screenshot.width - requested.width) > 1) {
+    if (!isTolerableScreenshotWidthMismatch(requested, observed, screenshot)) {
         reasons.push("screenshotWidth-mismatch");
     }
     return {
@@ -1584,6 +1603,18 @@ function createViewportValidation(requested, observed, screenshot, observedBefor
         valid: reasons.length === 0,
         reason: reasons.length > 0 ? reasons.join(",") : undefined,
     };
+}
+function isTolerableScreenshotWidthMismatch(requested, observed, screenshot) {
+    const screenshotDelta = Math.abs(screenshot.width - requested.width);
+    if (screenshotDelta <= 1)
+        return true;
+    const exactViewportMatch = observed.innerWidth === requested.width &&
+        Math.abs(observed.clientWidth - requested.width) <= 1;
+    if (!exactViewportMatch)
+        return false;
+    const toleratedScrollbarGutterPx = 24;
+    return (screenshot.width >= requested.width &&
+        screenshot.width <= requested.width + toleratedScrollbarGutterPx);
 }
 function shouldRetryViewportScreenshot(validation) {
     return Boolean(validation.reason?.includes("viewport-drift") ||
