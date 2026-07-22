@@ -1,0 +1,11 @@
+{
+  "name": "@coderelay/content-contract",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Canonical content and docs contract shared by export and clone pipelines.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  }
+}

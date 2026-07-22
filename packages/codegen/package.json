@@ -1,0 +1,16 @@
+{
+  "name": "@coderelay/codegen",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./contract-project": "./src/contract-project.ts",
+    "./next-project": "./src/next-project.ts",
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@coderelay/content-contract": "0.1.0",
+    "@coderelay/shared": "0.1.0"
+  }
+}

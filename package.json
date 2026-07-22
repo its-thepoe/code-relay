@@ -2,8 +2,18 @@
   "name": "coderelay",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "compiler"
+  ],
   "type": "module",
   "scripts": {
+    "clone": "npm run clone --workspace clone-static --",
+    "clone-site": "npm run clone-site --workspace clone-static --",
+    "validate-site": "npm run validate-site --workspace clone-static --",
+    "bench": "npm run bench --workspace clone-static --",
+    "bench-site": "npm run bench-site --workspace clone-static --",
     "export:test": "tsx apps/exporter-cli/src/index.ts",
     "export:migrate-job": "tsx scripts/export-migrate-job.ts",
     "export:compiled": "npm run build && node dist/apps/exporter-cli/src/index.js",
@@ -14,6 +24,7 @@
     "test": "npm run test:exporter",
     "test:exporter": "npm run build:test && node scripts/run-compiled-tests.cjs",
     "test:export-e2e": "npm run build:test && node scripts/run-export-e2e.cjs",
+    "phase0:famasi-smoke": "node scripts/phase0-famasi-smoke.mjs",
     "proof:portfolio-repeat": "tsx scripts/run-portfolio-repeat-proof.ts",
     "benchmark:framer": "tsx scripts/benchmark-framer-fixtures.ts",
     "check:compiled-runtime": "npm run build && node scripts/check-compiled-runtime.mjs",

@@ -1,0 +1,12 @@
+{
+  "name": "@coderelay/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./route-contract": "./src/route-contract.ts",
+    "./types": "./src/types.ts",
+    "./package.json": "./package.json"
+  }
+}

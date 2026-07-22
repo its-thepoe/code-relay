@@ -10,6 +10,12 @@ import type {
   ViewportName,
 } from "../../shared/src/types.js";
 import { resolveExportRouteMetadata } from "../../shared/src/route-contract.js";
+import {
+  createCanonicalContentBundle,
+  canonicalEditAreas,
+  migrateV1ContentContractToV2,
+  writeCanonicalSiteBundle,
+} from "../../content-contract/src/index.js";
 
 type GenerateInput = {
   ir: ExportIR;
@@ -314,6 +320,9 @@ export async function generateNextProject(
         ),
       )
     : [];
+  const contentRoutes = Array.isArray(input.ir.sitePages)
+    ? input.ir.sitePages
+    : [];
   const isFullSite =
     input.ir.exportMode === "full-site" && sitePages.length > 0;
   const templateGroups = isFullSite
@@ -419,6 +428,73 @@ export async function generateNextProject(
   await writeFile(
     path.join(input.projectDir, "route-template-manifest.json"),
     `${JSON.stringify(input.ir.routeTemplates ?? [], null, 2)}\n`,
+  );
+  const contentContract = createCanonicalContentBundle({
+    sourceUrl: input.ir.sourceUrl,
+    routePath: contentRoutes[0]?.routePath,
+    title: contentRoutes[0]?.title ?? input.ir.componentName,
+    description:
+      input.ir.exportMode === "full-site"
+        ? `Generated ${contentRoutes.length} route${contentRoutes.length === 1 ? "" : "s"} from a full-site export.`
+        : `Generated ${componentEntries.length} component${componentEntries.length === 1 ? "" : "s"} from a selection export.`,
+    content: {
+      sourceUrl: input.ir.sourceUrl,
+      exportMode: input.ir.exportMode ?? null,
+      semanticType: input.ir.component.semanticType,
+      routeCount: contentRoutes.length,
+      componentCount: componentModules.length,
+      cmsCollectionCount: input.ir.cmsCollections?.length ?? 0,
+      routePaths: contentRoutes.map((page) => page.routePath),
+      templateKinds: [...new Set(contentRoutes.map((page) => page.templateKind ?? "static"))],
+      cmsCollectionNames: (input.ir.cmsCollections ?? []).map((collection) =>
+        typeof collection.name === "string" ? collection.name : typeof collection.id === "string" ? collection.id : "collection",
+      ),
+    },
+    routes: contentRoutes.map((page) => ({
+      routePath: page.routePath,
+      title: page.title,
+      templateKind: page.templateKind ?? "static",
+      templateId: page.templateId,
+      templatePath: page.templatePath,
+      routeKind: page.routeKind,
+      destination: page.destination ?? null,
+      destinationKind: page.destinationKind ?? null,
+      redirectTo: page.redirectTo ?? null,
+      redirectStatus: page.redirectStatus ?? null,
+      sourceTextLength: page.sourceTextLength ?? 0,
+    })),
+    componentModules,
+    safeEditAreas: canonicalEditAreas({
+      hasContentModule: contentRoutes.length > 0 || (input.ir.cmsCollections?.length ?? 0) > 0,
+      hasSections: contentRoutes.length > 1,
+      hasComponents: componentModules.length > 0,
+      hasDocs: true,
+      hasStyles: true,
+    }),
+    generatedFiles: [
+      "content-contract.json",
+      "framer-component-modules.json",
+      "framer-code-files.json",
+      "framer-fonts.json",
+      "framer-cms-collections.json",
+      "framer-tree.json",
+      "export-tree.json",
+      "motion-manifest.json",
+      "asset-manifest.json",
+      "runtime-strategy-manifest.json",
+      "agent-handoff-manifest.json",
+      "route-manifest.json",
+      "route-template-manifest.json",
+    ],
+    runtimeUtilities: [],
+  });
+  await writeFile(
+    path.join(input.projectDir, "content-contract.json"),
+    `${JSON.stringify(contentContract, null, 2)}\n`,
+  );
+  await writeCanonicalSiteBundle(
+    migrateV1ContentContractToV2(contentContract),
+    path.join(input.projectDir, ".coderelay"),
   );
 
   for (const module of runtimeComponentModules) {
@@ -1833,7 +1909,10 @@ export default function App() {
 
   useEffect(() => {
     if (!currentPage?.redirectTo || typeof window === 'undefined') return
-    if (isExternalUrl(currentPage.redirectTo)) return
+    if (isExternalUrl(currentPage.redirectTo)) {
+      window.location.replace(currentPage.redirectTo)
+      return
+    }
     navigateTo(currentPage.redirectTo, { replace: true })
   }, [currentPage])
 
