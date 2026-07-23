@@ -1672,16 +1672,23 @@ export async function validateGeneratedProject(projectDir, input = {}) {
             throw new Error(`Generated export interaction contract failed for family ${failedInteractionContract.familyId} on route ${failedInteractionContract.routePath}. ` +
                 `${failedInteractionContract.detail ?? "Interaction state did not update as expected."}`);
         }
-        const emptyRoute = runtime.routes.find((route) => route.routeKind !== "redirect" &&
-            ((route.sourceTextLength > 0 && route.renderedTextLength === 0) ||
-                (route.sourceTextLength >= 200 &&
-                    route.renderedTextLength / route.sourceTextLength < 0.5) ||
-                (route.sourceTextLength > 0 &&
-                    route.sourceNodeCount >= 5 &&
-                    route.renderedElementCount < 3) ||
-                (route.sourceTextLength > 0 &&
-                    route.sourceNodeCount >= 5 &&
-                    route.screenshotColorCount < 3)));
+        const emptyRoute = runtime.routes.find((route) => {
+            if (route.routeKind === "redirect")
+                return false;
+            const textMissing = route.sourceTextLength > 0 && route.renderedTextLength === 0;
+            const textCollapsed = route.sourceTextLength >= 200 &&
+                route.renderedTextLength / route.sourceTextLength < 0.5;
+            const structurallySparse = route.sourceTextLength > 0 &&
+                route.sourceNodeCount >= 5 &&
+                route.renderedElementCount < 3;
+            const visuallyFlat = route.sourceTextLength > 0 &&
+                route.sourceNodeCount >= 5 &&
+                route.screenshotColorCount < 3;
+            const missingSubstance = textMissing || textCollapsed;
+            return (missingSubstance ||
+                ((structurallySparse || visuallyFlat) &&
+                    route.renderedTextLength < Math.min(route.sourceTextLength, 200)));
+        });
         if (emptyRoute) {
             throw new Error(`Generated export route ${emptyRoute.path} is near-empty ` +
                 `(sourceText=${emptyRoute.sourceTextLength}, renderedText=${emptyRoute.renderedTextLength}, ` +

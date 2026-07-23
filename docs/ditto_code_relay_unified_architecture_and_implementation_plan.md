@@ -622,6 +622,22 @@ Generated docs must be derived from the canonical bundle. They must not separate
 
 ### Phase 0: establish a green, reproducible baseline
 
+Status as of July 23, 2026: in progress, not complete.
+
+Observed repo state on July 23, 2026:
+
+- [x] Branch created in Code Relay: `codex/unify-ditto-coderelay`
+- [~] Famasi export investigation is active and localhost preview work is underway
+- [ ] Baseline test matrix has been rerun end-to-end and recorded as green
+- [ ] Famasi export regeneration/build/preview path is clean and reproducible
+- [ ] Baseline tree is stable enough to begin architecture work without qualification
+
+Notes:
+
+- The repo still has active Phase 0 stabilization edits in export/codegen paths.
+- A Famasi localhost workaround preview exists, but the full cached-IR replay/regeneration path is not yet clean.
+- Phase 0 exit criteria below are therefore not yet satisfied.
+
 Goal: no architectural work begins on a broken or ambiguous source tree.
 
 1. Create a branch in Code Relay:
@@ -656,6 +672,22 @@ Exit criteria:
 
 ### Phase 1: turn directories into real packages
 
+Status as of July 23, 2026: partially complete.
+
+Observed repo state on July 23, 2026:
+
+- [x] Package manifests now exist for `codegen`, `exporter-core`, `fidelity`, `matcher`, and `shared`
+- [x] Additional package manifests also exist for `reconcile`, `source-framer`, `source-runtime`, and `content-contract`
+- [ ] The planned `packages/contract` package does not exist yet
+- [ ] Production imports still reach into sibling package `src` directories
+- [ ] Package-level boundaries are not yet enforced through public APIs only
+- [ ] Cycle detection and package-boundary verification are not yet in place
+
+Notes:
+
+- This phase has real structural progress, but it has not met its own exit criteria.
+- The main remaining gap is import hygiene: apps and packages still use direct `../../*/src/*` paths in production code.
+
 1. Add package manifests and public entrypoints for `shared`, `codegen`, `exporter-core`, `fidelity`, `matcher`, and the new contract package.
 2. Rename package responsibilities rather than preserving misleading names. `shared` should be emptied into domain packages; it must not become a permanent dumping ground.
 3. Replace relative source imports with workspace package imports.
@@ -671,6 +703,21 @@ Exit criteria:
 - no new cycles.
 
 ### Phase 2: implement canonical contract v2
+
+Status as of July 23, 2026: not started in the form defined by this plan.
+
+Observed repo state on July 23, 2026:
+
+- [ ] `packages/contract` does not exist
+- [ ] The v2 canonical schema files listed below do not exist
+- [ ] JSON Schema publication for the canonical contract is not in place
+- [ ] Round-trip bundle validation for contract v2 is not in place
+- [~] `packages/content-contract` exists, but it is still the earlier shallow contract line, not the Phase 2 canonical v2 package
+
+Notes:
+
+- Existing `content-contract` work is useful precursor work, but it does not satisfy this phase as written.
+- Phase 2 should be treated as not yet begun until the dedicated `packages/contract` package and migration/validation surface are introduced.
 
 Files to create or replace:
 
