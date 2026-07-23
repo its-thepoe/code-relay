@@ -711,6 +711,61 @@ test("generated validation rejects a narrow page root", async () => {
   );
 });
 
+test("generated validation allows text-heavy minimal routes with a single visible container", async () => {
+  const projectDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "coderelay-text-heavy-minimal-route-"),
+  );
+  await fs.mkdir(path.join(projectDir, "dist"), { recursive: true });
+  await fs.writeFile(
+    path.join(projectDir, "package.json"),
+    JSON.stringify({
+      name: "text-heavy-minimal-route",
+      private: true,
+      scripts: { build: "node -e \"process.exit(0)\"" },
+    }),
+  );
+  await fs.writeFile(
+    path.join(projectDir, "route-manifest.json"),
+    JSON.stringify([
+      {
+        path: "/",
+        sourceTextLength: 1200,
+        sourceNodeCount: 269,
+      },
+    ]),
+  );
+  await fs.writeFile(
+    path.join(projectDir, "placeholder.tsx"),
+    "export const Placeholder = () => null\n",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "placeholder.css"),
+    "body { background: #ffffff; color: #111827; }\n",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "preview.html"),
+    "<!doctype html><html><body>preview</body></html>",
+  );
+  await fs.writeFile(
+    path.join(projectDir, "dist", "index.html"),
+    `<!doctype html>
+    <html>
+      <body style="margin:0;background:#fff;color:#111827;font-family:system-ui,sans-serif">
+        <div id="root">
+          <main style="min-height:100vh;padding:24px;background:#fff">
+            ${"<p>Rendered route text that should count as real content.</p>".repeat(40)}
+          </main>
+        </div>
+      </body>
+    </html>`,
+  );
+
+  const validation = await validateGeneratedProject(projectDir);
+  assert.equal(validation.routes[0]?.path, "/");
+  assert.equal((validation.routes[0]?.renderedTextLength ?? 0) >= 1200, true);
+  assert.equal(validation.externalRequests.length, 0);
+});
+
 test("generated validation reports detailed timeout diagnostics for a hung build", async () => {
   const projectDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "coderelay-build-timeout-diagnostics-"),

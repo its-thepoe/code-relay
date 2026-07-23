@@ -2684,19 +2684,28 @@ export async function validateGeneratedProject(
           `${failedInteractionContract.detail ?? "Interaction state did not update as expected."}`,
       );
     }
-    const emptyRoute = runtime.routes.find(
-      (route) =>
-        route.routeKind !== "redirect" &&
-        ((route.sourceTextLength > 0 && route.renderedTextLength === 0) ||
-          (route.sourceTextLength >= 200 &&
-            route.renderedTextLength / route.sourceTextLength < 0.5) ||
-          (route.sourceTextLength > 0 &&
-            route.sourceNodeCount >= 5 &&
-            route.renderedElementCount < 3) ||
-          (route.sourceTextLength > 0 &&
-            route.sourceNodeCount >= 5 &&
-            route.screenshotColorCount < 3)),
-    );
+    const emptyRoute = runtime.routes.find((route) => {
+      if (route.routeKind === "redirect") return false;
+      const textMissing =
+        route.sourceTextLength > 0 && route.renderedTextLength === 0;
+      const textCollapsed =
+        route.sourceTextLength >= 200 &&
+        route.renderedTextLength / route.sourceTextLength < 0.5;
+      const structurallySparse =
+        route.sourceTextLength > 0 &&
+        route.sourceNodeCount >= 5 &&
+        route.renderedElementCount < 3;
+      const visuallyFlat =
+        route.sourceTextLength > 0 &&
+        route.sourceNodeCount >= 5 &&
+        route.screenshotColorCount < 3;
+      const missingSubstance = textMissing || textCollapsed;
+      return (
+        missingSubstance ||
+        ((structurallySparse || visuallyFlat) &&
+          route.renderedTextLength < Math.min(route.sourceTextLength, 200))
+      );
+    });
     if (emptyRoute) {
       throw new Error(
         `Generated export route ${emptyRoute.path} is near-empty ` +
@@ -3382,6 +3391,19 @@ async function inspectBuiltProject(
       codeFileExecutions.push(
         ...(await inspectExecutableCodeFilePreviews(page, route.path)),
       );
+      await page.goto(
+        `http://127.0.0.1:${address.port}${withComponentFamilyDebugQuery(route.path)}`,
+        {
+          waitUntil: "domcontentloaded",
+          timeout: 30_000,
+        },
+      );
+      await waitForRenderedRouteReady({
+        page,
+        routePath: route.path,
+        timeoutMs: routeReadyTimeoutMs,
+      });
+      await page.waitForTimeout(100);
       interactionContracts.push(
         ...(await inspectComponentFamilyInteractions(page, route.path)),
       );
@@ -3423,6 +3445,14 @@ function shouldTrackExternalRuntimeRequest(request: PlaywrightRequest) {
   if (resourceType === "document") return false;
   if (request.isNavigationRequest()) return false;
   return true;
+}
+
+function withComponentFamilyDebugQuery(pathname: string) {
+  const [path, hash = ""] = pathname.split("#", 2);
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}__coderelay_component_family_debug=1${
+    hash ? `#${hash}` : ""
+  }`;
 }
 
 async function inspectComponentFamilyInteractions(

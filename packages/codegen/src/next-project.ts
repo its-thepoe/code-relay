@@ -2876,9 +2876,6 @@ function renderExportTreeNodeReact(
   depth: number,
 ): string {
   const familyMount = resolveComponentFamilyMount(node, ir);
-  if (familyMount) {
-    return `<FramerComponentFamilyStateMachine familyId="${escapeAttribute(familyMount.familyId)}"${familyMount.initialVariantId ? ` initialVariantId="${escapeAttribute(familyMount.initialVariantId)}"` : ""} placement="route" familyName="${escapeAttribute(familyMount.familyName)}" />`;
-  }
 
   const style = reactTreeStyleAttribute(node);
   const className = reactTreeClassName(node);
@@ -2890,7 +2887,10 @@ function renderExportTreeNodeReact(
   const text = rawText.trim() ? reactTextLiteral(rawText) : "";
 
   if (node.tag === "img" && typeof node.attributes.src === "string") {
-    return `<img className=${className} src="${escapeAttribute(node.attributes.src)}" alt="${escapeAttribute(String(node.attributes.alt ?? ""))}"${style} />`;
+    return withReactFamilyMount(
+      `<img className=${className} src="${escapeAttribute(node.attributes.src)}" alt="${escapeAttribute(String(node.attributes.alt ?? ""))}"${style} />`,
+      familyMount,
+    );
   }
 
   if (node.tag === "h1") {
@@ -2901,7 +2901,10 @@ function renderExportTreeNodeReact(
         ? `{props.${titleKey} ?? ${JSON.stringify(rawText)}}`
         : text;
     if (titleKey && !ctx.titleUsed) ctx.titleUsed = true;
-    return `<h1 className=${className}${style}>${content}${childContent}</h1>`;
+    return withReactFamilyMount(
+      `<h1 className=${className}${style}>${content}${childContent}</h1>`,
+      familyMount,
+    );
   }
 
   if (/^h[2-6]$/.test(node.tag)) {
@@ -2912,7 +2915,10 @@ function renderExportTreeNodeReact(
         ? `{props.${subtitleKey} ?? ${JSON.stringify(rawText)}}`
         : text;
     if (subtitleKey && !ctx.subtitleUsed) ctx.subtitleUsed = true;
-    return `<${node.tag} className=${className}${style}>${content}${childContent}</${node.tag}>`;
+    return withReactFamilyMount(
+      `<${node.tag} className=${className}${style}>${content}${childContent}</${node.tag}>`,
+      familyMount,
+    );
   }
 
   if (node.tag === "a") {
@@ -2930,7 +2936,10 @@ function renderExportTreeNodeReact(
         ? `{props.${hrefKey} ?? ${JSON.stringify(href)}}`
         : `"${escapeAttribute(href)}"`;
     if (hrefKey && !ctx.ctaHrefUsed) ctx.ctaHrefUsed = true;
-    return `<a className=${className} href=${hrefExpr}${style}>${label}${childContent}</a>`;
+    return withReactFamilyMount(
+      `<a className=${className} href=${hrefExpr}${style}>${label}${childContent}</a>`,
+      familyMount,
+    );
   }
 
   if (node.tag === "button") {
@@ -2941,18 +2950,27 @@ function renderExportTreeNodeReact(
         ? `{props.${labelKey} ?? ${JSON.stringify(rawText)}}`
         : text;
     if (labelKey && !ctx.ctaLabelUsed) ctx.ctaLabelUsed = true;
-    return `<button className=${className} type="button"${style}>${label}${childContent}</button>`;
+    return withReactFamilyMount(
+      `<button className=${className} type="button"${style}>${label}${childContent}</button>`,
+      familyMount,
+    );
   }
 
   if (isTreeTextNode(node)) {
     const tag = reactTextTag(node.tag);
-    return `<${tag} className=${className}${style}>${text}${childContent}</${tag}>`;
+    return withReactFamilyMount(
+      `<${tag} className=${className}${style}>${text}${childContent}</${tag}>`,
+      familyMount,
+    );
   }
 
   const tag = reactContainerTag(node, depth);
-  return `<${tag} className=${className}${style}>
+  return withReactFamilyMount(
+    `<${tag} className=${className}${style}>
     ${childContent || text}
-  </${tag}>`;
+  </${tag}>`,
+    familyMount,
+  );
 }
 
 function renderExportTreeNodeHtml(
@@ -2960,14 +2978,6 @@ function renderExportTreeNodeHtml(
   ir: ExportIR,
   depth: number,
 ): string {
-  const familyMount = resolveComponentFamilyMount(node, ir);
-  if (familyMount) {
-    return `<article class="surface" data-framer-component-family-placeholder="${escapeAttribute(familyMount.familyName)}">
-  <strong>${escapeText(familyMount.familyName)}</strong>
-  <p>Interactive Framer component family mounted in the React preview.</p>
-</article>`;
-  }
-
   const style = htmlTreeStyleAttribute(node);
   const className = htmlTreeClassName(node);
   const childContent = node.children
@@ -3002,6 +3012,17 @@ function renderExportTreeNodeHtml(
   return `<${tag} class="${className}"${style}>
     ${childContent || text}
   </${tag}>`;
+}
+
+function withReactFamilyMount(
+  renderedNode: string,
+  familyMount: ReturnType<typeof resolveComponentFamilyMount>,
+): string {
+  if (!familyMount) return renderedNode;
+  return `<>
+    ${renderedNode}
+    <FramerComponentFamilyStateMachine familyId="${escapeAttribute(familyMount.familyId)}"${familyMount.initialVariantId ? ` initialVariantId="${escapeAttribute(familyMount.initialVariantId)}"` : ""} placement="route" familyName="${escapeAttribute(familyMount.familyName)}" />
+  </>`;
 }
 
 function sectionStyle(nodes: RuntimeNode[], index: number, ir: ExportIR) {
@@ -4001,6 +4022,15 @@ function labelForTrigger(value: string | undefined) {
   return normalized === 'tap' ? 'Tap' : normalized === 'click' ? 'Click' : normalized === 'hover-start' ? 'Hover start' : normalized === 'hover-end' ? 'Hover end' : normalized === 'focus' ? 'Focus' : normalized === 'timeout' ? 'Timeout' : 'Advance'
 }
 
+function shouldRenderRouteComponentFamilyDebugUi() {
+  if (typeof window === 'undefined') return false
+  try {
+    return window.location.search.includes('__coderelay_component_family_debug=1')
+  } catch {
+    return false
+  }
+}
+
 export function FramerComponentFamilyStateMachine(props: {
   familyId: string
   initialVariantId?: string
@@ -4014,6 +4044,11 @@ export function FramerComponentFamilyStateMachine(props: {
   React.useEffect(() => {
     setCurrentVariantId(initialVariantId)
   }, [initialVariantId])
+
+  const isRoutePlacement = props.placement === 'route'
+  if (isRoutePlacement && !shouldRenderRouteComponentFamilyDebugUi()) {
+    return null
+  }
 
   if (!family) {
     return <div style={{ opacity: 0.64 }}>Unknown family {props.familyId}</div>
