@@ -2236,6 +2236,16 @@ async function inspectBuiltProject(distDir, routeManifest, input = {}) {
                 });
             }
             codeFileExecutions.push(...(await inspectExecutableCodeFilePreviews(page, route.path)));
+            await page.goto(`http://127.0.0.1:${address.port}${withComponentFamilyDebugQuery(route.path)}`, {
+                waitUntil: "domcontentloaded",
+                timeout: 30_000,
+            });
+            await waitForRenderedRouteReady({
+                page,
+                routePath: route.path,
+                timeoutMs: routeReadyTimeoutMs,
+            });
+            await page.waitForTimeout(100);
             interactionContracts.push(...(await inspectComponentFamilyInteractions(page, route.path)));
             rootChildCount = Math.max(rootChildCount, inspected.rootChildCount);
             routes.push({ ...route, ...inspected, screenshotColorCount, viewportChecks });
@@ -2271,6 +2281,11 @@ function shouldTrackExternalRuntimeRequest(request) {
     if (request.isNavigationRequest())
         return false;
     return true;
+}
+function withComponentFamilyDebugQuery(pathname) {
+    const [path, hash = ""] = pathname.split("#", 2);
+    const separator = path.includes("?") ? "&" : "?";
+    return `${path}${separator}__coderelay_component_family_debug=1${hash ? `#${hash}` : ""}`;
 }
 async function inspectComponentFamilyInteractions(page, routePath) {
     const routeMountedFamilies = await page

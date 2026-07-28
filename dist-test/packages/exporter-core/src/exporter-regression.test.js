@@ -2777,7 +2777,8 @@ test("shared route templates preserve component family mounts inside route runti
     const templateRuntime = await fs.readFile(path.join(projectDir, "src", "framer-data", "route-template-runtime.tsx"), "utf8");
     const alphaData = await fs.readFile(path.join(projectDir, "src", "framer-data", "routes", "FamilyAlphaRouteData.ts"), "utf8");
     assert.match(templateRuntime, /FramerComponentFamilyStateMachine/);
-    assert.match(templateRuntime, /placement="route"/);
+    assert.match(templateRuntime, /data-framer-component-family/);
+    assert.match(templateRuntime, /shouldRenderRouteComponentFamilyDebugUi/);
     assert.match(alphaData, /componentFamilyId/);
     assert.match(alphaData, /Button/);
     assert.match(alphaData, /button-default/);

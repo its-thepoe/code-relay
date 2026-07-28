@@ -447,10 +447,18 @@ function deriveIrForComponent(base, componentName, nodes, runtimeExportTree, rou
 }
 function createRouteDataModule(routeDataName, entry) {
     const exportTree = sanitizeRouteTemplateTree(entry.exportTree ?? [], entry);
-    return `export const ${routeDataName} = ${JSON.stringify({
+    const payload = JSON.stringify({
         sourceUrl: entry.sourceUrl,
         exportTree,
-    }, null, 2)} as const
+    }, null, 2);
+    return `export type FramerRouteData = {
+  sourceUrl: string
+  exportTree: ReadonlyArray<Record<string, unknown>>
+}
+
+export const ${routeDataName}: FramerRouteData = JSON.parse(
+  String.raw\`${escapeRawTemplateLiteral(payload)}\`,
+)
 `;
 }
 function normalizeFamilyLookupKey(value) {
@@ -516,6 +524,28 @@ function treeNodeHasComponentFamilyMount(node, ir) {
 function hasInlineComponentFamilyMount(ir) {
     return (ir.exportTree ?? []).some((node) => treeNodeHasComponentFamilyMount(node, ir));
 }
+function normalizeSerializableRouteTemplateAttributeValue(value) {
+    if (typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean") {
+        return value;
+    }
+    if (typeof value === "object" &&
+        value !== null &&
+        "baseVal" in value &&
+        typeof value.baseVal === "string") {
+        return value.baseVal;
+    }
+    return undefined;
+}
+function sanitizeRouteTemplateAttributes(attributes) {
+    return Object.fromEntries(Object.entries(attributes)
+        .map(([key, value]) => [
+        key,
+        normalizeSerializableRouteTemplateAttributeValue(value),
+    ])
+        .filter((entry) => entry[1] !== undefined));
+}
 function sanitizeRouteTemplateTree(nodes, ir) {
     return nodes.map((node) => {
         const familyMount = ir ? resolveComponentFamilyMount(node, ir) : undefined;
@@ -528,18 +558,7 @@ function sanitizeRouteTemplateTree(nodes, ir) {
             componentFamilyId: familyMount?.familyId,
             componentFamilyName: familyMount?.familyName,
             componentFamilyInitialVariantId: familyMount?.initialVariantId,
-            attributes: {
-                src: node.attributes.src,
-                href: node.attributes.href,
-                alt: node.attributes.alt,
-                role: node.attributes.role,
-                className: typeof node.attributes.className === "string"
-                    ? node.attributes.className
-                    : undefined,
-                dataFramerName: typeof node.attributes.dataFramerName === "string"
-                    ? node.attributes.dataFramerName
-                    : undefined,
-            },
+            attributes: sanitizeRouteTemplateAttributes(node.attributes),
             inlineStyle: Object.fromEntries(treeInlineStyleEntries(node)),
             children: sanitizeRouteTemplateTree(node.children, ir),
         };
@@ -585,6 +604,9 @@ function createSharedTemplateDts(templateComponentName) {
 export declare function ${templateComponentName}(props: ${templateComponentName}Props): React.JSX.Element
 `;
 }
+function escapeRawTemplateLiteral(value) {
+    return value.replaceAll("`", "\\`").replaceAll("${", "\\${");
+}
 function createRouteTemplateRuntimeModule(_hasComponentFamilies) {
     return `import * as React from 'react'
 import { FramerComponentFamilyStateMachine } from './component-families-runtime'
@@ -607,6 +629,23 @@ type RuntimeProps = {
   tree: ReadonlyArray<Record<string, unknown>>
   styles: Record<string, string>
 }
+
+const htmlVoidTags = new Set([
+  'area',
+  'base',
+  'br',
+  'col',
+  'embed',
+  'hr',
+  'img',
+  'input',
+  'link',
+  'meta',
+  'param',
+  'source',
+  'track',
+  'wbr',
+])
 
 const textTags = new Set(['p', 'span', 'li', 'label', 'strong', 'em', 'small', 'blockquote'])
 
@@ -643,14 +682,15 @@ function baseClassForTag(node: RouteTemplateNode) {
   if (node.tag === 'h2' || node.tag === 'h3') return 'subheading'
   if (node.tag === 'a') return 'link'
   if (node.tag === 'button') return 'button'
+  if (node.tag === 'input' || node.tag === 'textarea' || node.tag === 'select') return 'body'
   if (node.kind === 'text' || textTags.has(node.tag ?? '')) return 'body'
   return 'surface'
 }
 
 function tagForNode(node: RouteTemplateNode, depth: number) {
-  if (node.tag && /^h[1-6]$/.test(node.tag)) return node.tag
-  if (node.tag === 'a' || node.tag === 'button' || node.tag === 'img') return node.tag
-  if (textTags.has(node.tag ?? '')) return node.tag ?? 'span'
+  if (typeof node.tag === 'string' && /^[a-z][a-z0-9-]*$/i.test(node.tag)) {
+    return node.tag
+  }
   if (depth === 0 && node.kind === 'component') return 'section'
   if (node.tag === 'section' || node.tag === 'main' || node.tag === 'article') {
     return node.tag
@@ -660,8 +700,76 @@ function tagForNode(node: RouteTemplateNode, depth: number) {
 
 function toStyleObject(value: Record<string, unknown>) {
   return Object.fromEntries(
-    Object.entries(value).filter(([, entry]) => typeof entry === 'string' && entry.length > 0),
+    Object.entries(value).filter(
+      ([key, entry]) =>
+        ((typeof entry === 'string' && entry.length > 0) || typeof entry === 'number') &&
+        (key.startsWith('--') || /^[a-zA-Z][a-zA-Z0-9]*$/.test(key)),
+    ),
   ) as React.CSSProperties
+}
+
+function toKebabCase(value: string) {
+  return value.replace(/[A-Z]/g, (match) => '-' + match.toLowerCase())
+}
+
+function normalizeAttributeKey(key: string) {
+  if (key === 'class') return 'className'
+  if (key === 'for') return 'htmlFor'
+  if (key === 'tabindex') return 'tabIndex'
+  if (key === 'readonly') return 'readOnly'
+  if (key === 'maxlength') return 'maxLength'
+  if (key === 'minlength') return 'minLength'
+  if (key === 'colspan') return 'colSpan'
+  if (key === 'rowspan') return 'rowSpan'
+  if (/^data[A-Z]/.test(key)) return 'data-' + toKebabCase(key.slice(4))
+  if (/^aria[A-Z]/.test(key)) return 'aria-' + toKebabCase(key.slice(4))
+  return key
+}
+
+function normalizedAttributes(node: RouteTemplateNode) {
+  const source = isRecord(node.attributes) ? node.attributes : {}
+  return Object.fromEntries(
+    Object.entries(source)
+      .map(([key, value]) => {
+        if (key === 'style' || typeof value === 'function') return undefined
+        if (
+          typeof value !== 'string' &&
+          typeof value !== 'number' &&
+          typeof value !== 'boolean'
+        ) {
+          return undefined
+        }
+        const normalizedKey = normalizeAttributeKey(key)
+        if (
+          normalizedKey === 'className' ||
+          normalizedKey === 'children' ||
+          normalizedKey === 'dangerouslySetInnerHTML'
+        ) {
+          return undefined
+        }
+        if (normalizedKey === 'value' && typeof value === 'string') {
+          return ['defaultValue', value] as const
+        }
+        if (normalizedKey === 'checked' && typeof value === 'boolean') {
+          return ['defaultChecked', value] as const
+        }
+        return [normalizedKey, value] as const
+      })
+      .filter(
+        (
+          entry,
+        ): entry is readonly [string, string | number | boolean] => entry !== undefined,
+      ),
+  )
+}
+
+function shouldRenderRouteComponentFamilyDebugUi() {
+  if (typeof window === 'undefined') return false
+  try {
+    return window.location.search.includes('__coderelay_component_family_debug=1')
+  } catch {
+    return false
+  }
 }
 
 function classNameForNode(node: RouteTemplateNode, styles: Record<string, string>) {
@@ -673,18 +781,6 @@ function classNameForNode(node: RouteTemplateNode, styles: Record<string, string
 }
 
 function renderNode(node: RouteTemplateNode, styles: Record<string, string>, depth: number): React.ReactNode {
-  if (node.componentFamilyId) {
-    return (
-      <FramerComponentFamilyStateMachine
-        key={node.id ?? node.componentFamilyId}
-        familyId={node.componentFamilyId}
-        initialVariantId={node.componentFamilyInitialVariantId}
-        placement="route"
-        familyName={node.componentFamilyName}
-      />
-    )
-  }
-
   const tag = tagForNode(node, depth)
   const children = (node.children ?? []).map((child, index) =>
     renderNode(child, styles, depth + 1) ?? <React.Fragment key={index} />,
@@ -707,16 +803,45 @@ function renderNode(node: RouteTemplateNode, styles: Record<string, string>, dep
     key,
     className,
     style,
+    ...normalizedAttributes(node),
   }
 
-  if (tag === 'a') {
-    props.href = typeof node.attributes?.href === 'string' ? node.attributes.href : '#'
+  if (node.componentFamilyId) {
+    props['data-framer-component-family'] = node.componentFamilyId
+    if (node.componentFamilyName) {
+      props['data-framer-component-family-name'] = node.componentFamilyName
+    }
+    if (node.componentFamilyInitialVariantId) {
+      props['data-framer-component-family-initial-variant'] =
+        node.componentFamilyInitialVariantId
+    }
+  }
+
+  if (tag === 'a' && typeof props.href !== 'string') {
+    props.href = '#'
   }
   if (tag === 'button') {
     props.type = 'button'
   }
 
-  return React.createElement(tag, props, node.text, ...children)
+  const debugFamily =
+    node.componentFamilyId && shouldRenderRouteComponentFamilyDebugUi()
+      ? (
+          <FramerComponentFamilyStateMachine
+            key={\`\${key}-family-debug\`}
+            familyId={node.componentFamilyId}
+            initialVariantId={node.componentFamilyInitialVariantId}
+            placement="gallery"
+            familyName={node.componentFamilyName}
+          />
+        )
+      : null
+
+  if (htmlVoidTags.has(tag)) {
+    return React.createElement(tag, props)
+  }
+
+  return React.createElement(tag, props, node.text, ...children, debugFamily)
 }
 
 export function FramerRouteTemplateRuntime({ tree, styles }: RuntimeProps) {
@@ -2141,9 +2266,6 @@ function renderExportTreeForHtml(ir) {
 }
 function renderExportTreeNodeReact(node, ir, ctx, depth) {
     const familyMount = resolveComponentFamilyMount(node, ir);
-    if (familyMount) {
-        return `<FramerComponentFamilyStateMachine familyId="${escapeAttribute(familyMount.familyId)}"${familyMount.initialVariantId ? ` initialVariantId="${escapeAttribute(familyMount.initialVariantId)}"` : ""} placement="route" familyName="${escapeAttribute(familyMount.familyName)}" />`;
-    }
     const style = reactTreeStyleAttribute(node);
     const className = reactTreeClassName(node);
     const childContent = node.children
@@ -2153,7 +2275,7 @@ function renderExportTreeNodeReact(node, ir, ctx, depth) {
     const rawText = node.text ?? "";
     const text = rawText.trim() ? reactTextLiteral(rawText) : "";
     if (node.tag === "img" && typeof node.attributes.src === "string") {
-        return `<img className=${className} src="${escapeAttribute(node.attributes.src)}" alt="${escapeAttribute(String(node.attributes.alt ?? ""))}"${style} />`;
+        return withReactFamilyMount(`<img className=${className} src="${escapeAttribute(node.attributes.src)}" alt="${escapeAttribute(String(node.attributes.alt ?? ""))}"${style} />`, familyMount);
     }
     if (node.tag === "h1") {
         const props = ir.exportProps;
@@ -2163,7 +2285,7 @@ function renderExportTreeNodeReact(node, ir, ctx, depth) {
             : text;
         if (titleKey && !ctx.titleUsed)
             ctx.titleUsed = true;
-        return `<h1 className=${className}${style}>${content}${childContent}</h1>`;
+        return withReactFamilyMount(`<h1 className=${className}${style}>${content}${childContent}</h1>`, familyMount);
     }
     if (/^h[2-6]$/.test(node.tag)) {
         const props = ir.exportProps;
@@ -2173,7 +2295,7 @@ function renderExportTreeNodeReact(node, ir, ctx, depth) {
             : text;
         if (subtitleKey && !ctx.subtitleUsed)
             ctx.subtitleUsed = true;
-        return `<${node.tag} className=${className}${style}>${content}${childContent}</${node.tag}>`;
+        return withReactFamilyMount(`<${node.tag} className=${className}${style}>${content}${childContent}</${node.tag}>`, familyMount);
     }
     if (node.tag === "a") {
         const props = ir.exportProps;
@@ -2190,7 +2312,7 @@ function renderExportTreeNodeReact(node, ir, ctx, depth) {
             : `"${escapeAttribute(href)}"`;
         if (hrefKey && !ctx.ctaHrefUsed)
             ctx.ctaHrefUsed = true;
-        return `<a className=${className} href=${hrefExpr}${style}>${label}${childContent}</a>`;
+        return withReactFamilyMount(`<a className=${className} href=${hrefExpr}${style}>${label}${childContent}</a>`, familyMount);
     }
     if (node.tag === "button") {
         const props = ir.exportProps;
@@ -2200,25 +2322,18 @@ function renderExportTreeNodeReact(node, ir, ctx, depth) {
             : text;
         if (labelKey && !ctx.ctaLabelUsed)
             ctx.ctaLabelUsed = true;
-        return `<button className=${className} type="button"${style}>${label}${childContent}</button>`;
+        return withReactFamilyMount(`<button className=${className} type="button"${style}>${label}${childContent}</button>`, familyMount);
     }
     if (isTreeTextNode(node)) {
         const tag = reactTextTag(node.tag);
-        return `<${tag} className=${className}${style}>${text}${childContent}</${tag}>`;
+        return withReactFamilyMount(`<${tag} className=${className}${style}>${text}${childContent}</${tag}>`, familyMount);
     }
     const tag = reactContainerTag(node, depth);
-    return `<${tag} className=${className}${style}>
+    return withReactFamilyMount(`<${tag} className=${className}${style}>
     ${childContent || text}
-  </${tag}>`;
+  </${tag}>`, familyMount);
 }
 function renderExportTreeNodeHtml(node, ir, depth) {
-    const familyMount = resolveComponentFamilyMount(node, ir);
-    if (familyMount) {
-        return `<article class="surface" data-framer-component-family-placeholder="${escapeAttribute(familyMount.familyName)}">
-  <strong>${escapeText(familyMount.familyName)}</strong>
-  <p>Interactive Framer component family mounted in the React preview.</p>
-</article>`;
-    }
     const style = htmlTreeStyleAttribute(node);
     const className = htmlTreeClassName(node);
     const childContent = node.children
@@ -2247,6 +2362,14 @@ function renderExportTreeNodeHtml(node, ir, depth) {
     return `<${tag} class="${className}"${style}>
     ${childContent || text}
   </${tag}>`;
+}
+function withReactFamilyMount(renderedNode, familyMount) {
+    if (!familyMount)
+        return renderedNode;
+    return `<>
+    ${renderedNode}
+    <FramerComponentFamilyStateMachine familyId="${escapeAttribute(familyMount.familyId)}"${familyMount.initialVariantId ? ` initialVariantId="${escapeAttribute(familyMount.initialVariantId)}"` : ""} placement="route" familyName="${escapeAttribute(familyMount.familyName)}" />
+  </>`;
 }
 function sectionStyle(nodes, index, ir) {
     const hasHeading = nodes.some((node) => node.tag === "h1" || node.tag === "h2");
@@ -3151,6 +3274,15 @@ function labelForTrigger(value: string | undefined) {
   return normalized === 'tap' ? 'Tap' : normalized === 'click' ? 'Click' : normalized === 'hover-start' ? 'Hover start' : normalized === 'hover-end' ? 'Hover end' : normalized === 'focus' ? 'Focus' : normalized === 'timeout' ? 'Timeout' : 'Advance'
 }
 
+function shouldRenderRouteComponentFamilyDebugUi() {
+  if (typeof window === 'undefined') return false
+  try {
+    return window.location.search.includes('__coderelay_component_family_debug=1')
+  } catch {
+    return false
+  }
+}
+
 export function FramerComponentFamilyStateMachine(props: {
   familyId: string
   initialVariantId?: string
@@ -3164,6 +3296,11 @@ export function FramerComponentFamilyStateMachine(props: {
   React.useEffect(() => {
     setCurrentVariantId(initialVariantId)
   }, [initialVariantId])
+
+  const isRoutePlacement = props.placement === 'route'
+  if (isRoutePlacement && !shouldRenderRouteComponentFamilyDebugUi()) {
+    return null
+  }
 
   if (!family) {
     return <div style={{ opacity: 0.64 }}>Unknown family {props.familyId}</div>
@@ -3482,10 +3619,34 @@ export const framerFontFamilies = framerFonts.map((entry) => entry.family)
 `;
 }
 function createCmsDataModule(ir) {
-    return `export const framerCmsCollections = ${JSON.stringify(ir.cmsCollections ?? [], null, 2)} as const
+    const payload = JSON.stringify(ir.cmsCollections ?? [], null, 2);
+    return `export type FramerCmsFieldMeta = {
+  id?: string
+  name?: string
+  type?: string
+  [key: string]: unknown
+}
 
-export type FramerCmsCollectionMeta = (typeof framerCmsCollections)[number]
-export type FramerCmsItemMeta = FramerCmsCollectionMeta extends { items: readonly (infer Item)[] } ? Item : never
+export type FramerCmsItemMeta = {
+  id?: string
+  slug?: string
+  fieldData?: Record<string, unknown>
+  [key: string]: unknown
+}
+
+export type FramerCmsCollectionMeta = {
+  id?: string
+  name?: string
+  managed?: boolean
+  pluginDataKeys?: string[]
+  fields?: FramerCmsFieldMeta[]
+  items?: FramerCmsItemMeta[]
+  [key: string]: unknown
+}
+
+export const framerCmsCollections: FramerCmsCollectionMeta[] = JSON.parse(
+  String.raw\`${escapeRawTemplateLiteral(payload)}\`,
+)
 
 export function getFramerCmsCollectionByName(name: string) {
   return framerCmsCollections.find((entry) => entry.name === name)
@@ -3502,7 +3663,12 @@ function createCmsRuntimeModule(ir) {
         .join(" | ");
     const collectionNameType = collectionNames.length > 0 ? collectionNames : "string";
     return `import * as React from 'react'
-import { framerCmsCollections, getFramerCmsCollectionById, getFramerCmsCollectionByName } from './cms'
+import {
+  framerCmsCollections,
+  getFramerCmsCollectionById,
+  getFramerCmsCollectionByName,
+  type FramerCmsItemMeta,
+} from './cms'
 
 export type FramerCmsCollectionName = ${collectionNameType}
 export type FramerCmsFieldEntry =
@@ -3619,9 +3785,9 @@ export function getFramerCmsDisplayValue(
 
 export function mapFramerCmsItems<T>(
   input: { id?: string; name?: string },
-  mapper: (item: (typeof framerCmsCollections)[number]['items'] extends readonly (infer Item)[] ? Item : never, index: number) => T,
+  mapper: (item: FramerCmsItemMeta, index: number) => T,
 ) {
-  return getFramerCmsItems(input).map((item, index) => mapper(item as never, index))
+  return getFramerCmsItems(input).map((item, index) => mapper(item, index))
 }
 
 export function useFramerCmsCollection(input: { id?: string; name?: string }) {
@@ -3643,7 +3809,7 @@ export function useFramerCmsCollection(input: { id?: string; name?: string }) {
 export function FramerCmsCollectionList(props: {
   id?: string
   name?: string
-  children: (item: (typeof framerCmsCollections)[number]['items'] extends readonly (infer Item)[] ? Item : never, index: number) => React.ReactNode
+  children: (item: FramerCmsItemMeta, index: number) => React.ReactNode
   empty?: React.ReactNode
 }) {
   const { items } = useFramerCmsCollection({ id: props.id, name: props.name })
@@ -3652,7 +3818,7 @@ export function FramerCmsCollectionList(props: {
     return <>{props.empty ?? null}</>
   }
 
-  return <>{items.map((item, index) => props.children(item as never, index))}</>
+  return <>{items.map((item, index) => props.children(item, index))}</>
 }
 
 export function FramerCmsText(props: {

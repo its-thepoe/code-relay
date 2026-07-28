@@ -238,7 +238,11 @@ function buildComponentFamilies(
         Boolean(module.gesture),
     );
     const variants =
-      variantModules.length > 0 ? variantModules : [primaryVariant];
+      variantModules.length > 0
+        ? variantModules
+        : modules.length > 1
+          ? modules
+          : [primaryVariant];
 
     return {
       id: familyId,
@@ -328,7 +332,8 @@ function buildRuntimeSitePages(input: BuildIrInput, fallbackName: string) {
     const baseName = toComponentName(title);
     const count = usedNames.get(baseName) ?? 0;
     usedNames.set(baseName, count + 1);
-    const nodes = promoteFallbackHeading(pickContentNodes(capture.nodes));
+    const canonicalNodes = preferredRuntimeNodes(capture);
+    const nodes = promoteFallbackHeading(pickContentNodes(canonicalNodes));
     const destination =
       capture.destination ??
       capture.redirectTo ??
@@ -383,7 +388,7 @@ function buildRuntimeSitePages(input: BuildIrInput, fallbackName: string) {
               ),
             ],
       exportTree: buildRuntimeExportTree(capture),
-      sourceTextLength: runtimeTextLength(capture.nodes),
+      sourceTextLength: runtimeTextLength(canonicalNodes),
     };
   });
 }
@@ -1569,13 +1574,14 @@ function buildExportTree(
 }
 
 function buildRuntimeExportTree(runtimeCapture: RuntimeCapture): ExportTreeNode[] {
+  const canonicalNodes = preferredRuntimeNodes(runtimeCapture);
   const runtimeByDomPath = new Map(
-    runtimeCapture.nodes.map((node) => [node.domPath, node] as const),
+    canonicalNodes.map((node) => [node.domPath, node] as const),
   );
   const childrenByDomPath = new Map<string, RuntimeNode[]>();
   const roots: RuntimeNode[] = [];
 
-  for (const node of runtimeCapture.nodes) {
+  for (const node of canonicalNodes) {
     const parentPath =
       node.parentDomPath && runtimeByDomPath.has(node.parentDomPath)
         ? node.parentDomPath
@@ -1631,6 +1637,34 @@ function buildRuntimeExportTree(runtimeCapture: RuntimeCapture): ExportTreeNode[
   };
 
   return roots.map(buildNode);
+}
+
+function preferredRuntimeNodes(runtimeCapture: RuntimeCapture): RuntimeNode[] {
+  const candidates = [
+    Array.isArray(runtimeCapture.nodes) ? runtimeCapture.nodes : [],
+    ...Object.values(runtimeCapture.nodesByViewport ?? {}).filter((nodes): nodes is RuntimeNode[] =>
+      Array.isArray(nodes),
+    ),
+  ].filter((nodes) => nodes.length > 0);
+
+  if (candidates.length === 0) return [];
+
+  const score = (nodes: RuntimeNode[]) => {
+    const textCount = nodes.filter(
+      (node) => typeof node.text === "string" && node.text.trim().length > 0,
+    ).length;
+    const contentNodes = nodes.filter(
+      (node) =>
+        (typeof node.text === "string" && node.text.trim().length > 0) ||
+        Boolean(node.attributes.href) ||
+        Boolean(node.attributes.src),
+    ).length;
+    return contentNodes * 10_000 + textCount * 100 + nodes.length;
+  };
+
+  return candidates.reduce((best, candidate) =>
+    score(candidate) > score(best) ? candidate : best,
+  );
 }
 
 function nearestCapturedParentDomPath(
