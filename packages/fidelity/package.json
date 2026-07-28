@@ -1,0 +1,14 @@
+{
+  "name": "@coderelay/fidelity",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./compare": "./src/compare.ts",
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@coderelay/shared": "0.1.0"
+  }
+}

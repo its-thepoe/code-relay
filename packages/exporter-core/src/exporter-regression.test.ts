@@ -3394,7 +3394,8 @@ test("shared route templates preserve component family mounts inside route runti
   );
 
   assert.match(templateRuntime, /FramerComponentFamilyStateMachine/);
-  assert.match(templateRuntime, /placement="route"/);
+  assert.match(templateRuntime, /data-framer-component-family/);
+  assert.match(templateRuntime, /shouldRenderRouteComponentFamilyDebugUi/);
   assert.match(alphaData, /componentFamilyId/);
   assert.match(alphaData, /Button/);
   assert.match(alphaData, /button-default/);

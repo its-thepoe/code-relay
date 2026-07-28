@@ -1,7 +1,11 @@
 node_modules/
 dist/
+dist-test/
 .coderelay/
+.next 2/
 .next/
 apps/web/.next/
+benchmarks/framer-fixtures/results/
+compiler/benchmarks/results/
 *.log
 .DS_Store

@@ -570,7 +570,7 @@ export async function captureRuntime(
   try {
     return await captureRuntimeWithBrowser(browser, input);
   } finally {
-    await browser.close();
+    await closePlaywrightResource(browser.close.bind(browser));
   }
 }
 
@@ -1059,7 +1059,19 @@ export async function validateFullSiteCapture(input: {
       if (
         validation.requestedWidth !== expected.width ||
         validation.observedInnerWidth !== expected.width ||
-        Math.abs(validation.screenshotWidth - expected.width) > 1
+        !isTolerableScreenshotWidthMismatch(
+          { width: expected.width, height: expected.height },
+          {
+            innerWidth: validation.observedInnerWidth,
+            innerHeight: validation.observedInnerHeight,
+            clientWidth: validation.observedClientWidth,
+            devicePixelRatio: 1,
+          },
+          {
+            width: validation.screenshotWidth,
+            height: validation.screenshotHeight,
+          },
+        )
       ) {
         throw new Error(
           `Full-site capture width mismatch: route ${routePath} at ${viewportName} requested=${validation.requestedWidth}, observed=${validation.observedInnerWidth}, screenshot=${validation.screenshotWidth}.`,
@@ -1559,7 +1571,7 @@ async function captureRuntimeRouteWithResume(input: {
       failingProgress,
     );
   } finally {
-    await browser.close().catch(() => undefined);
+    await closePlaywrightResource(browser.close.bind(browser));
   }
 }
 
@@ -1772,6 +1784,17 @@ async function withTimeout<T>(
   }
 }
 
+async function closePlaywrightResource(
+  close: () => Promise<unknown>,
+  timeoutMs = 2_000,
+) {
+  await withTimeout(
+    close(),
+    timeoutMs,
+    `Playwright teardown exceeded ${Math.round(timeoutMs / 1000)}s.`,
+  ).catch(() => undefined);
+}
+
 function normalizeRoutePath(value: string) {
   const trimmed = value.trim();
   if (!trimmed || trimmed === "/") return "/";
@@ -1830,7 +1853,7 @@ async function captureViewport(
   captureDir: string,
 ) {
   const viewport = viewports[viewportName];
-  const page = await createPageWithViewport(browser, viewport);
+  const { page, close } = await createPageWithViewport(browser, viewport);
   const routePath = input.routePath ?? "/";
   const phaseHistory: RouteCapturePhaseRecord[] = [];
   const warnings: string[] = [];
@@ -2106,7 +2129,7 @@ async function captureViewport(
       warnings,
     };
   } finally {
-    await page.close().catch(() => undefined);
+    await closePlaywrightResource(close);
   }
 }
 
@@ -2117,18 +2140,27 @@ async function createPageWithViewport(
   if ("newContext" in browser) {
     const context = await browser.newContext({ viewport });
     const page = await context.newPage();
-    return page;
+    return {
+      page,
+      close: () => context.close(),
+    };
   }
   const page = await browser.newPage();
   await page.setViewportSize(viewport);
-  return page;
+  return {
+    page,
+    close: () => page.close(),
+  };
 }
 
 async function readObservedViewport(page: Page) {
   return page.evaluate(() => ({
     innerWidth: window.innerWidth,
     innerHeight: window.innerHeight,
-    clientWidth: document.documentElement.clientWidth,
+    clientWidth:
+      document.documentElement?.clientWidth ??
+      document.body?.clientWidth ??
+      window.innerWidth,
     devicePixelRatio: window.devicePixelRatio,
   }));
 }
@@ -2305,7 +2337,7 @@ function createViewportValidation(
   if (Math.abs(observed.clientWidth - requested.width) > 1) {
     reasons.push("clientWidth-mismatch");
   }
-  if (Math.abs(screenshot.width - requested.width) > 1) {
+  if (!isTolerableScreenshotWidthMismatch(requested, observed, screenshot)) {
     reasons.push("screenshotWidth-mismatch");
   }
   return {
@@ -2323,6 +2355,31 @@ function createViewportValidation(
     valid: reasons.length === 0,
     reason: reasons.length > 0 ? reasons.join(",") : undefined,
   };
+}
+
+function isTolerableScreenshotWidthMismatch(
+  requested: { width: number; height: number },
+  observed: {
+    innerWidth: number;
+    innerHeight: number;
+    clientWidth: number;
+    devicePixelRatio: number;
+  },
+  screenshot: { width: number; height: number },
+) {
+  const screenshotDelta = Math.abs(screenshot.width - requested.width);
+  if (screenshotDelta <= 1) return true;
+
+  const exactViewportMatch =
+    observed.innerWidth === requested.width &&
+    Math.abs(observed.clientWidth - requested.width) <= 1;
+  if (!exactViewportMatch) return false;
+
+  const toleratedScrollbarGutterPx = 24;
+  return (
+    screenshot.width >= requested.width &&
+    screenshot.width <= requested.width + toleratedScrollbarGutterPx
+  );
 }
 
 function shouldRetryViewportScreenshot(
@@ -4022,6 +4079,42 @@ async function extractNodes(
       }
     }
 
+    function readHref(element) {
+      const rawHref =
+        element.getAttribute('href') ||
+        element.getAttribute('xlink:href') ||
+        (typeof element.href === 'string' ? element.href : undefined) ||
+        (element.href &&
+        typeof element.href === 'object' &&
+        typeof element.href.baseVal === 'string'
+          ? element.href.baseVal
+          : undefined)
+
+      if (!rawHref || rawHref.includes('[object SVGAnimatedString]')) {
+        return undefined
+      }
+
+      if (/(^|\\/):[A-Za-z0-9_-]+(?=\\/|$)/.test(rawHref)) {
+        return undefined
+      }
+
+      try {
+        const resolved = new URL(rawHref, window.location.href)
+        return resolved.origin === window.location.origin
+          ? resolved.pathname + resolved.search + resolved.hash
+          : resolved.toString()
+      } catch {
+        return rawHref
+      }
+    }
+
+    function readClassName(element) {
+      const rawClass = element.getAttribute('class')
+      return typeof rawClass === 'string' && rawClass.trim().length > 0
+        ? rawClass
+        : undefined
+    }
+
     return Array.from(base.querySelectorAll('*'))
       .filter((element) => !ignoredTags.has(element.tagName.toLowerCase()))
       .map((element, index) => {
@@ -4050,15 +4143,10 @@ async function extractNodes(
           },
           attributes: {
             src: element.currentSrc || element.src || undefined,
-            href:
-              element.href && new URL(element.href, window.location.href).origin === window.location.origin
-                ? new URL(element.href, window.location.href).pathname +
-                  new URL(element.href, window.location.href).search +
-                  new URL(element.href, window.location.href).hash
-                : element.href || undefined,
+            href: readHref(element),
             alt: element.alt || undefined,
             role: element.getAttribute('role') || undefined,
-            className: element.className || undefined,
+            className: readClassName(element),
             dataFramerName: element.getAttribute('data-framer-name') || undefined,
           },
           styles: styleMap,

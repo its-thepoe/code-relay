@@ -10,6 +10,12 @@ import type {
   ViewportName,
 } from "../../shared/src/types.js";
 import { resolveExportRouteMetadata } from "../../shared/src/route-contract.js";
+import {
+  createCanonicalContentBundle,
+  canonicalEditAreas,
+  migrateV1ContentContractToV2,
+  writeCanonicalSiteBundle,
+} from "../../content-contract/src/index.js";
 
 type GenerateInput = {
   ir: ExportIR;
@@ -74,6 +80,7 @@ export const generatedProjectVersions = {
   framerMotion: "12.42.0",
   react: "19.2.7",
   reactDom: "19.2.7",
+  typesNode: "24.1.0",
   typesReact: "19.2.17",
   typesReactDom: "19.2.3",
   vite: "8.1.0",
@@ -259,7 +266,7 @@ function rewriteCodeFileSource(
   source: string,
   adapterImportPath: string,
 ) {
-  return source
+  return stabilizeCodeFileSource(source)
     .replace(
       /\bfrom\s+(['"])framer\1/g,
       `from '${adapterImportPath}'`,
@@ -267,6 +274,42 @@ function rewriteCodeFileSource(
     .replace(
       /\bimport\s*\(\s*(['"])framer\1\s*\)/g,
       `import('${adapterImportPath}')`,
+    );
+}
+
+function stabilizeCodeFileSource(source: string) {
+  return source
+    .replace(
+      /\b((?:React\.)?)useState\(\s*\[\s*\]\s*\)/g,
+      "$1useState<any[]>([])",
+    )
+    .replace(
+      /\b((?:React\.)?)useState\(\s*null\s*\)/g,
+      "$1useState<any>(null)",
+    )
+    .replace(
+      /\b((?:React\.)?)useState\(\s*\{\s*\}\s*\)/g,
+      "$1useState<Record<string, any>>({})",
+    )
+    .replace(
+      /\b((?:React\.)?)useRef\(\s*\)/g,
+      "$1useRef<any>(null)",
+    )
+    .replace(
+      /\b((?:React\.)?)useRef\(\s*null\s*\)/g,
+      "$1useRef<any>(null)",
+    )
+    .replace(
+      /catch\s*\(\s*([A-Za-z_$][\w$]*)\s*\)\s*\{/g,
+      "catch ($1: any) {",
+    )
+    .replace(
+      /const\s+styles\s*=\s*\{/g,
+      "const styles: Record<string, React.CSSProperties> = {",
+    )
+    .replace(
+      /const\s+([A-Za-z_$][\w$]*Style)\s*=\s*\{/g,
+      "const $1: React.CSSProperties = {",
     );
 }
 
@@ -313,6 +356,9 @@ export async function generateNextProject(
           entry.routePath,
         ),
       )
+    : [];
+  const contentRoutes = Array.isArray(input.ir.sitePages)
+    ? input.ir.sitePages
     : [];
   const isFullSite =
     input.ir.exportMode === "full-site" && sitePages.length > 0;
@@ -409,7 +455,9 @@ export async function generateNextProject(
           sourceTextLength: page.sourceTextLength ?? 0,
           sourceNodeCount: page.exportTree
             ? countExportTreeNodes(page.exportTree)
-            : page.nodes.length,
+            : Array.isArray(page.nodes)
+              ? page.nodes.length
+              : 0,
         };
       }),
       null,
@@ -419,6 +467,73 @@ export async function generateNextProject(
   await writeFile(
     path.join(input.projectDir, "route-template-manifest.json"),
     `${JSON.stringify(input.ir.routeTemplates ?? [], null, 2)}\n`,
+  );
+  const contentContract = createCanonicalContentBundle({
+    sourceUrl: input.ir.sourceUrl,
+    routePath: contentRoutes[0]?.routePath,
+    title: contentRoutes[0]?.title ?? input.ir.componentName,
+    description:
+      input.ir.exportMode === "full-site"
+        ? `Generated ${contentRoutes.length} route${contentRoutes.length === 1 ? "" : "s"} from a full-site export.`
+        : `Generated ${componentEntries.length} component${componentEntries.length === 1 ? "" : "s"} from a selection export.`,
+    content: {
+      sourceUrl: input.ir.sourceUrl,
+      exportMode: input.ir.exportMode ?? null,
+      semanticType: input.ir.component.semanticType,
+      routeCount: contentRoutes.length,
+      componentCount: componentModules.length,
+      cmsCollectionCount: input.ir.cmsCollections?.length ?? 0,
+      routePaths: contentRoutes.map((page) => page.routePath),
+      templateKinds: [...new Set(contentRoutes.map((page) => page.templateKind ?? "static"))],
+      cmsCollectionNames: (input.ir.cmsCollections ?? []).map((collection) =>
+        typeof collection.name === "string" ? collection.name : typeof collection.id === "string" ? collection.id : "collection",
+      ),
+    },
+    routes: contentRoutes.map((page) => ({
+      routePath: page.routePath,
+      title: page.title,
+      templateKind: page.templateKind ?? "static",
+      templateId: page.templateId,
+      templatePath: page.templatePath,
+      routeKind: page.routeKind,
+      destination: page.destination ?? null,
+      destinationKind: page.destinationKind ?? null,
+      redirectTo: page.redirectTo ?? null,
+      redirectStatus: page.redirectStatus ?? null,
+      sourceTextLength: page.sourceTextLength ?? 0,
+    })),
+    componentModules,
+    safeEditAreas: canonicalEditAreas({
+      hasContentModule: contentRoutes.length > 0 || (input.ir.cmsCollections?.length ?? 0) > 0,
+      hasSections: contentRoutes.length > 1,
+      hasComponents: componentModules.length > 0,
+      hasDocs: true,
+      hasStyles: true,
+    }),
+    generatedFiles: [
+      "content-contract.json",
+      "framer-component-modules.json",
+      "framer-code-files.json",
+      "framer-fonts.json",
+      "framer-cms-collections.json",
+      "framer-tree.json",
+      "export-tree.json",
+      "motion-manifest.json",
+      "asset-manifest.json",
+      "runtime-strategy-manifest.json",
+      "agent-handoff-manifest.json",
+      "route-manifest.json",
+      "route-template-manifest.json",
+    ],
+    runtimeUtilities: [],
+  });
+  await writeFile(
+    path.join(input.projectDir, "content-contract.json"),
+    `${JSON.stringify(contentContract, null, 2)}\n`,
+  );
+  await writeCanonicalSiteBundle(
+    migrateV1ContentContractToV2(contentContract),
+    path.join(input.projectDir, ".coderelay"),
   );
 
   for (const module of runtimeComponentModules) {
@@ -459,14 +574,11 @@ export async function generateNextProject(
     );
     if (templateGroup && templateGroup.isShared) {
       const routeDataName = `${entry.componentName}RouteData`;
-      const routeDataPath = path.join(routeDataDir, `${routeDataName}.ts`);
+      const routeDataPath = path.join(routeDataDir, `${routeDataName}.json`);
       const routePagePath = path.join(pageDir, `${entry.componentName}.tsx`);
       await writeFile(
         routeDataPath,
-        await formatTsx(
-          createRouteDataModule(routeDataName, entry),
-          "typescript",
-        ),
+        createRouteDataPayload(routeDataName, entry, input.strategy),
       );
       await writeFile(
         routePagePath,
@@ -801,17 +913,22 @@ function deriveIrForComponent(
   };
 }
 
-function createRouteDataModule(routeDataName: string, entry: ExportIR) {
+function createRouteDataPayload(
+  routeDataName: string,
+  entry: ExportIR,
+  strategy: ExportStrategyConfig,
+) {
   const exportTree = sanitizeRouteTemplateTree(entry.exportTree ?? [], entry);
-  return `export const ${routeDataName} = ${JSON.stringify(
+  return `${JSON.stringify(
     {
       sourceUrl: entry.sourceUrl,
+      scopeId: routeDataName,
+      styleText: createScopedRouteTemplateCss(entry, strategy, routeDataName),
       exportTree,
     },
     null,
     2,
-  )} as const
-`;
+  )}\n`;
 }
 
 type ComponentFamilyMount = {
@@ -819,6 +936,85 @@ type ComponentFamilyMount = {
   familyName: string;
   initialVariantId?: string;
 };
+
+function resolveComponentFamiliesForIr(ir: ExportIR) {
+  if ((ir.componentFamilies?.length ?? 0) > 0) {
+    return ir.componentFamilies ?? [];
+  }
+
+  const modules = ir.componentModules ?? [];
+  const grouped = new Map<string, typeof modules>();
+  for (const module of modules) {
+    const familyId =
+      module.componentIdentifier ?? module.componentName ?? module.name;
+    grouped.set(familyId, [...(grouped.get(familyId) ?? []), module]);
+  }
+
+  return [...grouped.entries()].map(([familyId, familyModules]) => {
+    const primaryVariant =
+      familyModules.find((module) => module.isPrimaryVariant) ??
+      familyModules.find((module) => module.isVariant) ??
+      familyModules[0]!;
+    const explicitVariants = familyModules.filter(
+      (module) =>
+        module.isVariant ||
+        Boolean(module.variantName) ||
+        Boolean(module.breakpoint) ||
+        Boolean(module.gesture),
+    );
+    const variants =
+      explicitVariants.length > 0
+        ? explicitVariants
+        : familyModules.length > 1
+          ? familyModules
+          : [primaryVariant];
+
+    return {
+      id: familyId,
+      name:
+        primaryVariant.componentName ??
+        primaryVariant.componentIdentifier ??
+        primaryVariant.name,
+      primaryVariantId: primaryVariant.id ?? primaryVariant.name,
+      variants: variants.map((module) => ({
+        id: module.id ?? module.name,
+        name: module.name,
+        gesture: module.gesture,
+        inheritsFromId: module.inheritsFromId,
+        breakpoint: module.breakpoint,
+        variantName: module.variantName,
+        codeFileId: module.codeFileId,
+      })),
+      instances: familyModules.map((module) => ({
+        nodeId: module.id ?? module.name,
+        controls: module.controls,
+        initialVariantId: primaryVariant.id ?? primaryVariant.name,
+      })),
+      transitions: variants
+        .filter((module) => typeof module.gesture === "string" && module.gesture.length > 0)
+        .map((module) => ({
+          fromVariantId:
+            module.id !== (primaryVariant.id ?? primaryVariant.name) &&
+            (module.inheritsFromId === (primaryVariant.id ?? primaryVariant.name) ||
+              module.inheritsFromId === primaryVariant.name ||
+              variants.length === 2)
+              ? (primaryVariant.id ?? primaryVariant.name)
+              : (module.id ?? module.name),
+          toVariantId:
+            module.id !== (primaryVariant.id ?? primaryVariant.name) &&
+            (module.inheritsFromId === (primaryVariant.id ?? primaryVariant.name) ||
+              module.inheritsFromId === primaryVariant.name ||
+              variants.length === 2)
+              ? (module.id ?? module.name)
+              : undefined,
+          trigger: module.gesture,
+          confidence: 0.55,
+          provenance: "merged" as const,
+        })),
+      provenance: "merged" as const,
+    };
+  });
+}
 
 function normalizeFamilyLookupKey(value: string | undefined) {
   return typeof value === "string" && value.trim()
@@ -830,7 +1026,7 @@ function resolveComponentFamilyMount(
   node: ExportTreeNode,
   ir: ExportIR,
 ): ComponentFamilyMount | undefined {
-  const families = ir.componentFamilies ?? [];
+  const families = resolveComponentFamiliesForIr(ir);
   if (families.length === 0) return undefined;
 
   const pluginNodeId = node.source.pluginNodeId;
@@ -904,6 +1100,54 @@ function hasInlineComponentFamilyMount(ir: ExportIR) {
   return (ir.exportTree ?? []).some((node) => treeNodeHasComponentFamilyMount(node, ir));
 }
 
+function normalizeSerializableRouteTemplateAttributeValue(
+  key: string,
+  value: unknown,
+) {
+  if (typeof value === "string") {
+    if (
+      (key === "href" || key === "src") &&
+      value.includes("[object SVGAnimatedString]")
+    ) {
+      return undefined;
+    }
+    if (key === "href" && /(^|\/):[A-Za-z0-9_-]+(?=\/|$)/.test(value)) {
+      return undefined;
+    }
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "baseVal" in value &&
+    typeof (value as { baseVal?: unknown }).baseVal === "string"
+  ) {
+    return (value as { baseVal: string }).baseVal;
+  }
+  return undefined;
+}
+
+function sanitizeRouteTemplateAttributes(
+  attributes: Record<string, unknown>,
+): Record<string, string | number | boolean> {
+  return Object.fromEntries(
+    Object.entries(attributes)
+      .map(([key, value]) => [
+        key,
+        normalizeSerializableRouteTemplateAttributeValue(key, value),
+      ] as const)
+      .filter(
+        (
+          entry,
+        ): entry is readonly [string, string | number | boolean] =>
+          entry[1] !== undefined,
+      ),
+  );
+}
+
 function sanitizeRouteTemplateTree(
   nodes: ExportTreeNode[],
   ir?: ExportIR,
@@ -919,20 +1163,7 @@ function sanitizeRouteTemplateTree(
       componentFamilyId: familyMount?.familyId,
       componentFamilyName: familyMount?.familyName,
       componentFamilyInitialVariantId: familyMount?.initialVariantId,
-      attributes: {
-        src: node.attributes.src,
-        href: node.attributes.href,
-        alt: node.attributes.alt,
-        role: node.attributes.role,
-        className:
-          typeof node.attributes.className === "string"
-            ? node.attributes.className
-            : undefined,
-        dataFramerName:
-          typeof node.attributes.dataFramerName === "string"
-            ? node.attributes.dataFramerName
-            : undefined,
-      },
+      attributes: sanitizeRouteTemplateAttributes(node.attributes),
       inlineStyle: Object.fromEntries(treeInlineStyleEntries(node)),
       children: sanitizeRouteTemplateTree(node.children, ir),
     };
@@ -944,11 +1175,58 @@ function createSharedTemplateRoutePage(input: {
   templateComponentName: string;
   routeDataImportName: string;
 }) {
-  return `import { ${input.templateComponentName} } from '../templates/${input.templateComponentName}'
-import { ${input.routeDataImportName} } from '../src/framer-data/routes/${input.routeDataImportName}'
+  return `import { useEffect, useState } from 'react'
+import { ${input.templateComponentName} } from '../templates/${input.templateComponentName}'
+import routeDataUrl from '../src/framer-data/routes/${input.routeDataImportName}.json?url'
+
+type FramerRouteData = {
+  sourceUrl: string
+  scopeId: string
+  styleText: string
+  exportTree: ReadonlyArray<Record<string, unknown>>
+}
+
+function isFramerRouteData(value: unknown): value is FramerRouteData {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { sourceUrl?: unknown }).sourceUrl === 'string' &&
+    typeof (value as { scopeId?: unknown }).scopeId === 'string' &&
+    typeof (value as { styleText?: unknown }).styleText === 'string' &&
+    Array.isArray((value as { exportTree?: unknown }).exportTree)
+  )
+}
 
 export function ${input.pageComponentName}() {
-  return <${input.templateComponentName} pageData={${input.routeDataImportName}} />
+  const [pageData, setPageData] = useState<FramerRouteData | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    fetch(routeDataUrl)
+      .then((response) => response.json())
+      .then((payload) => {
+        if (!cancelled && isFramerRouteData(payload)) {
+          setPageData(payload)
+        }
+      })
+      .catch((error) => {
+        console.error('CodeRelay route data failed to load', {
+          routeDataUrl,
+          error,
+        })
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  if (!pageData) {
+    return null
+  }
+
+  return <${input.templateComponentName} pageData={pageData} />
 }
 `;
 }
@@ -960,13 +1238,20 @@ import { FramerRouteTemplateRuntime } from '../src/framer-data/route-template-ru
 export type ${templateComponentName}Props = {
   pageData: {
     sourceUrl: string
+    scopeId: string
+    styleText: string
     exportTree: ReadonlyArray<Record<string, unknown>>
   }
 }
 
 export function ${templateComponentName}(props: ${templateComponentName}Props) {
   return (
-    <main className={styles.page} data-coderelay-source={props.pageData.sourceUrl}>
+    <main
+      className={styles.page}
+      data-coderelay-source={props.pageData.sourceUrl}
+      data-coderelay-route-scope={props.pageData.scopeId}
+    >
+      <style>{props.pageData.styleText}</style>
       <FramerRouteTemplateRuntime tree={props.pageData.exportTree} styles={styles} />
     </main>
   )
@@ -978,12 +1263,163 @@ function createSharedTemplateDts(templateComponentName: string) {
   return `export type ${templateComponentName}Props = {
   pageData: {
     sourceUrl: string
+    scopeId: string
+    styleText: string
     exportTree: ReadonlyArray<Record<string, unknown>>
   }
 }
 
 export declare function ${templateComponentName}(props: ${templateComponentName}Props): React.JSX.Element
 `;
+}
+
+function createScopedRouteTemplateCss(
+  ir: ExportIR,
+  _strategy: ExportStrategyConfig,
+  scopeId: string,
+) {
+  const rootNode = (ir.exportTree ?? [])[0];
+  const pageBackground =
+    usableColor(rootNode?.styles.backgroundColor) ??
+    findBackgroundColor(ir, ir.runtimeCapture.nodes[0]);
+  const pageTextColor =
+    usableColor(rootNode?.styles.color) ??
+    usableColor(
+      flattenExportTree(ir.exportTree ?? [])
+        .map((node) => node.styles.color)
+        .find(Boolean),
+    ) ??
+    "#111111";
+  const viewportWidths = {
+    laptop: ir.runtimeCapture.viewports.laptop?.width ?? 1280,
+    tablet: ir.runtimeCapture.viewports.tablet?.width ?? 768,
+    mobile: ir.runtimeCapture.viewports.mobile?.width ?? 390,
+  };
+  const treeNodes = flattenExportTree(ir.exportTree ?? []);
+  const rootBaseRules = styleRuleEntries(ir.runtimeCapture.rootStyles ?? {});
+  const rootLaptopRules = styleRuleEntries(
+    ir.runtimeCapture.rootStylesByViewport?.laptop ?? {},
+    ir.runtimeCapture.rootStyles ?? {},
+  );
+  const rootTabletRules = styleRuleEntries(
+    ir.runtimeCapture.rootStylesByViewport?.tablet ?? {},
+    ir.runtimeCapture.rootStyles ?? {},
+  );
+  const rootMobileRules = styleRuleEntries(
+    ir.runtimeCapture.rootStylesByViewport?.mobile ?? {},
+    ir.runtimeCapture.rootStyles ?? {},
+  );
+  const scope = `[data-coderelay-route-scope="${scopeId}"]`;
+  const baseRules = treeNodes
+    .map((node) => {
+      const entries = treeCssEntries(node);
+      if (entries.length === 0) return "";
+      return `${scope} .${treeNodeClass(node)} {\n${entries
+        .map(([key, value]) => `  ${toKebabCase(key)}: ${value};`)
+        .join("\n")}\n}`;
+    })
+    .filter(Boolean)
+    .join("\n\n");
+  const interactionRules = (state: "hover" | "focus") =>
+    treeNodes
+      .map((node) => {
+        const entries = interactionStateEntries(node, state);
+        if (entries.length === 0) return "";
+        return `${scope} .${treeNodeClass(node)}${state === "hover" ? ":hover" : ":focus-visible"} {\n${entries
+          .map(([key, value]) => `  ${toKebabCase(key)}: ${value};`)
+          .join("\n")}\n}`;
+      })
+      .filter(Boolean)
+      .join("\n\n");
+  const viewportRules = (viewport: ViewportName) =>
+    treeNodes
+      .map((node) => {
+        if (shouldHideNodeForViewport(node, viewport)) {
+          return `${scope} .${treeNodeClass(node)} {\n  display: none;\n}`;
+        }
+        const entries = treeCssEntries(node, viewport).filter(
+          ([key, value]) => node.styles[key] !== value,
+        );
+        if (entries.length === 0) return "";
+        return `${scope} .${treeNodeClass(node)} {\n${entries
+          .map(([key, value]) => `  ${toKebabCase(key)}: ${value};`)
+          .join("\n")}\n}`;
+      })
+      .filter(Boolean)
+      .join("\n\n");
+  const viewportInteractionRules = (
+    viewport: ViewportName,
+    state: "hover" | "focus",
+  ) =>
+    treeNodes
+      .map((node) => {
+        const entries = interactionStateEntries(node, state, viewport).filter(
+          ([key, value]) =>
+            (node.interactionStyles?.[state]?.[key] ?? undefined) !== value,
+        );
+        if (entries.length === 0) return "";
+        return `${scope} .${treeNodeClass(node)}${state === "hover" ? ":hover" : ":focus-visible"} {\n${entries
+          .map(([key, value]) => `  ${toKebabCase(key)}: ${value};`)
+          .join("\n")}\n}`;
+      })
+      .filter(Boolean)
+      .join("\n\n");
+
+  return `${scope} {
+  min-height: 100vh;
+${rootBaseRules.map(([key, value]) => `  ${toKebabCase(key)}: ${value};`).join("\n")}
+  background: ${pageBackground};
+  color: ${pageTextColor};
+  overflow-x: hidden;
+}
+
+${scope} .surface {
+  min-width: 0;
+}
+
+${scope} .surface,
+${scope} .body,
+${scope} .heading,
+${scope} .subheading,
+${scope} .link,
+${scope} .button,
+${scope} .image {
+  box-sizing: border-box;
+}
+
+${scope} .heading,
+${scope} .subheading,
+${scope} .body {
+  margin: 0;
+}
+
+${scope} .link,
+${scope} .button {
+  text-decoration: none;
+}
+
+${scope} .image {
+  display: block;
+  max-width: 100%;
+}
+
+${baseRules}
+${interactionRules("hover") ? `\n\n@media (hover: hover) and (pointer: fine) {\n${indentCss(interactionRules("hover"), 2)}\n}` : ""}
+${interactionRules("focus") ? `\n\n${interactionRules("focus")}` : ""}
+${viewportRules("laptop") || rootLaptopRules.length ? `\n\n@media ${viewportMediaQuery("laptop", viewportWidths)} {\n${rootLaptopRules.length ? `  ${scope} {\n${rootLaptopRules.map(([key, value]) => `    ${toKebabCase(key)}: ${value};`).join("\n")}\n  }\n` : ""}${viewportRules("laptop") ? indentCss(viewportRules("laptop"), 2) : ""}\n}` : ""}
+${viewportRules("tablet") || rootTabletRules.length ? `\n\n@media ${viewportMediaQuery("tablet", viewportWidths)} {\n${rootTabletRules.length ? `  ${scope} {\n${rootTabletRules.map(([key, value]) => `    ${toKebabCase(key)}: ${value};`).join("\n")}\n  }\n` : ""}${viewportRules("tablet") ? indentCss(viewportRules("tablet"), 2) : ""}\n}` : ""}
+${viewportRules("mobile") || rootMobileRules.length ? `\n\n@media ${viewportMediaQuery("mobile", viewportWidths)} {\n${rootMobileRules.length ? `  ${scope} {\n${rootMobileRules.map(([key, value]) => `    ${toKebabCase(key)}: ${value};`).join("\n")}\n  }\n` : ""}${viewportRules("mobile") ? indentCss(viewportRules("mobile"), 2) : ""}\n}` : ""}
+${viewportInteractionRules("laptop", "hover") ? `\n\n@media (hover: hover) and (pointer: fine) and ${viewportMediaQuery("laptop", viewportWidths)} {\n${indentCss(viewportInteractionRules("laptop", "hover"), 2)}\n}` : ""}
+${viewportInteractionRules("tablet", "hover") ? `\n\n@media (hover: hover) and (pointer: fine) and ${viewportMediaQuery("tablet", viewportWidths)} {\n${indentCss(viewportInteractionRules("tablet", "hover"), 2)}\n}` : ""}
+${viewportInteractionRules("mobile", "hover") ? `\n\n@media (hover: hover) and (pointer: fine) and ${viewportMediaQuery("mobile", viewportWidths)} {\n${indentCss(viewportInteractionRules("mobile", "hover"), 2)}\n}` : ""}
+${viewportInteractionRules("laptop", "focus") ? `\n\n@media ${viewportMediaQuery("laptop", viewportWidths)} {\n${indentCss(viewportInteractionRules("laptop", "focus"), 2)}\n}` : ""}
+${viewportInteractionRules("tablet", "focus") ? `\n\n@media ${viewportMediaQuery("tablet", viewportWidths)} {\n${indentCss(viewportInteractionRules("tablet", "focus"), 2)}\n}` : ""}
+${viewportInteractionRules("mobile", "focus") ? `\n\n@media ${viewportMediaQuery("mobile", viewportWidths)} {\n${indentCss(viewportInteractionRules("mobile", "focus"), 2)}\n}` : ""}
+`;
+}
+
+function escapeRawTemplateLiteral(value: string) {
+  return value.replaceAll("`", "\\`").replaceAll("${", "\\${");
 }
 
 function createRouteTemplateRuntimeModule(_hasComponentFamilies: boolean) {
@@ -1008,6 +1444,23 @@ type RuntimeProps = {
   tree: ReadonlyArray<Record<string, unknown>>
   styles: Record<string, string>
 }
+
+const htmlVoidTags = new Set([
+  'area',
+  'base',
+  'br',
+  'col',
+  'embed',
+  'hr',
+  'img',
+  'input',
+  'link',
+  'meta',
+  'param',
+  'source',
+  'track',
+  'wbr',
+])
 
 const textTags = new Set(['p', 'span', 'li', 'label', 'strong', 'em', 'small', 'blockquote'])
 
@@ -1044,14 +1497,26 @@ function baseClassForTag(node: RouteTemplateNode) {
   if (node.tag === 'h2' || node.tag === 'h3') return 'subheading'
   if (node.tag === 'a') return 'link'
   if (node.tag === 'button') return 'button'
+  if (node.tag === 'input' || node.tag === 'textarea' || node.tag === 'select') return 'body'
+  if (node.kind === 'text' || textTags.has(node.tag ?? '')) return 'body'
+  return 'surface'
+}
+
+function rawBaseClassForTag(node: RouteTemplateNode) {
+  if (node.tag === 'img') return 'image'
+  if (node.tag === 'h1') return 'heading'
+  if (node.tag === 'h2' || node.tag === 'h3') return 'subheading'
+  if (node.tag === 'a') return 'link'
+  if (node.tag === 'button') return 'button'
+  if (node.tag === 'input' || node.tag === 'textarea' || node.tag === 'select') return 'body'
   if (node.kind === 'text' || textTags.has(node.tag ?? '')) return 'body'
   return 'surface'
 }
 
 function tagForNode(node: RouteTemplateNode, depth: number) {
-  if (node.tag && /^h[1-6]$/.test(node.tag)) return node.tag
-  if (node.tag === 'a' || node.tag === 'button' || node.tag === 'img') return node.tag
-  if (textTags.has(node.tag ?? '')) return node.tag ?? 'span'
+  if (typeof node.tag === 'string' && /^[a-z][a-z0-9-]*$/i.test(node.tag)) {
+    return node.tag
+  }
   if (depth === 0 && node.kind === 'component') return 'section'
   if (node.tag === 'section' || node.tag === 'main' || node.tag === 'article') {
     return node.tag
@@ -1061,31 +1526,90 @@ function tagForNode(node: RouteTemplateNode, depth: number) {
 
 function toStyleObject(value: Record<string, unknown>) {
   return Object.fromEntries(
-    Object.entries(value).filter(([, entry]) => typeof entry === 'string' && entry.length > 0),
+    Object.entries(value).filter(
+      ([key, entry]) =>
+        ((typeof entry === 'string' && entry.length > 0) || typeof entry === 'number') &&
+        (key.startsWith('--') || /^[a-zA-Z][a-zA-Z0-9]*$/.test(key)),
+    ),
   ) as React.CSSProperties
 }
 
+function toKebabCase(value: string) {
+  return value.replace(/[A-Z]/g, (match) => '-' + match.toLowerCase())
+}
+
+function normalizeAttributeKey(key: string) {
+  if (key === 'class') return 'className'
+  if (key === 'for') return 'htmlFor'
+  if (key === 'tabindex') return 'tabIndex'
+  if (key === 'readonly') return 'readOnly'
+  if (key === 'maxlength') return 'maxLength'
+  if (key === 'minlength') return 'minLength'
+  if (key === 'colspan') return 'colSpan'
+  if (key === 'rowspan') return 'rowSpan'
+  if (/^data[A-Z]/.test(key)) return 'data-' + toKebabCase(key.slice(4))
+  if (/^aria[A-Z]/.test(key)) return 'aria-' + toKebabCase(key.slice(4))
+  return key
+}
+
+function normalizedAttributes(node: RouteTemplateNode) {
+  const source = isRecord(node.attributes) ? node.attributes : {}
+  return Object.fromEntries(
+    Object.entries(source)
+      .map(([key, value]) => {
+        if (key === 'style' || typeof value === 'function') return undefined
+        if (
+          typeof value !== 'string' &&
+          typeof value !== 'number' &&
+          typeof value !== 'boolean'
+        ) {
+          return undefined
+        }
+        const normalizedKey = normalizeAttributeKey(key)
+        if (
+          normalizedKey === 'className' ||
+          normalizedKey === 'children' ||
+          normalizedKey === 'dangerouslySetInnerHTML'
+        ) {
+          return undefined
+        }
+        if (normalizedKey === 'value' && typeof value === 'string') {
+          return ['defaultValue', value] as const
+        }
+        if (normalizedKey === 'checked' && typeof value === 'boolean') {
+          return ['defaultChecked', value] as const
+        }
+        return [normalizedKey, value] as const
+      })
+      .filter(
+        (
+          entry,
+        ): entry is readonly [string, string | number | boolean] => entry !== undefined,
+      ),
+  )
+}
+
+function shouldRenderRouteComponentFamilyDebugUi() {
+  if (typeof window === 'undefined') return false
+  try {
+    return window.location.search.includes('__coderelay_component_family_debug=1')
+  } catch {
+    return false
+  }
+}
+
 function classNameForNode(node: RouteTemplateNode, styles: Record<string, string>) {
-  const classes = [styles[baseClassForTag(node)]]
-  if (node.classKey && styles[node.classKey]) classes.push(styles[node.classKey])
+  const classes = [rawBaseClassForTag(node), styles[baseClassForTag(node)]]
+  if (node.classKey) {
+    classes.push(node.classKey)
+    if (styles[node.classKey]) classes.push(styles[node.classKey])
+  }
   const extra = typeof node.attributes?.className === 'string' ? node.attributes.className : ''
   if (extra) classes.push(extra)
   return classes.filter(Boolean).join(' ')
 }
 
 function renderNode(node: RouteTemplateNode, styles: Record<string, string>, depth: number): React.ReactNode {
-  if (node.componentFamilyId) {
-    return (
-      <FramerComponentFamilyStateMachine
-        key={node.id ?? node.componentFamilyId}
-        familyId={node.componentFamilyId}
-        initialVariantId={node.componentFamilyInitialVariantId}
-        placement="route"
-        familyName={node.componentFamilyName}
-      />
-    )
-  }
-
   const tag = tagForNode(node, depth)
   const children = (node.children ?? []).map((child, index) =>
     renderNode(child, styles, depth + 1) ?? <React.Fragment key={index} />,
@@ -1108,16 +1632,45 @@ function renderNode(node: RouteTemplateNode, styles: Record<string, string>, dep
     key,
     className,
     style,
+    ...normalizedAttributes(node),
   }
 
-  if (tag === 'a') {
-    props.href = typeof node.attributes?.href === 'string' ? node.attributes.href : '#'
+  if (node.componentFamilyId) {
+    props['data-framer-component-family'] = node.componentFamilyId
+    if (node.componentFamilyName) {
+      props['data-framer-component-family-name'] = node.componentFamilyName
+    }
+    if (node.componentFamilyInitialVariantId) {
+      props['data-framer-component-family-initial-variant'] =
+        node.componentFamilyInitialVariantId
+    }
+  }
+
+  if (tag === 'a' && typeof props.href !== 'string') {
+    props.href = '#'
   }
   if (tag === 'button') {
     props.type = 'button'
   }
 
-  return React.createElement(tag, props, node.text, ...children)
+  const debugFamily =
+    node.componentFamilyId && shouldRenderRouteComponentFamilyDebugUi()
+      ? (
+          <FramerComponentFamilyStateMachine
+            key={\`\${key}-family-debug\`}
+            familyId={node.componentFamilyId}
+            initialVariantId={node.componentFamilyInitialVariantId}
+            placement="gallery"
+            familyName={node.componentFamilyName}
+          />
+        )
+      : null
+
+  if (htmlVoidTags.has(tag)) {
+    return React.createElement(tag, props)
+  }
+
+  return React.createElement(tag, props, node.text, ...children, debugFamily)
 }
 
 export function FramerRouteTemplateRuntime({ tree, styles }: RuntimeProps) {
@@ -1347,6 +1900,7 @@ function extractFirstCssUrl(value: string | undefined) {
 }
 
 function createDts(ir: ExportIR, includeDataPreviews = true) {
+  const componentFamilies = resolveComponentFamiliesForIr(ir);
   const lines: string[] = [];
   lines.push(`import type * as React from "react"`);
   lines.push("");
@@ -1363,7 +1917,7 @@ function createDts(ir: ExportIR, includeDataPreviews = true) {
   if (includeDataPreviews && (ir.componentModules?.length ?? 0) > 0) {
     lines.push(`  includeFramerRegistry?: boolean`);
   }
-  if (includeDataPreviews && (ir.componentFamilies?.length ?? 0) > 0) {
+  if (includeDataPreviews && componentFamilies.length > 0) {
     lines.push(`  includeFramerComponentFamilies?: boolean`);
   }
   if (includeDataPreviews && (ir.codeFiles?.length ?? 0) > 0) {
@@ -1395,27 +1949,29 @@ function createComponent(
   const framerDataImportPath =
     options.framerDataImportPath ?? `../src/framer-data`;
   const includeDataPreviews = options.includeDataPreviews !== false;
+  const componentFamilies = resolveComponentFamiliesForIr(ir);
   const hasCmsCollections =
     includeDataPreviews && (ir.cmsCollections?.length ?? 0) > 0;
   const hasComponentModules =
     includeDataPreviews && (ir.componentModules?.length ?? 0) > 0;
   const hasComponentFamilies =
-    includeDataPreviews && (ir.componentFamilies?.length ?? 0) > 0;
+    includeDataPreviews && componentFamilies.length > 0;
   const hasInlineComponentFamilies = hasInlineComponentFamilyMount(ir);
   const hasCodeFiles = includeDataPreviews && (ir.codeFiles?.length ?? 0) > 0;
   const content = hasUsableExportTree(ir)
     ? renderExportTreeForReact(ir)
     : ir.component.sections.length > 0
       ? ir.component.sections
-          .map((section, index) =>
-            renderSection({
-              nodes: section.nodes,
+          .map((section, index) => {
+            const sectionNodes = Array.isArray(section.nodes) ? section.nodes : [];
+            return renderSection({
+              nodes: sectionNodes,
               index,
               ir,
-              kind: section.kind ?? inferKindFromNodes(section.nodes, index),
+              kind: section.kind ?? inferKindFromNodes(sectionNodes, index),
               confidence: section.confidence,
-            }),
-          )
+            });
+          })
           .join("\n")
       : renderSection({
           nodes: ir.component.nodes,
@@ -1512,7 +2068,7 @@ function createViteApp(
   hasGlobalCodeFiles = false,
 ) {
   const hasComponentFamilies = entries.some(
-    (entry) => (entry.componentFamilies?.length ?? 0) > 0,
+    (entry) => resolveComponentFamiliesForIr(entry).length > 0,
   );
   const imports = entries
     .map(
@@ -1833,7 +2389,10 @@ export default function App() {
 
   useEffect(() => {
     if (!currentPage?.redirectTo || typeof window === 'undefined') return
-    if (isExternalUrl(currentPage.redirectTo)) return
+    if (isExternalUrl(currentPage.redirectTo)) {
+      window.location.replace(currentPage.redirectTo)
+      return
+    }
     navigateTo(currentPage.redirectTo, { replace: true })
   }, [currentPage])
 
@@ -2155,13 +2714,29 @@ function createCss(ir: ExportIR, strategy: ExportStrategyConfig) {
 }
 
 function createHeuristicCss(ir: ExportIR, strategy: ExportStrategyConfig) {
-  const root = ir.runtimeCapture.nodes.find(
+  const runtimeNodes = Array.isArray(ir.runtimeCapture.nodes)
+    ? ir.runtimeCapture.nodes
+    : [];
+  const componentNodes = Array.isArray(ir.component.nodes)
+    ? ir.component.nodes
+    : Array.isArray(ir.component.sections)
+      ? ir.component.sections.flatMap((section) =>
+          Array.isArray(section.nodes) ? section.nodes : [],
+        )
+      : [];
+  const desktopViewportHeight =
+    ir.runtimeCapture.viewports?.desktop?.height ?? 900;
+  const mobileViewportHeight =
+    ir.runtimeCapture.viewports?.mobile?.height ?? 720;
+  const tabletHeight =
+    ir.runtimeCapture.viewports?.tablet?.height ?? mobileViewportHeight;
+  const root = runtimeNodes.find(
     (node) => node.rect.width > 200 && node.rect.height > 100,
   );
-  const heading = ir.component.nodes.find(
+  const heading = componentNodes.find(
     (node) => node.tag === "h1" || node.tag === "h2",
   );
-  const body = ir.component.nodes.find((node) => node.tag === "p");
+  const body = componentNodes.find((node) => node.tag === "p");
   const backgroundColor = findBackgroundColor(ir, root);
   const textColor =
     usableColor(heading?.styles.color ?? body?.styles.color) ?? "#111111";
@@ -2172,11 +2747,8 @@ function createHeuristicCss(ir: ExportIR, strategy: ExportStrategyConfig) {
       ? 520
       : Math.max(
           360,
-          Math.min(900, ir.runtimeCapture.viewports.desktop.height),
+          Math.min(900, desktopViewportHeight),
         );
-  const tabletHeight =
-    ir.runtimeCapture.viewports.tablet?.height ??
-    ir.runtimeCapture.viewports.mobile.height;
   const landingStructured = strategy.structuredLayout;
   const stricterSpacing = strategy.compactSpacing;
 
@@ -2533,14 +3105,15 @@ function createPreviewHtml(ir: ExportIR, css: string) {
 }
 
 function renderPreviewSection(
-  nodes: RuntimeNode[],
+  nodes: RuntimeNode[] | undefined,
   index: number,
   ir: ExportIR,
 ) {
-  const repaired = repairSectionNodes(nodes);
+  const safeNodes = Array.isArray(nodes) ? nodes : [];
+  const repaired = repairSectionNodes(safeNodes);
   const groups = groupSectionNodes(repaired);
-  const style = sectionStyle(nodes, index, ir);
-  const kind = inferKindFromNodes(nodes, index);
+  const style = sectionStyle(safeNodes, index, ir);
+  const kind = inferKindFromNodes(safeNodes, index);
   const layout =
     kind === "hero" ? "hero" : kind === "media-grid" ? "media-grid" : "content";
 
@@ -2797,9 +3370,6 @@ function renderExportTreeNodeReact(
   depth: number,
 ): string {
   const familyMount = resolveComponentFamilyMount(node, ir);
-  if (familyMount) {
-    return `<FramerComponentFamilyStateMachine familyId="${escapeAttribute(familyMount.familyId)}"${familyMount.initialVariantId ? ` initialVariantId="${escapeAttribute(familyMount.initialVariantId)}"` : ""} placement="route" familyName="${escapeAttribute(familyMount.familyName)}" />`;
-  }
 
   const style = reactTreeStyleAttribute(node);
   const className = reactTreeClassName(node);
@@ -2811,7 +3381,10 @@ function renderExportTreeNodeReact(
   const text = rawText.trim() ? reactTextLiteral(rawText) : "";
 
   if (node.tag === "img" && typeof node.attributes.src === "string") {
-    return `<img className=${className} src="${escapeAttribute(node.attributes.src)}" alt="${escapeAttribute(String(node.attributes.alt ?? ""))}"${style} />`;
+    return withReactFamilyMount(
+      `<img className=${className} src="${escapeAttribute(node.attributes.src)}" alt="${escapeAttribute(String(node.attributes.alt ?? ""))}"${style} />`,
+      familyMount,
+    );
   }
 
   if (node.tag === "h1") {
@@ -2822,7 +3395,10 @@ function renderExportTreeNodeReact(
         ? `{props.${titleKey} ?? ${JSON.stringify(rawText)}}`
         : text;
     if (titleKey && !ctx.titleUsed) ctx.titleUsed = true;
-    return `<h1 className=${className}${style}>${content}${childContent}</h1>`;
+    return withReactFamilyMount(
+      `<h1 className=${className}${style}>${content}${childContent}</h1>`,
+      familyMount,
+    );
   }
 
   if (/^h[2-6]$/.test(node.tag)) {
@@ -2833,7 +3409,10 @@ function renderExportTreeNodeReact(
         ? `{props.${subtitleKey} ?? ${JSON.stringify(rawText)}}`
         : text;
     if (subtitleKey && !ctx.subtitleUsed) ctx.subtitleUsed = true;
-    return `<${node.tag} className=${className}${style}>${content}${childContent}</${node.tag}>`;
+    return withReactFamilyMount(
+      `<${node.tag} className=${className}${style}>${content}${childContent}</${node.tag}>`,
+      familyMount,
+    );
   }
 
   if (node.tag === "a") {
@@ -2851,7 +3430,10 @@ function renderExportTreeNodeReact(
         ? `{props.${hrefKey} ?? ${JSON.stringify(href)}}`
         : `"${escapeAttribute(href)}"`;
     if (hrefKey && !ctx.ctaHrefUsed) ctx.ctaHrefUsed = true;
-    return `<a className=${className} href=${hrefExpr}${style}>${label}${childContent}</a>`;
+    return withReactFamilyMount(
+      `<a className=${className} href=${hrefExpr}${style}>${label}${childContent}</a>`,
+      familyMount,
+    );
   }
 
   if (node.tag === "button") {
@@ -2862,18 +3444,27 @@ function renderExportTreeNodeReact(
         ? `{props.${labelKey} ?? ${JSON.stringify(rawText)}}`
         : text;
     if (labelKey && !ctx.ctaLabelUsed) ctx.ctaLabelUsed = true;
-    return `<button className=${className} type="button"${style}>${label}${childContent}</button>`;
+    return withReactFamilyMount(
+      `<button className=${className} type="button"${style}>${label}${childContent}</button>`,
+      familyMount,
+    );
   }
 
   if (isTreeTextNode(node)) {
     const tag = reactTextTag(node.tag);
-    return `<${tag} className=${className}${style}>${text}${childContent}</${tag}>`;
+    return withReactFamilyMount(
+      `<${tag} className=${className}${style}>${text}${childContent}</${tag}>`,
+      familyMount,
+    );
   }
 
   const tag = reactContainerTag(node, depth);
-  return `<${tag} className=${className}${style}>
+  return withReactFamilyMount(
+    `<${tag} className=${className}${style}>
     ${childContent || text}
-  </${tag}>`;
+  </${tag}>`,
+    familyMount,
+  );
 }
 
 function renderExportTreeNodeHtml(
@@ -2881,14 +3472,6 @@ function renderExportTreeNodeHtml(
   ir: ExportIR,
   depth: number,
 ): string {
-  const familyMount = resolveComponentFamilyMount(node, ir);
-  if (familyMount) {
-    return `<article class="surface" data-framer-component-family-placeholder="${escapeAttribute(familyMount.familyName)}">
-  <strong>${escapeText(familyMount.familyName)}</strong>
-  <p>Interactive Framer component family mounted in the React preview.</p>
-</article>`;
-  }
-
   const style = htmlTreeStyleAttribute(node);
   const className = htmlTreeClassName(node);
   const childContent = node.children
@@ -2925,24 +3508,39 @@ function renderExportTreeNodeHtml(
   </${tag}>`;
 }
 
-function sectionStyle(nodes: RuntimeNode[], index: number, ir: ExportIR) {
-  const hasHeading = nodes.some(
+function withReactFamilyMount(
+  renderedNode: string,
+  familyMount: ReturnType<typeof resolveComponentFamilyMount>,
+): string {
+  if (!familyMount) return renderedNode;
+  return `<>
+    ${renderedNode}
+    <FramerComponentFamilyStateMachine familyId="${escapeAttribute(familyMount.familyId)}"${familyMount.initialVariantId ? ` initialVariantId="${escapeAttribute(familyMount.initialVariantId)}"` : ""} placement="route" familyName="${escapeAttribute(familyMount.familyName)}" />
+  </>`;
+}
+
+function sectionStyle(nodes: RuntimeNode[] | undefined, index: number, ir: ExportIR) {
+  const safeNodes = Array.isArray(nodes) ? nodes : [];
+  const runtimeNodes = Array.isArray(ir.runtimeCapture.nodes)
+    ? ir.runtimeCapture.nodes
+    : [];
+  const hasHeading = safeNodes.some(
     (node) => node.tag === "h1" || node.tag === "h2",
   );
-  const imageCount = nodes.filter((node) => node.tag === "img").length;
-  const textCount = nodes.filter(
+  const imageCount = safeNodes.filter((node) => node.tag === "img").length;
+  const textCount = safeNodes.filter(
     (node) => node.text && node.tag !== "img",
   ).length;
-  const rootId = nodes.find((node) => node.styles.__coderelayRootId)?.styles
+  const rootId = safeNodes.find((node) => node.styles.__coderelayRootId)?.styles
     .__coderelayRootId;
   const root =
     (rootId
-      ? ir.runtimeCapture.nodes.find(
+      ? runtimeNodes.find(
           (node) =>
             node.styles.__coderelayRootId === rootId &&
             node.styles.__coderelayDepth === "0",
         )
-      : undefined) ?? nodes[0];
+      : undefined) ?? safeNodes[0];
   const bg =
     usableColor(root?.styles.backgroundColor) ??
     (index % 2 === 0 ? "transparent" : "rgba(0, 0, 0, 0.02)");
@@ -2954,7 +3552,7 @@ function sectionStyle(nodes: RuntimeNode[], index: number, ir: ExportIR) {
       : "content";
   const contentHeight = Math.max(
     220,
-    ...nodes.map((node) => Number(node.rect.height || 0)).filter(Boolean),
+    ...safeNodes.map((node) => Number(node.rect.height || 0)).filter(Boolean),
   );
   const minHeight = Math.max(
     260,
@@ -2968,10 +3566,13 @@ function sectionStyle(nodes: RuntimeNode[], index: number, ir: ExportIR) {
   };
 }
 
-function repairSectionNodes(nodes: RuntimeNode[]) {
-  const pluginOrdered = nodes.every((node) => getSourceIndex(node) !== null);
+function repairSectionNodes(nodes: RuntimeNode[] | undefined) {
+  const safeNodes = Array.isArray(nodes) ? nodes : [];
+  if (safeNodes.length === 0) return [];
+
+  const pluginOrdered = safeNodes.every((node) => getSourceIndex(node) !== null);
   if (pluginOrdered) {
-    return [...nodes].sort(
+    return [...safeNodes].sort(
       (first, second) => getSourceIndex(first)! - getSourceIndex(second)!,
     );
   }
@@ -2980,7 +3581,7 @@ function repairSectionNodes(nodes: RuntimeNode[]) {
   // - reorder by source y/x
   // - preserve natural reading order (top-to-bottom, then left-to-right)
   // - keep tiny overlays from dominating order (by using a y tolerance)
-  return [...nodes].sort((first, second) => {
+  return [...safeNodes].sort((first, second) => {
     const yDelta = first.rect.y - second.rect.y;
     if (Math.abs(yDelta) > 10) return yDelta;
     return first.rect.x - second.rect.x;
@@ -3381,6 +3982,7 @@ function createPackageJson(ir: ExportIR, executableCodeFiles: ExecutableCodeFile
       ...dependencyEntries,
     },
     devDependencies: {
+      "@types/node": generatedProjectVersions.typesNode,
       "@types/react": generatedProjectVersions.typesReact,
       "@types/react-dom": generatedProjectVersions.typesReactDom,
       "@vitejs/plugin-react": generatedProjectVersions.viteReact,
@@ -3398,6 +4000,7 @@ function createTsConfig() {
       lib: ["ES2020", "DOM", "DOM.Iterable"],
       skipLibCheck: true,
       strict: true,
+      noImplicitAny: false,
       module: "ESNext",
       moduleResolution: "bundler",
       allowImportingTsExtensions: true,
@@ -3434,11 +4037,88 @@ function createIndexHtml(ir: ExportIR) {
 }
 
 function createViteConfig() {
-  return `import { defineConfig } from 'vite'
+  return `import fs from 'node:fs'
+import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+function normalizePath(pathname) {
+  if (pathname.endsWith('/') && pathname !== '/') return pathname.slice(0, -1)
+  return pathname
+}
+
+function loadRouteEntries() {
+  try {
+    const raw = fs.readFileSync(new URL('./route-manifest.json', import.meta.url), 'utf8')
+    const manifest = JSON.parse(raw)
+    if (!Array.isArray(manifest)) return []
+    return manifest
+      .filter((entry) => entry && typeof entry.path === 'string')
+      .map((entry) => ({
+        path: entry.path,
+        redirectTo: typeof entry.redirectTo === 'string' ? entry.redirectTo : undefined,
+        redirectStatus: typeof entry.redirectStatus === 'number' ? entry.redirectStatus : 302,
+      }))
+  } catch {
+    return []
+  }
+}
+
+function redirectRoutesPlugin() {
+  const routeEntries = loadRouteEntries()
+  const explicitRedirectRoutes = routeEntries.filter((entry) => typeof entry.redirectTo === 'string')
+  const canonicalRoutePaths = new Set(
+    routeEntries
+      .map((entry) => normalizePath(entry.path))
+      .filter((path) => path !== '/')
+      .map((path) => \`\${path}/\`),
+  )
+
+  function matchExplicitRedirect(pathname) {
+    const normalizedPath = normalizePath(pathname)
+    return explicitRedirectRoutes.find((entry) => normalizePath(entry.path) === normalizedPath)
+  }
+
+  function middleware(req, res, next) {
+    if (!req.url) {
+      next()
+      return
+    }
+
+    const url = new URL(req.url, 'http://localhost')
+    const explicitRedirect = matchExplicitRedirect(url.pathname)
+    if (explicitRedirect) {
+      res.statusCode = explicitRedirect.redirectStatus
+      res.setHeader('Location', explicitRedirect.redirectTo)
+      res.end()
+      return
+    }
+
+    if (url.pathname !== '/' && !url.pathname.endsWith('/') && canonicalRoutePaths.has(\`\${normalizePath(url.pathname)}/\`)) {
+      res.statusCode = 302
+      res.setHeader('Location', \`\${url.pathname}/\${url.search}\`)
+      res.end()
+      return
+    }
+
+    if (!explicitRedirect) {
+      next()
+      return
+    }
+  }
+
+  return {
+    name: 'coderelay-route-redirects',
+    configureServer(server) {
+      server.middlewares.use(middleware)
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(middleware)
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), redirectRoutesPlugin()],
 })
 `;
 }
@@ -3666,6 +4346,8 @@ function createFramerAdapterModule() {
 export * from 'framer-motion'
 export { motion } from 'framer-motion'
 
+export type Override = Record<string, unknown>
+
 type RenderTargetValue = 'canvas' | 'preview' | 'export'
 
 const renderTargetState: {
@@ -3705,6 +4387,10 @@ export function addPropertyControls<T = unknown>(
   _controls: PropertyControls<T>,
 ) {
   return undefined
+}
+
+export function Data<T extends object = object>(initial?: Partial<T> | object) {
+  return { ...(initial ?? {}) } as T
 }
 
 export const ControlType = {
@@ -3834,6 +4520,7 @@ export const hasFramerExecutableCodeFiles = ${executableCodeFiles.length > 0 ? "
 }
 
 function createComponentFamiliesDataModule(ir: ExportIR) {
+  const componentFamilies = resolveComponentFamiliesForIr(ir);
   return `export type FramerComponentFamilyVariantMeta = {
   id: string
   name: string
@@ -3869,7 +4556,7 @@ export type FramerComponentFamilyMeta = {
   provenance: 'plugin' | 'runtime' | 'source' | 'merged'
 }
 
-export const framerComponentFamilies: ReadonlyArray<FramerComponentFamilyMeta> = ${JSON.stringify(ir.componentFamilies ?? [], null, 2)}
+export const framerComponentFamilies: ReadonlyArray<FramerComponentFamilyMeta> = ${JSON.stringify(componentFamilies, null, 2)}
 
 export function getFramerComponentFamilyById(id: string) {
   return framerComponentFamilies.find((entry) => entry.id === id)
@@ -3882,7 +4569,7 @@ export function getFramerComponentFamilyByName(name: string) {
 }
 
 function createComponentFamiliesRuntimeModule(ir: ExportIR) {
-  const hasFamilies = (ir.componentFamilies?.length ?? 0) > 0;
+  const hasFamilies = resolveComponentFamiliesForIr(ir).length > 0;
   return `import * as React from 'react'
 import {
   framerComponentFamilies,
@@ -3922,6 +4609,15 @@ function labelForTrigger(value: string | undefined) {
   return normalized === 'tap' ? 'Tap' : normalized === 'click' ? 'Click' : normalized === 'hover-start' ? 'Hover start' : normalized === 'hover-end' ? 'Hover end' : normalized === 'focus' ? 'Focus' : normalized === 'timeout' ? 'Timeout' : 'Advance'
 }
 
+function shouldRenderRouteComponentFamilyDebugUi() {
+  if (typeof window === 'undefined') return false
+  try {
+    return window.location.search.includes('__coderelay_component_family_debug=1')
+  } catch {
+    return false
+  }
+}
+
 export function FramerComponentFamilyStateMachine(props: {
   familyId: string
   initialVariantId?: string
@@ -3935,6 +4631,11 @@ export function FramerComponentFamilyStateMachine(props: {
   React.useEffect(() => {
     setCurrentVariantId(initialVariantId)
   }, [initialVariantId])
+
+  const isRoutePlacement = props.placement === 'route'
+  if (isRoutePlacement && !shouldRenderRouteComponentFamilyDebugUi()) {
+    return null
+  }
 
   if (!family) {
     return <div style={{ opacity: 0.64 }}>Unknown family {props.familyId}</div>
@@ -4259,10 +4960,34 @@ export const framerFontFamilies = framerFonts.map((entry) => entry.family)
 }
 
 function createCmsDataModule(ir: ExportIR) {
-  return `export const framerCmsCollections = ${JSON.stringify(ir.cmsCollections ?? [], null, 2)} as const
+  const payload = JSON.stringify(ir.cmsCollections ?? [], null, 2);
+  return `export type FramerCmsFieldMeta = {
+  id: string
+  name: string
+  type: string
+  [key: string]: unknown
+}
 
-export type FramerCmsCollectionMeta = (typeof framerCmsCollections)[number]
-export type FramerCmsItemMeta = FramerCmsCollectionMeta extends { items: readonly (infer Item)[] } ? Item : never
+export type FramerCmsItemMeta = {
+  id?: string
+  slug?: string
+  fieldData: Record<string, unknown>
+  [key: string]: unknown
+}
+
+export type FramerCmsCollectionMeta = {
+  id: string
+  name: string
+  managed: boolean
+  pluginDataKeys: string[]
+  fields: FramerCmsFieldMeta[]
+  items: FramerCmsItemMeta[]
+  [key: string]: unknown
+}
+
+export const framerCmsCollections: FramerCmsCollectionMeta[] = JSON.parse(
+  String.raw\`${escapeRawTemplateLiteral(payload)}\`,
+)
 
 export function getFramerCmsCollectionByName(name: string) {
   return framerCmsCollections.find((entry) => entry.name === name)
@@ -4281,7 +5006,12 @@ function createCmsRuntimeModule(ir: ExportIR) {
   const collectionNameType = collectionNames.length > 0 ? collectionNames : "string";
 
   return `import * as React from 'react'
-import { framerCmsCollections, getFramerCmsCollectionById, getFramerCmsCollectionByName } from './cms'
+import {
+  framerCmsCollections,
+  getFramerCmsCollectionById,
+  getFramerCmsCollectionByName,
+  type FramerCmsItemMeta,
+} from './cms'
 
 export type FramerCmsCollectionName = ${collectionNameType}
 export type FramerCmsFieldEntry =
@@ -4398,9 +5128,9 @@ export function getFramerCmsDisplayValue(
 
 export function mapFramerCmsItems<T>(
   input: { id?: string; name?: string },
-  mapper: (item: (typeof framerCmsCollections)[number]['items'] extends readonly (infer Item)[] ? Item : never, index: number) => T,
+  mapper: (item: FramerCmsItemMeta, index: number) => T,
 ) {
-  return getFramerCmsItems(input).map((item, index) => mapper(item as never, index))
+  return getFramerCmsItems(input).map((item, index) => mapper(item, index))
 }
 
 export function useFramerCmsCollection(input: { id?: string; name?: string }) {
@@ -4422,7 +5152,7 @@ export function useFramerCmsCollection(input: { id?: string; name?: string }) {
 export function FramerCmsCollectionList(props: {
   id?: string
   name?: string
-  children: (item: (typeof framerCmsCollections)[number]['items'] extends readonly (infer Item)[] ? Item : never, index: number) => React.ReactNode
+  children: (item: FramerCmsItemMeta, index: number) => React.ReactNode
   empty?: React.ReactNode
 }) {
   const { items } = useFramerCmsCollection({ id: props.id, name: props.name })
@@ -4431,7 +5161,7 @@ export function FramerCmsCollectionList(props: {
     return <>{props.empty ?? null}</>
   }
 
-  return <>{items.map((item, index) => props.children(item as never, index))}</>
+  return <>{items.map((item, index) => props.children(item, index))}</>
 }
 
 export function FramerCmsText(props: {
@@ -4759,10 +5489,11 @@ export function FramerCmsAutoSections() {
 }
 
 function createFramerDataIndexModule(ir: ExportIR) {
+  const componentFamilies = resolveComponentFamiliesForIr(ir);
   const hasCms = (ir.cmsCollections?.length ?? 0) > 0;
   const hasCodeFiles = (ir.codeFiles?.length ?? 0) > 0;
   const hasModules = (ir.componentModules?.length ?? 0) > 0;
-  const hasFamilies = (ir.componentFamilies?.length ?? 0) > 0;
+  const hasFamilies = componentFamilies.length > 0;
 
   return `export { framerComponentModules, getFramerComponentModuleByName } from './component-modules'
 export {
@@ -4827,7 +5558,7 @@ export {
 
 export const framerDataSummary = {
   componentModuleCount: ${ir.componentModules?.length ?? 0},
-  componentFamilyCount: ${ir.componentFamilies?.length ?? 0},
+  componentFamilyCount: ${componentFamilies.length},
   codeFileCount: ${ir.codeFiles?.length ?? 0},
   cmsCollectionCount: ${ir.cmsCollections?.length ?? 0},
   hasComponentModules: ${hasModules ? "true" : "false"},

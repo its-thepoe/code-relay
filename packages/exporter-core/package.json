@@ -1,0 +1,19 @@
+{
+  "name": "@coderelay/exporter-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./capture": "./src/capture.ts",
+    "./local-export": "./src/local-export.ts",
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@coderelay/codegen": "0.1.0",
+    "@coderelay/content-contract": "0.1.0",
+    "@coderelay/fidelity": "0.1.0",
+    "@coderelay/matcher": "0.1.0",
+    "@coderelay/shared": "0.1.0"
+  }
+}
