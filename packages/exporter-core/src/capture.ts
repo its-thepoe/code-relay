@@ -4079,6 +4079,42 @@ async function extractNodes(
       }
     }
 
+    function readHref(element) {
+      const rawHref =
+        element.getAttribute('href') ||
+        element.getAttribute('xlink:href') ||
+        (typeof element.href === 'string' ? element.href : undefined) ||
+        (element.href &&
+        typeof element.href === 'object' &&
+        typeof element.href.baseVal === 'string'
+          ? element.href.baseVal
+          : undefined)
+
+      if (!rawHref || rawHref.includes('[object SVGAnimatedString]')) {
+        return undefined
+      }
+
+      if (/(^|\\/):[A-Za-z0-9_-]+(?=\\/|$)/.test(rawHref)) {
+        return undefined
+      }
+
+      try {
+        const resolved = new URL(rawHref, window.location.href)
+        return resolved.origin === window.location.origin
+          ? resolved.pathname + resolved.search + resolved.hash
+          : resolved.toString()
+      } catch {
+        return rawHref
+      }
+    }
+
+    function readClassName(element) {
+      const rawClass = element.getAttribute('class')
+      return typeof rawClass === 'string' && rawClass.trim().length > 0
+        ? rawClass
+        : undefined
+    }
+
     return Array.from(base.querySelectorAll('*'))
       .filter((element) => !ignoredTags.has(element.tagName.toLowerCase()))
       .map((element, index) => {
@@ -4107,15 +4143,10 @@ async function extractNodes(
           },
           attributes: {
             src: element.currentSrc || element.src || undefined,
-            href:
-              element.href && new URL(element.href, window.location.href).origin === window.location.origin
-                ? new URL(element.href, window.location.href).pathname +
-                  new URL(element.href, window.location.href).search +
-                  new URL(element.href, window.location.href).hash
-                : element.href || undefined,
+            href: readHref(element),
             alt: element.alt || undefined,
             role: element.getAttribute('role') || undefined,
-            className: element.className || undefined,
+            className: readClassName(element),
             dataFramerName: element.getAttribute('data-framer-name') || undefined,
           },
           styles: styleMap,
