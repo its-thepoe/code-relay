@@ -2,10 +2,18 @@ node_modules/
 dist/
 dist-test/
 .coderelay/
-.next 2/
 .next/
+*.next/
+*.next 2/
+.next.bak-*/
 apps/web/.next/
+apps/web/.next 2/
+apps/web/.next.bak-*/
 benchmarks/framer-fixtures/results/
 compiler/benchmarks/results/
+.env
+.env.*
+!.env.example
+!.env.*.example
 *.log
 .DS_Store

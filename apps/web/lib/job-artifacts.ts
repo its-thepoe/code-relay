@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { LocalExportJob } from "./jobs-store.js";
 
 export type JobArtifactType =
@@ -94,4 +95,37 @@ export function resolveJobArtifact(
     filename,
     contentType,
   };
+}
+
+export function resolveSafeJobArtifact(
+  job: LocalExportJob,
+  type: JobArtifactType,
+): { path?: string; filename: string; contentType: string; blocked?: boolean } {
+  const artifact = resolveJobArtifact(job, type);
+  if (!artifact.path) return artifact;
+
+  const allowedDirs = [
+    job.artifacts?.exportDir,
+    job.artifacts?.zipPath ? path.dirname(job.artifacts.zipPath) : undefined,
+  ].filter((dir): dir is string => Boolean(dir));
+
+  if (
+    allowedDirs.length === 0 ||
+    !allowedDirs.some((dir) => isPathInside(dir, artifact.path!))
+  ) {
+    return { ...artifact, path: undefined, blocked: true };
+  }
+
+  return artifact;
+}
+
+function isPathInside(parentDir: string, childPath: string) {
+  const parent = path.resolve(parentDir);
+  const child = path.resolve(childPath);
+  const relative = path.relative(parent, child);
+
+  return (
+    relative === "" ||
+    (!relative.startsWith("..") && !path.isAbsolute(relative))
+  );
 }

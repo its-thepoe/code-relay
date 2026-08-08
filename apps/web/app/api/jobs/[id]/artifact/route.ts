@@ -1,31 +1,21 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
+import { corsHeaders } from "../../../../../lib/cors";
 import {
   canServeArtifactWhilePending,
-  resolveJobArtifact,
+  resolveSafeJobArtifact,
   type JobArtifactType,
 } from "../../../../../lib/job-artifacts";
 import { readJob } from "../../../../../lib/jobs-store";
 
-function corsHeaders(request: Request) {
-  const origin = request.headers.get("origin") ?? "";
-  const allow =
-    origin === "https://localhost:5174" ||
-    origin === "http://localhost:5174" ||
-    origin.startsWith("https://localhost:") ||
-    origin.startsWith("http://localhost:");
-
-  return {
-    "access-control-allow-origin": allow ? origin : "*",
-    "access-control-allow-methods": "GET, OPTIONS",
-    "access-control-allow-headers": "content-type",
-    "access-control-max-age": "86400",
-  };
-}
+const allowedMethods = ["GET", "OPTIONS"];
 
 export async function OPTIONS(request: Request) {
-  return new NextResponse(null, { status: 204, headers: corsHeaders(request) });
+  return new NextResponse(null, {
+    status: 204,
+    headers: corsHeaders(request, allowedMethods),
+  });
 }
 
 export async function GET(
@@ -37,7 +27,7 @@ export async function GET(
   if (!job) {
     return NextResponse.json(
       { error: "Job not found." },
-      { status: 404, headers: corsHeaders(request) },
+      { status: 404, headers: corsHeaders(request, allowedMethods) },
     );
   }
 
@@ -53,7 +43,7 @@ export async function GET(
           status: job.status,
           updatedAt: job.updatedAt,
         },
-        { status: 409, headers: corsHeaders(request) },
+        { status: 409, headers: corsHeaders(request, allowedMethods) },
       );
     }
   }
@@ -66,7 +56,7 @@ export async function GET(
           status: job.status,
           updatedAt: job.updatedAt,
         },
-        { status: 422, headers: corsHeaders(request) },
+        { status: 422, headers: corsHeaders(request, allowedMethods) },
       );
     }
   }
@@ -79,17 +69,24 @@ export async function GET(
             ? "Artifact metadata is not available yet for this running job."
             : "Artifact metadata is missing for this job.",
       },
-      { status: 404, headers: corsHeaders(request) },
+      { status: 404, headers: corsHeaders(request, allowedMethods) },
     );
   }
 
-  const artifact = resolveJobArtifact(job, type);
+  const artifact = resolveSafeJobArtifact(job, type);
   const pickPath = artifact.path;
+
+  if (artifact.blocked) {
+    return NextResponse.json(
+      { error: "Artifact path is outside the job artifact directory." },
+      { status: 403, headers: corsHeaders(request, allowedMethods) },
+    );
+  }
 
   if (!pickPath) {
     return NextResponse.json(
       { error: "Artifact not available." },
-      { status: 404, headers: corsHeaders(request) },
+      { status: 404, headers: corsHeaders(request, allowedMethods) },
     );
   }
 
@@ -100,14 +97,14 @@ export async function GET(
   } catch {
     return NextResponse.json(
       { error: "Artifact file is missing on disk.", path: resolved },
-      { status: 404, headers: corsHeaders(request) },
+      { status: 404, headers: corsHeaders(request, allowedMethods) },
     );
   }
 
   return new NextResponse(data, {
     status: 200,
     headers: {
-      ...corsHeaders(request),
+      ...corsHeaders(request, allowedMethods),
       "content-type": artifact.contentType,
       "content-disposition":
         type === "zip"

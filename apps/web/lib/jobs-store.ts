@@ -71,13 +71,21 @@ function resolveRepoRoot() {
 const repoRoot = resolveRepoRoot();
 const jobsDir = path.join(repoRoot, ".coderelay", "jobs");
 const legacyJobsDir = path.join(process.cwd(), ".coderelay", "jobs");
+const jobIdPattern = /^job_[A-Za-z0-9_-]{1,80}$/;
 
 async function ensureDirs() {
   await fs.mkdir(jobsDir, { recursive: true });
 }
 
 function jobPath(id: string) {
+  if (!isValidJobId(id)) {
+    throw new Error("Invalid job id.");
+  }
   return path.join(jobsDir, `${id}.json`);
+}
+
+export function isValidJobId(id: string) {
+  return jobIdPattern.test(id);
 }
 
 export async function readAllJobs(): Promise<LocalExportJob[]> {
@@ -120,6 +128,8 @@ export async function readAllJobs(): Promise<LocalExportJob[]> {
 }
 
 export async function readJob(id: string): Promise<LocalExportJob | null> {
+  if (!isValidJobId(id)) return null;
+
   await ensureDirs();
   const paths =
     legacyJobsDir === jobsDir

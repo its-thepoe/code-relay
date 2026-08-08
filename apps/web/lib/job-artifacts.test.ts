@@ -4,6 +4,7 @@ import type { LocalExportJob } from "./jobs-store.js";
 import {
   canServeArtifactWhilePending,
   resolveJobArtifact,
+  resolveSafeJobArtifact,
 } from "./job-artifacts.js";
 
 const job: LocalExportJob = {
@@ -53,4 +54,47 @@ test("resolveJobArtifact returns the path, filename, and content type", () => {
     filename: "job_123-preview.html",
     contentType: "text/html; charset=utf-8",
   });
+});
+
+test("resolveSafeJobArtifact blocks paths outside the job artifact dirs", () => {
+  assert.deepEqual(
+    resolveSafeJobArtifact(
+      {
+        ...job,
+        artifacts: {
+          exportDir: "/tmp/coderelay/job_123/export",
+          zipPath: "/tmp/coderelay/job_123/site.zip",
+          reportPath: "/etc/passwd",
+        },
+      },
+      "report",
+    ),
+    {
+      path: undefined,
+      filename: "job_123-report.json",
+      contentType: "application/json; charset=utf-8",
+      blocked: true,
+    },
+  );
+});
+
+test("resolveSafeJobArtifact allows files inside the export dir", () => {
+  assert.deepEqual(
+    resolveSafeJobArtifact(
+      {
+        ...job,
+        artifacts: {
+          exportDir: "/tmp/coderelay/job_123/export",
+          zipPath: "/tmp/coderelay/job_123/site.zip",
+          reportPath: "/tmp/coderelay/job_123/export/export-report.json",
+        },
+      },
+      "report",
+    ),
+    {
+      path: "/tmp/coderelay/job_123/export/export-report.json",
+      filename: "job_123-report.json",
+      contentType: "application/json; charset=utf-8",
+    },
+  );
 });
