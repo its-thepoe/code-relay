@@ -1,68 +1,147 @@
-# code-relay
+# Code Relay
 
-Code Relay is a local export system for turning Framer content into code, reviewing the result, and storing the generated artifacts on disk.
+Code Relay turns a Framer design, or a published website URL, into code that you can run, inspect, and continue building locally.
 
-It is built as a monorepo with three main pieces:
+It is made for the point where a visual site needs to become a real codebase. You can use it to export a selected part of a Framer project, export reusable components, generate a full site, or clone a published page for further development.
 
-- a Framer plugin for creating export jobs
-- a Next.js dashboard for browsing and creating jobs locally
-- a worker that picks up queued jobs and writes the export artifacts
+## How It Is Built
 
-The repo also includes a deterministic compiler workspace used for cloning and validating published sites.
+Code Relay is a local monorepo. Each part has one job:
 
-## What This Repo Does
+1. A source is captured from Framer or from a published URL.
+2. The captured content is converted into a common internal format. This keeps the rest of the system independent from the original source.
+3. The code generator turns that format into a React project or export.
+4. Validation compares the result with the source and records what worked, what changed, and how closely the output matches.
+5. The result is saved on disk as code, a ZIP file, a report, and a preview.
 
-- Captures source content from Framer or a published URL
-- Builds an intermediate representation of the layout and interactions
-- Generates a React app export
-- Validates the generated result against render and fidelity checks
-- Packages the output into a ZIP plus reports and previews
-- Keeps job state and artifacts on disk under `.coderelay/`
+The dashboard and worker are both local. The dashboard creates and displays export jobs. The worker picks up those jobs and runs the export pipeline in the background.
 
-## Who This Is For
+## Choose Your Starting Point
 
-Use this repo if you want to:
+### You are coming from Framer
 
-- create export jobs from the Framer plugin
-- inspect exports in a local dashboard
-- run the worker locally to process jobs
-- work on the compiler that powers cloning and validation
-- test export fidelity against real pages and fixtures
+Use the Framer plugin when you want Framer-aware exports. It can send the selected content, components, code files, and export settings into Code Relay.
 
-## Repo Map
+The usual flow is:
 
-- `apps/web` - Next.js dashboard for creating and browsing jobs
-- `apps/worker` - local worker that processes queued jobs
-- `apps/plugin` - Framer plugin UI and plugin runtime
-- `apps/exporter-cli` - CLI wrapper around the export pipeline
-- `packages/exporter-core` - core export pipeline and packaging logic
-- `packages/content-contract` - canonical content bundle schema and helpers
-- `packages/codegen` - project generation code
-- `packages/fidelity` - preview comparison and fidelity scoring
-- `packages/matcher` - DOM-to-plugin node matching
-- `packages/reconcile` - reconciliation helpers for exported content
-- `packages/shared` - shared CLI, types, and export-health utilities
-- `packages/source-framer` - Framer source extraction helpers
-- `packages/source-runtime` - runtime source helpers
-- `compiler` - deterministic cloning and validation workspace
-- `docs` - design notes, implementation plans, and run commands
-- `scripts` - repo-level automation for export, benchmarks, and checks
+1. Open the plugin in Framer.
+2. Choose what to export.
+3. Create an export job.
+4. Let the local worker process it.
+5. Open the completed job in the dashboard and download or inspect the generated files.
 
-## Core Workflow
+### You have a published URL
 
-1. Create or queue an export job from the Framer plugin or the dashboard.
-2. Run the worker locally so it can claim queued jobs.
-3. The worker calls the export pipeline in `packages/exporter-core`.
-4. The export pipeline captures source, generates code, validates output, and packages artifacts.
-5. Job records and artifacts are written to `.coderelay/jobs` and `.coderelay/artifacts`.
-6. Open the dashboard to inspect status, logs, and generated files.
+Use the dashboard or CLI when you want to work from a live page. Give Code Relay the URL, optionally provide a CSS selector, and choose whether to export a selection, components, or the full site.
 
-## Requirements
+The compiler can also clone a URL directly. In this context, “clone” means generating a new codebase from a live website. It does not mean running `git clone` and it does not require access to the original source repository.
 
-- Node.js and npm
-- Playwright Chromium for the compiler workspace
+## Quick Start
 
-If you are working in `compiler`, install browser dependencies once:
+You need Node.js and npm. Install the dependencies from the repository root:
+
+```bash
+npm install
+```
+
+Start the dashboard:
+
+```bash
+npm run dev:web
+```
+
+In a second terminal, start the worker:
+
+```bash
+npm run dev:worker
+```
+
+Open [http://localhost:3000](http://localhost:3000). From the Jobs page, enter a published page URL and create a job. The worker will process it and write the result into `.coderelay/`.
+
+## Export From the Command Line
+
+The CLI is useful when you want a repeatable export without opening the dashboard:
+
+```bash
+npm run export:test -- \
+  --url https://example.com \
+  --export-mode selection \
+  --out-dir .coderelay/exports
+```
+
+Available export modes are:
+
+- `selection` - export the selected part of a page
+- `components` - export reusable components found in the source
+- `full-site` - export the complete page or site
+
+To place a ZIP export inside an existing project:
+
+```bash
+npm run export:test -- install \
+  --zip /path/to/export.zip \
+  --target /path/to/your-project
+```
+
+The files will be placed in a `coderelay-export` directory inside the target project. Review the generated code before moving components into your application.
+
+## What You Get
+
+Each completed export can include:
+
+- generated React code
+- a ZIP archive of the generated project
+- a JSON report with validation and fidelity results
+- a preview for visual review
+- job metadata and progress information
+
+By default, local job data is stored here:
+
+```text
+.coderelay/jobs
+.coderelay/artifacts
+.coderelay/exports
+```
+
+These are working files, not source code. They can be removed when you want a clean local run:
+
+```bash
+rm -rf .coderelay/jobs .coderelay/artifacts .coderelay/exports
+```
+
+## Repository Layout
+
+```text
+apps/
+  web/            Local dashboard for creating and reviewing jobs
+  worker/         Background process that runs queued exports
+  plugin/         Framer plugin UI and capture logic
+  exporter-cli/   Command-line entry point for direct exports
+
+packages/
+  exporter-core/ Core export pipeline and artifact packaging
+  content-contract/ Shared shape for captured content
+  codegen/        React project and component generation
+  fidelity/       Preview comparison and fidelity scoring
+  matcher/        Matching between source nodes and generated nodes
+  reconcile/      Reconciliation of captured and generated content
+  source-framer/ Framer-specific source extraction
+  source-runtime/ Runtime capture helpers
+  shared/         Shared types, CLI parsing, and health checks
+
+compiler/
+  A separate URL-to-code compiler with capture, generation, and validation tools
+
+docs/
+  Run commands, design notes, and implementation documentation
+
+scripts/
+  Repository checks, benchmarks, and test helpers
+```
+
+## Compiler Workflow
+
+The compiler is the lower-level URL-to-code path. Install its browser dependency once:
 
 ```bash
 cd compiler
@@ -70,63 +149,46 @@ npm install
 npx playwright install chromium
 ```
 
-## Quick Start
-
-From the repo root:
+Clone a published page:
 
 ```bash
-npm install
-npm run dev:web
+npm run clone -- https://example.com/
 ```
 
-In a second terminal:
+The command creates a run under `compiler/runs/`. It also prints the command needed to install and start the generated app. To validate a run later:
 
 ```bash
-npm run dev:worker
+npm run validate-site -- ../runs/site-example.com/<timestamp>
 ```
 
-Then open the dashboard at `http://localhost:3000`.
+The compiler can generate Next.js App Router or Vite React output, capture multiple routes, preserve interactions, and run render and quality checks. See the [compiler guide](compiler/README.md) for all compiler options.
 
 ## Useful Commands
 
-From the repo root:
-
-- `npm run dev:web` - start the dashboard
-- `npm run dev:worker` - start the local worker
-- `npm run build` - typecheck and build the workspace
-- `npm run test` - run the main export test flow
-- `npm run test:export-e2e` - run export end-to-end tests
-- `npm run typecheck` - run TypeScript typecheck only
-- `npm run format` - format the repository with Prettier
-- `npm run export:test -- --url https://example.com --export-mode selection --out-dir .coderelay/exports` - run a local export
-- `npm run export:test -- install --zip /path/to/export.zip --target /path/to/project` - unpack an export into another project
-
-The compiler workspace also has its own commands in [compiler/README.md](compiler/README.md).
-
-## Job Artifacts
-
-Completed jobs usually include:
-
-- a ZIP archive of the generated project
-- a report JSON with validation and fidelity data
-- a preview artifact for review
-- job metadata under `.coderelay/jobs`
-
-If you want a clean slate while developing, delete:
+Run these from the repository root:
 
 ```bash
-rm -rf .coderelay/jobs .coderelay/artifacts
+npm run dev:web          # Start the local dashboard
+npm run dev:worker       # Start the export worker
+npm run typecheck        # Check TypeScript without emitting files
+npm run build            # Build the TypeScript workspace
+npm run test             # Run the main export tests
+npm run test:export-e2e  # Run export end-to-end tests
+npm run format           # Format the repository with Prettier
 ```
 
-## Working Notes
+The [run commands guide](docs/run-commands.md) contains more examples.
 
-- The repo uses npm workspaces.
-- Root scripts forward into the underlying app, package, or compiler workspaces.
-- The dashboard and worker are meant to run side by side during local development.
-- The compiler workspace is where most of the heavy capture and validation logic lives.
+## Notes for Contributors
+
+- The repository uses npm workspaces. Apps and packages share the root install.
+- The dashboard and worker are designed to run side by side during local development.
+- The compiler has its own workspace and browser setup.
+- Generated artifacts belong in `.coderelay/` or `compiler/runs/`, not in the source directories.
+- The generated output is a starting point for development. Always review dependencies, interactions, and visual differences before shipping it.
 
 ## More Reading
 
 - [Run commands](docs/run-commands.md)
 - [Compiler guide](compiler/README.md)
-- [Plugin guide](apps/plugin/README.md)
+- [Framer plugin guide](apps/plugin/README.md)
